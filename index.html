@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dilution Designer — 96-Well Plate Planner</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f5f3ee; --surface: #fff; --surface2: #f0ede6;
+  --border: #d8d3c8; --border2: #c5bfb2;
+  --text: #1a1814; --text2: #6b6560; --text3: #9e9890;
+  --accent: #2d5a3d; --accent2: #4a8c62; --accent-bg: #e8f2eb;
+  --warn: #8b4513; --warn-bg: #fdf0e8;
+  --danger: #8b1a1a; --danger-bg: #fde8e8;
+  --purple: #3d2d6b; --purple-bg: #eeebf8;
+  --blue: #1a3a6b; --blue-bg: #e8eef8;
+  --mono: 'DM Mono', monospace; --sans: 'Syne', sans-serif;
+}
+body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh; font-size:14px; }
+
+header { background:var(--text); color:var(--bg); padding:14px 26px; display:flex; align-items:center; gap:14px; position:sticky; top:0; z-index:200; }
+header h1 { font-size:17px; font-weight:800; letter-spacing:-0.03em; }
+header .tagline { font-family:var(--mono); font-size:10px; color:#888; letter-spacing:0.08em; }
+.exp-badge { font-family:var(--mono); font-size:10px; color:#aaa; margin-left:4px; }
+.hactions { margin-left:auto; display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
+.btn { font-family:var(--mono); font-size:10px; padding:7px 14px; border-radius:5px; border:1px solid rgba(255,255,255,0.25); background:transparent; color:var(--bg); cursor:pointer; letter-spacing:0.05em; transition:all 0.15s; white-space:nowrap; }
+.btn:hover { background:rgba(255,255,255,0.12); }
+.btn.ac { background:var(--accent2); border-color:var(--accent2); color:#fff; }
+.btn.ac:hover { background:var(--accent); }
+
+.app { display:grid; grid-template-columns:306px 1fr; min-height:calc(100vh - 50px); }
+
+/* SIDEBAR */
+.sidebar { background:var(--surface); border-right:1px solid var(--border); padding:18px 16px; overflow-y:auto; display:flex; flex-direction:column; gap:16px; }
+.sl { font-family:var(--mono); font-size:9px; letter-spacing:0.13em; color:var(--text3); text-transform:uppercase; margin-bottom:7px; padding-bottom:5px; border-bottom:1px solid var(--border); }
+.f { display:flex; flex-direction:column; gap:3px; margin-bottom:8px; }
+.f label { font-size:10px; color:var(--text2); font-family:var(--mono); }
+.f input, .f select { font-family:var(--mono); font-size:12px; padding:6px 8px; border:1px solid var(--border); border-radius:5px; background:var(--bg); color:var(--text); width:100%; }
+.f input:focus, .f select:focus { outline:none; border-color:var(--accent2); }
+.f .h { font-size:10px; color:var(--text3); font-family:var(--mono); }
+.r2 { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+
+.ctags { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:7px; min-height:18px; }
+.ctag { display:inline-flex; align-items:center; gap:4px; background:var(--purple-bg); color:var(--purple); font-family:var(--mono); font-size:11px; padding:3px 7px; border-radius:4px; border:1px solid #cac4e8; }
+.ctag button { background:none; border:none; cursor:pointer; color:var(--purple); font-size:12px; line-height:1; padding:0; opacity:0.5; }
+.ctag button:hover { opacity:1; }
+.addrow { display:flex; gap:5px; }
+.addrow input { font-family:var(--mono); font-size:12px; padding:6px 8px; border:1px solid var(--border); border-radius:5px; background:var(--bg); color:var(--text); flex:1; }
+.addrow input:focus { outline:none; border-color:var(--accent2); }
+.addbtn { background:var(--text); color:var(--bg); border:none; border-radius:5px; padding:6px 11px; font-family:var(--mono); font-size:10px; cursor:pointer; }
+.addbtn:hover { background:var(--accent); }
+.presets { display:flex; gap:4px; flex-wrap:wrap; margin-top:5px; }
+.pb { font-family:var(--mono); font-size:9px; padding:3px 6px; border:1px solid var(--border2); border-radius:3px; background:var(--surface2); color:var(--text2); cursor:pointer; }
+.pb:hover { background:var(--border); }
+
+.tg { display:flex; gap:4px; margin-bottom:7px; }
+.tb { flex:1; font-family:var(--mono); font-size:10px; padding:5px 4px; border:1px solid var(--border); border-radius:4px; background:var(--bg); color:var(--text2); cursor:pointer; text-align:center; }
+.tb.on { background:var(--text); color:var(--bg); border-color:var(--text); }
+
+.slrow { display:flex; align-items:center; gap:8px; }
+.slrow input[type=range] { flex:1; -webkit-appearance:none; height:4px; background:var(--border); border-radius:2px; outline:none; }
+.slrow input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--accent2); cursor:pointer; }
+.slv { font-family:var(--mono); font-size:11px; font-weight:500; color:var(--accent); min-width:60px; text-align:right; }
+
+/* Controls list */
+.clist { display:flex; flex-direction:column; gap:6px; }
+.citem { display:flex; align-items:flex-start; gap:7px; padding:7px 9px; border:1px solid var(--border); border-radius:6px; background:var(--bg); }
+.citem input[type=checkbox] { width:13px; height:13px; accent-color:var(--accent2); cursor:pointer; margin-top:2px; flex-shrink:0; }
+.cinfo { flex:1; min-width:0; }
+.cname { font-size:11px; font-weight:700; }
+.cdesc { font-family:var(--mono); font-size:9px; color:var(--text3); margin-top:1px; }
+.cdot { width:11px; height:11px; border-radius:50%; flex-shrink:0; margin-top:2px; border:1.5px solid rgba(0,0,0,0.18); cursor:pointer; transition:transform 0.12s; }
+.cdot:hover { transform:scale(1.35); }
+.creps { font-family:var(--mono); font-size:10px; color:var(--text2); display:flex; align-items:center; gap:3px; margin-top:3px; }
+.creps input { width:32px; font-family:var(--mono); font-size:10px; padding:2px 4px; border:1px solid var(--border); border-radius:3px; background:var(--surface); }
+
+.ibox { background:var(--accent-bg); border:1px solid #b8d4bf; border-radius:5px; padding:8px 10px; font-family:var(--mono); font-size:10px; color:var(--accent); line-height:1.6; }
+.ibox.w { background:var(--warn-bg); border-color:#d4a882; color:var(--warn); }
+.ibox.d { background:var(--danger-bg); border-color:#d48282; color:var(--danger); }
+
+.rcc { display:flex; align-items:center; gap:8px; }
+.rcb { width:25px; height:25px; border-radius:50%; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:var(--mono); font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.rcb:hover { background:var(--text); color:var(--bg); }
+.rcv { font-family:var(--mono); font-size:14px; font-weight:700; min-width:18px; text-align:center; }
+
+/* MAIN */
+.main { padding:20px 24px; overflow-y:auto; display:flex; flex-direction:column; gap:18px; }
+
+.mets { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; }
+.mc { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+.mv { font-size:18px; font-weight:800; letter-spacing:-0.02em; }
+.ml { font-family:var(--mono); font-size:9px; color:var(--text3); margin-top:2px; letter-spacing:0.06em; }
+.mc.g .mv { color:var(--accent); }
+.mc.w .mv { color:var(--warn); }
+.mc.b .mv { color:var(--danger); }
+
+.panel { background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+.ph { padding:10px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--surface); }
+.ptitle { font-size:12px; font-weight:700; letter-spacing:-0.01em; }
+.psub { font-family:var(--mono); font-size:9px; color:var(--text3); margin-left:auto; }
+
+table { width:100%; border-collapse:collapse; }
+thead th { font-family:var(--mono); font-size:9px; letter-spacing:0.1em; color:var(--text3); text-transform:uppercase; padding:7px 12px; text-align:left; background:var(--bg); border-bottom:1px solid var(--border); }
+tbody td { padding:7px 12px; border-bottom:1px solid var(--border); font-family:var(--mono); font-size:11px; color:var(--text); vertical-align:middle; }
+tbody tr:last-child td { border-bottom:none; }
+tbody tr:hover { background:var(--bg); }
+
+.badge { display:inline-block; padding:2px 6px; border-radius:3px; font-size:9px; font-weight:600; font-family:var(--mono); }
+.bg { background:var(--accent-bg); color:var(--accent); }
+.bw { background:var(--warn-bg); color:var(--warn); }
+.bd { background:var(--danger-bg); color:var(--danger); }
+.bp { background:var(--purple-bg); color:var(--purple); }
+.bb { background:var(--blue-bg); color:var(--blue); }
+.bn { background:var(--surface2); color:var(--text2); }
+
+/* Steps */
+.steps { display:flex; flex-direction:column; gap:10px; padding:14px; }
+.step { display:flex; gap:11px; align-items:flex-start; }
+.sn { width:23px; height:23px; border-radius:50%; background:var(--text); color:var(--bg); font-family:var(--mono); font-size:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-weight:500; }
+.sn.ac { background:var(--accent2); }
+.sb { flex:1; }
+.stitle { font-size:12px; font-weight:700; margin-bottom:3px; }
+.sdetail { font-family:var(--mono); font-size:10px; color:var(--text2); line-height:1.7; background:var(--bg); border-radius:5px; padding:8px 10px; border:1px solid var(--border); white-space:pre-wrap; }
+
+/* Plate */
+.platewrap { padding:12px; overflow-x:auto; user-select:none; -webkit-user-select:none; }
+.plate { display:inline-grid; grid-template-columns:20px repeat(12,34px); grid-template-rows:17px repeat(8,34px); gap:3px; }
+.pcl,.prl { font-family:var(--mono); font-size:9px; color:var(--text3); display:flex; align-items:center; justify-content:center; }
+.well { width:34px; height:34px; border-radius:50%; border:1.5px solid transparent; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; transition:transform 0.1s; position:relative; }
+.well:hover { transform:scale(1.18); z-index:20; }
+.well.empty { background:var(--surface2); border-color:var(--border); }
+.well.excl {
+  background: repeating-linear-gradient(45deg,#e0ddd8 0,#e0ddd8 2px,#f5f3ee 2px,#f5f3ee 8px) !important;
+  border-color: var(--border2) !important;
+  cursor: not-allowed !important;
+  opacity: 0.55;
+}
+.well.excl:hover { transform:none; }
+.wl { font-family:var(--mono); font-size:7.5px; font-weight:700; line-height:1.1; text-align:center; pointer-events:none; }
+.wr { font-family:var(--mono); font-size:6.5px; line-height:1; opacity:0.75; pointer-events:none; }
+.well[data-tip]:hover::after { content:attr(data-tip); position:absolute; bottom:112%; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); font-family:var(--mono); font-size:9px; padding:4px 8px; border-radius:4px; white-space:nowrap; pointer-events:none; z-index:100; }
+.well.excl[data-tip]:hover::after { display:none; }
+
+/* Exclusion controls */
+.excl-bar { padding:8px 12px; border-bottom:1px solid var(--border); background:var(--surface2); display:flex; flex-direction:column; gap:5px; }
+.excl-row { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+.exlabel { font-family:var(--mono); font-size:9px; color:var(--text3); letter-spacing:0.1em; min-width:36px; }
+.exbtn { font-family:var(--mono); font-size:9px; padding:2px 6px; border:1px solid var(--border); border-radius:3px; background:var(--surface); color:var(--text2); cursor:pointer; transition:all 0.1s; min-width:22px; text-align:center; }
+.exbtn:hover { background:var(--border); }
+.exbtn.excl-active { background:var(--text); color:var(--bg); border-color:var(--text); }
+.excl-hint { font-family:var(--mono); font-size:9px; color:var(--text3); }
+
+/* Color swatch on ctag */
+.cswatch { width:11px; height:11px; border-radius:50%; border:1.5px solid rgba(0,0,0,0.18); cursor:pointer; flex-shrink:0; display:inline-block; transition:transform 0.12s; }
+.cswatch:hover { transform:scale(1.35); }
+
+/* Color picker popup */
+#colorPickerPopup { font-family:var(--mono); }
+#cpSwatches span { display:inline-block; width:18px; height:18px; border-radius:50%; cursor:pointer; transition:transform 0.1s; }
+#cpSwatches span:hover { transform:scale(1.2); }
+
+/* Legend */
+.legend { display:flex; gap:10px; flex-wrap:wrap; padding:8px 12px; border-top:1px solid var(--border); background:var(--bg); }
+.li { display:flex; align-items:center; gap:5px; font-family:var(--mono); font-size:9px; color:var(--text2); }
+.ld { width:10px; height:10px; border-radius:50%; flex-shrink:0; border:1px solid rgba(0,0,0,0.12); }
+
+/* Plate-only print header */
+#plateOnlyHeader { display:none; padding:6px 12px; border-bottom:1px solid var(--border); font-family:var(--mono); font-size:10px; color:var(--text2); }
+
+/* Welcome banner */
+#welcomeBanner { display:none; }
+
+/* ── PRINT ── */
+@media print {
+  body { background:#fff; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  header { position:static; background:#fff !important; color:#000 !important; border-bottom:2px solid #000; padding:10px 18px; }
+  header h1 { color:#000 !important; }
+  header .tagline, .exp-badge { color:#555 !important; }
+  .hactions { display:none !important; }
+  .sidebar { display:none !important; }
+  .app { display:block !important; }
+  .main { padding:0 10px; gap:14px; }
+  .panel { page-break-inside:avoid; border:1px solid #ccc; }
+  .mc { border:1px solid #ccc; }
+  .well.empty { background:#f0f0f0 !important; }
+  .print-hide { display:none !important; }
+  .print-only { display:block !important; }
+  .excl-bar { display:none !important; }
+}
+.print-only { display:none; }
+
+/* Print plate only mode */
+body.print-plate-mode .sidebar,
+body.print-plate-mode .mets,
+body.print-plate-mode .hactions,
+body.print-plate-mode header .tagline,
+body.print-plate-mode header .exp-badge,
+body.print-plate-mode #welcomeBanner,
+body.print-plate-mode .panel:not(#platePanelEl) {
+  display:none !important;
+}
+body.print-plate-mode .app { display:block !important; }
+body.print-plate-mode .main { padding:6px; }
+body.print-plate-mode #plateOnlyHeader { display:block !important; }
+body.print-plate-mode .excl-bar { display:none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Dilution Designer</h1>
+  <span class="tagline">96-WELL PLATE EXPERIMENT PLANNER</span>
+  <span class="exp-badge" id="expBadge"></span>
+  <div class="hactions">
+    <button class="btn" onclick="copyText()">Copy text</button>
+    <button class="btn" onclick="downloadCSV()">CSV export</button>
+    <button class="btn" onclick="printPlateOnly()">Print plate only</button>
+    <button class="btn ac" onclick="printReport()">Print / PDF report</button>
+  </div>
+</header>
+
+<div class="app">
+<aside class="sidebar">
+
+  <div>
+    <div class="sl">Experiment info</div>
+    <div class="f">
+      <label style="font-weight:700;color:var(--text);">Compound / reagent name</label>
+      <input id="inducerName" placeholder="e.g. Crystal violet, IPTG, doxycycline…" oninput="update()" style="font-size:13px;">
+    </div>
+    <div class="f"><label>Experiment name</label><input id="expName" placeholder="e.g. CV dose-response run 3" oninput="update()"></div>
+    <div class="f"><label>Researcher</label><input id="researcher" placeholder="Your name" oninput="update()"></div>
+    <div class="f"><label>Organism / sample / notes</label><input id="expNotes" placeholder="Organism, strain, cell line…" oninput="update()"></div>
+    <div class="f"><label>Date</label><input id="expDate" type="date" oninput="update()"></div>
+  </div>
+
+  <div>
+    <div class="sl">Stock solution</div>
+    <div class="r2">
+      <div class="f"><label>Concentration</label><input type="number" id="stockConc" value="25000" min="0" step="any" oninput="update()"><span class="h" id="unitsHint">nM</span></div>
+      <div class="f"><label>Vol available (µL)</label><input type="number" id="stockVol" value="25000" min="0" step="any" oninput="update()"></div>
+    </div>
+    <div class="f"><label>Concentration units</label>
+      <select id="concUnits" onchange="update()">
+        <option value="nM">nM</option><option value="µM">µM</option><option value="mM">mM</option>
+        <option value="µg/mL">µg/mL</option><option value="ng/mL">ng/mL</option><option value="%">%</option>
+        <option value="U/mL">U/mL</option><option value="mg/mL">mg/mL</option><option value="custom">custom</option>
+      </select>
+    </div>
+  </div>
+
+  <div>
+    <div class="sl">Culture / sample</div>
+    <div class="r2">
+      <div class="f"><label>Vol per well (µL)</label><input type="number" id="cultureVol" value="200" min="1" step="any" oninput="update()"></div>
+      <div class="f"><label>Total available (µL)</label><input type="number" id="cultureTotal" value="25000" min="0" step="any" oninput="update()"></div>
+    </div>
+    <div class="f"><label>Sample / culture name</label><input id="cultureName" placeholder="e.g. E. coli, HeLa cells…" oninput="update()"></div>
+  </div>
+
+  <div>
+    <div class="sl">Target concentrations</div>
+    <div class="ctags" id="ctags"></div>
+    <div class="addrow">
+      <input type="number" id="concInput" placeholder="e.g. 6.25" step="any">
+      <button class="addbtn" onclick="addConc()">+ Add</button>
+    </div>
+    <div class="presets">
+      <button class="pb" onclick="loadPreset([6.25,12.5,25,50,100])">2× (6.25–100)</button>
+      <button class="pb" onclick="loadPreset([10,20,40,80,160])">2× (10–160)</button>
+      <button class="pb" onclick="loadPreset([1,5,10,50,100])">log-ish</button>
+      <button class="pb" onclick="loadPreset([25,50,75,100])">linear</button>
+      <button class="pb" onclick="clearConcs()">clear</button>
+    </div>
+  </div>
+
+  <div>
+    <div class="sl">Replicates &amp; arrangement</div>
+    <div class="f">
+      <label>Replicates per condition</label>
+      <div class="rcc">
+        <button class="rcb" onclick="changeReps(-1)">−</button>
+        <span class="rcv" id="repCount">3</span>
+        <button class="rcb" onclick="changeReps(1)">+</button>
+      </div>
+      <span class="h" style="margin-top:3px;">Controls use their own replicate count</span>
+    </div>
+    <div class="f">
+      <label>Plate fill order</label>
+      <select id="fillSelect" onchange="setFill(this.value)">
+        <option value="col-ttb" selected>By column, top → bottom</option>
+        <option value="col-btt">By column, bottom → top</option>
+        <option value="row-ltr">By row, left → right</option>
+        <option value="row-rtl">By row, right → left</option>
+        <option value="snake">Snake / serpentine</option>
+        <option value="spread">Spread / interleave replicates</option>
+      </select>
+      <span class="h">Spread: replicates distributed evenly across the plate</span>
+    </div>
+    <div class="f">
+      <label>Replicate labels on plate map</label>
+      <div class="tg">
+        <button class="tb on" id="tgROn" onclick="setShowReps(true)">Show r1, r2…</button>
+        <button class="tb" id="tgROff" onclick="setShowReps(false)">Hide</button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="sl">Controls &amp; blanks</div>
+    <div class="clist" id="clist"></div>
+    <div style="margin-top:7px;"><button class="addbtn" onclick="addCustomCtrl()" style="width:100%;padding:6px;">+ Custom control</button></div>
+  </div>
+
+  <div>
+    <div class="sl">Intermediate stock</div>
+    <div class="tg">
+      <button class="tb on" id="tgDir" onclick="setIntm('direct')">Direct from stock</button>
+      <button class="tb" id="tgInt" onclick="setIntm('intermediate')">Intermediate</button>
+    </div>
+    <div id="intmPanel" style="display:none;">
+      <div class="f">
+        <label>Intermediate concentration</label>
+        <div class="slrow">
+          <input type="range" id="intmSlider" min="10" max="10000" step="10" value="1600" oninput="syncSlider()">
+          <span class="slv" id="slv">1600</span>
+        </div>
+        <input type="number" id="intmConc" value="1600" min="1" step="any" oninput="syncInput()" style="margin-top:4px;">
+        <span class="h">drag or type</span>
+      </div>
+      <div class="r2">
+        <div class="f"><label>Prep vol (µL)</label><input type="number" id="intmPrepVol" value="1000" min="10" step="any" oninput="update()"></div>
+      </div>
+      <div id="intmRecipe" class="ibox" style="margin-top:4px;"></div>
+    </div>
+    <div id="directNote" class="ibox"><span id="directNoteCompound">Compound</span> pipetted directly from stock into each well.</div>
+  </div>
+
+</aside>
+
+<main class="main">
+
+  <!-- Print header (hidden in app, visible when printing full report) -->
+  <div class="print-only" id="printHdr" style="border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:6px;">
+    <div style="font-family:'DM Mono',monospace;font-size:10px;color:#555;margin-bottom:6px;letter-spacing:0.1em;">EXPERIMENT REPORT</div>
+    <table style="width:100%;font-family:'DM Mono',monospace;font-size:10px;border:none;border-collapse:collapse;">
+      <tr>
+        <td style="color:#666;width:110px;padding:2px 0;vertical-align:top;">Experiment</td>
+        <td style="font-weight:700;padding:2px 8px 2px 0;" id="pr-name"></td>
+        <td style="color:#666;width:90px;vertical-align:top;">Date</td>
+        <td id="pr-date" style="padding:2px 0;"></td>
+      </tr>
+      <tr>
+        <td style="color:#666;padding:2px 0;vertical-align:top;">Researcher</td>
+        <td id="pr-researcher" style="padding:2px 8px 2px 0;"></td>
+        <td style="color:#666;vertical-align:top;">Organism</td>
+        <td id="pr-notes" style="padding:2px 0;"></td>
+      </tr>
+      <tr>
+        <td style="color:#666;padding:2px 0;vertical-align:top;">Compound</td>
+        <td id="pr-inducer" style="padding:2px 8px 2px 0;"></td>
+        <td style="color:#666;vertical-align:top;">Stock</td>
+        <td id="pr-stock" style="padding:2px 0;"></td>
+      </tr>
+      <tr>
+        <td style="color:#666;padding:2px 0;">Culture</td>
+        <td id="pr-culture" style="padding:2px 8px 2px 0;" colspan="3"></td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Welcome banner -->
+  <div id="welcomeBanner" class="panel">
+    <div class="ph"><span class="ptitle">Welcome to Dilution Designer</span></div>
+    <div style="padding:18px 20px;">
+      <p style="font-family:var(--mono);font-size:11px;color:var(--text2);line-height:1.8;margin-bottom:12px;">
+        A fast, flexible tool for designing any 96-well plate experiment — dose-response, inhibition, growth, fluorescence, and more. No account needed, runs entirely in your browser.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:8px;font-family:var(--mono);font-size:11px;color:var(--text2);">
+        <div style="display:flex;gap:10px;align-items:flex-start;"><span style="background:var(--text);color:var(--bg);border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;">1</span><span>Enter your <strong>compound / reagent name</strong> and stock concentration in the sidebar</span></div>
+        <div style="display:flex;gap:10px;align-items:flex-start;"><span style="background:var(--text);color:var(--bg);border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;">2</span><span>Add <strong>target concentrations</strong> one by one, or pick a preset dilution series</span></div>
+        <div style="display:flex;gap:10px;align-items:flex-start;"><span style="background:var(--text);color:var(--bg);border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;">3</span><span>Set replicates, toggle controls, pick fill order — the plate map updates live</span></div>
+        <div style="display:flex;gap:10px;align-items:flex-start;"><span style="background:var(--accent2);color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;">4</span><span>Click/drag wells to <strong>exclude rows, columns, or individual wells</strong>. Customize colors, export CSV, or print.</span></div>
+      </div>
+      <div style="margin-top:14px;background:var(--accent-bg);border:1px solid #b8d4bf;border-radius:5px;padding:8px 12px;font-family:var(--mono);font-size:10px;color:var(--accent);">
+        Tip: start by typing your compound name and adding a concentration above.
+      </div>
+    </div>
+  </div>
+
+  <div class="mets" id="mets"></div>
+
+  <!-- Per-well table -->
+  <div class="panel">
+    <div class="ph">
+      <span class="ptitle">Per-well volumes</span>
+      <span class="psub" id="wclabel"></span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table><thead><tr>
+        <th>Condition</th><th>Type</th><th id="thConc">Target conc</th>
+        <th id="thCult">Culture (µL)</th><th id="thInd">Compound (µL)</th>
+        <th>Final vol (µL)</th><th>Pipettable?</th>
+      </tr></thead>
+      <tbody id="wbody"></tbody></table>
+    </div>
+  </div>
+
+  <!-- Master mix -->
+  <div class="panel">
+    <div class="ph">
+      <span class="ptitle">Master mix table</span>
+      <span class="psub">×<span id="repLabel">3</span> reps + 10% overage</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table><thead><tr>
+        <th>Condition</th><th>Type</th><th>Target conc</th>
+        <th>Culture total (µL)</th><th id="thIndMM">Compound total (µL)</th><th>Vol total (µL)</th>
+      </tr></thead>
+      <tbody id="mmbody"></tbody></table>
+    </div>
+  </div>
+
+  <!-- Steps -->
+  <div class="panel">
+    <div class="ph"><span class="ptitle">Step-by-step bench instructions</span></div>
+    <div class="steps" id="steps"></div>
+  </div>
+
+  <!-- Plate map -->
+  <div class="panel" id="platePanelEl">
+    <div class="ph">
+      <span class="ptitle">96-well plate map</span>
+      <span class="psub" id="plateUsed"></span>
+    </div>
+    <!-- Plate-only print header (hidden normally) -->
+    <div id="plateOnlyHeader">
+      <span id="poCompound" style="font-weight:700;"></span>
+      <span id="poExp"></span>
+      <span id="poDate"></span>
+    </div>
+    <!-- Row/column exclusion controls -->
+    <div class="excl-bar" id="exclBar">
+      <div class="excl-row">
+        <span class="exlabel">ROWS</span>
+        <button class="exbtn" id="rowbtn-0" onclick="toggleRowExclusion(0)">A</button>
+        <button class="exbtn" id="rowbtn-1" onclick="toggleRowExclusion(1)">B</button>
+        <button class="exbtn" id="rowbtn-2" onclick="toggleRowExclusion(2)">C</button>
+        <button class="exbtn" id="rowbtn-3" onclick="toggleRowExclusion(3)">D</button>
+        <button class="exbtn" id="rowbtn-4" onclick="toggleRowExclusion(4)">E</button>
+        <button class="exbtn" id="rowbtn-5" onclick="toggleRowExclusion(5)">F</button>
+        <button class="exbtn" id="rowbtn-6" onclick="toggleRowExclusion(6)">G</button>
+        <button class="exbtn" id="rowbtn-7" onclick="toggleRowExclusion(7)">H</button>
+      </div>
+      <div class="excl-row">
+        <span class="exlabel">COLS</span>
+        <button class="exbtn" id="colbtn-0"  onclick="toggleColExclusion(0)">1</button>
+        <button class="exbtn" id="colbtn-1"  onclick="toggleColExclusion(1)">2</button>
+        <button class="exbtn" id="colbtn-2"  onclick="toggleColExclusion(2)">3</button>
+        <button class="exbtn" id="colbtn-3"  onclick="toggleColExclusion(3)">4</button>
+        <button class="exbtn" id="colbtn-4"  onclick="toggleColExclusion(4)">5</button>
+        <button class="exbtn" id="colbtn-5"  onclick="toggleColExclusion(5)">6</button>
+        <button class="exbtn" id="colbtn-6"  onclick="toggleColExclusion(6)">7</button>
+        <button class="exbtn" id="colbtn-7"  onclick="toggleColExclusion(7)">8</button>
+        <button class="exbtn" id="colbtn-8"  onclick="toggleColExclusion(8)">9</button>
+        <button class="exbtn" id="colbtn-9"  onclick="toggleColExclusion(9)">10</button>
+        <button class="exbtn" id="colbtn-10" onclick="toggleColExclusion(10)">11</button>
+        <button class="exbtn" id="colbtn-11" onclick="toggleColExclusion(11)">12</button>
+        <button class="addbtn" onclick="clearExclusions()" style="font-size:9px;padding:3px 9px;margin-left:6px;">Clear all</button>
+      </div>
+      <div class="excl-hint">Click row/col buttons to exclude. Click or drag wells directly on the map to toggle individual wells.</div>
+    </div>
+    <div class="platewrap"><div class="plate" id="plate"></div></div>
+    <div class="legend" id="legend"></div>
+  </div>
+
+</main>
+</div>
+
+<!-- Color picker popup -->
+<div id="colorPickerPopup" style="display:none;position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;box-shadow:0 4px 24px rgba(0,0,0,0.18);width:230px;">
+  <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:8px;" id="cpTitle">Pick color</div>
+  <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;" id="cpSwatches"></div>
+  <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px;">
+    <input type="color" id="cpNativeInput" style="width:32px;height:26px;padding:0;border:none;cursor:pointer;border-radius:3px;flex-shrink:0;">
+    <input type="text" id="cpHexInput" placeholder="#74b480" maxlength="7"
+      style="font-family:var(--mono);font-size:11px;padding:4px 7px;border:1px solid var(--border);border-radius:4px;width:90px;background:var(--bg);color:var(--text);">
+    <button onclick="applyPickerColor()" style="font-family:var(--mono);font-size:10px;padding:4px 9px;background:var(--text);color:var(--bg);border:none;border-radius:4px;cursor:pointer;white-space:nowrap;">Apply</button>
+  </div>
+  <button onclick="closeColorPicker()" style="font-family:var(--mono);font-size:9px;color:var(--text3);background:none;border:none;cursor:pointer;width:100%;text-align:right;padding:0;">close ✕</button>
+</div>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────────
+let concs = [];
+let condColors = {};
+let excludedWells = new Set();
+let reps = 3;
+let intmMode = 'direct';
+let fillDir = 'col-ttb';
+let showReps = true;
+let _cachedWells = [];
+let _dragging = false;
+let _dragExclude = null;
+const OV = 1.1;
+
+let controls = [
+  { id:'neg',   name:'Negative control', desc:'Culture only — no compound',         color:'#7ba7d4', on:true,  reps:3, hasCulture:true,  hasInducer:false, isBlank:false },
+  { id:'blank', name:'Media blank',      desc:'Media only — no cells, no compound', color:'#c0c0c0', on:false, reps:2, hasCulture:false, hasInducer:false, isBlank:true  },
+  { id:'cblk',  name:'Culture blank',    desc:'Culture only — background reference',color:'#aacce0', on:false, reps:2, hasCulture:true,  hasInducer:false, isBlank:true  },
+  { id:'pos',   name:'Positive control', desc:'Max compound — full response ref',   color:'#d47b7b', on:false, reps:3, hasCulture:true,  hasInducer:true,  isBlank:false },
+];
+
+const CC = ['#74b480','#3d8a55','#2d6e42','#1d5430','#d4954a','#b87030','#e87520','#8b4510',
+            '#6090cc','#3a6aaa','#1e4888','#0e3060','#b87ab0','#905090','#6a3070','#481850'];
+
+const PALETTE = [
+  '#e05c5c','#e07a5c','#e0a05c','#d4c44a',
+  '#74b480','#3d8a55','#4aabb0','#4a7ab0',
+  '#3a6aaa','#1e4888','#7b5cb0','#b87ab0',
+  '#d47b7b','#e87520','#8b4510','#6090cc',
+  '#7ba7d4','#c0c0c0','#aacce0','#905090'
+];
+
+// ── CONTROLS UI ────────────────────────────────────────────────
+function renderClist() {
+  document.getElementById('clist').innerHTML = controls.map(c => `
+    <div class="citem">
+      <span class="cdot" style="background:${c.color};" onclick="openColorPicker('ctrl','${c.id}',this)" title="Change color"></span>
+      <input type="checkbox" ${c.on?'checked':''} onchange="toggleC('${c.id}',this.checked)">
+      <div class="cinfo">
+        <div class="cname">${c.name}</div>
+        <div class="cdesc">${c.desc}</div>
+        <div class="creps"><span>reps:</span>
+          <input type="number" value="${c.reps}" min="1" max="12" onchange="setCReps('${c.id}',this.value)" ${!c.on?'disabled':''} style="width:32px;">
+        </div>
+      </div>
+    </div>`).join('');
+}
+function toggleC(id,v){ controls.find(c=>c.id===id).on=v; renderClist(); update(); }
+function setCReps(id,v){ controls.find(c=>c.id===id).reps=Math.max(1,parseInt(v)||1); update(); }
+let cc=0;
+function addCustomCtrl(){
+  cc++;
+  const h=(cc*83)%360;
+  controls.push({id:'cu'+cc,name:'Custom control '+cc,desc:'Edit as needed',color:`hsl(${h},50%,58%)`,on:true,reps:2,hasCulture:true,hasInducer:false,isBlank:false});
+  renderClist(); update();
+}
+
+// ── CONCS ──────────────────────────────────────────────────────
+function addConc(){
+  const inp=document.getElementById('concInput');
+  const v=parseFloat(inp.value);
+  if(!isNaN(v)&&v>0&&!concs.includes(v)){concs.push(v);concs.sort((a,b)=>a-b);inp.value='';renderCtags();update();}
+}
+document.getElementById('concInput').addEventListener('keydown',e=>{if(e.key==='Enter')addConc();});
+function removeConc(v){concs=concs.filter(c=>c!==v);delete condColors[v];renderCtags();update();}
+function loadPreset(a){concs=[...a];renderCtags();update();}
+function clearConcs(){concs=[];condColors={};renderCtags();update();}
+
+function renderCtags(){
+  document.getElementById('ctags').innerHTML=concs.map((c,i)=>{
+    const color=condColors[c]||CC[i%CC.length];
+    return `<span class="ctag">
+      <span class="cswatch" style="background:${color};" onclick="openColorPicker('cond',${c},this)" title="Change color"></span>
+      ${c}<button onclick="removeConc(${c})">×</button>
+    </span>`;
+  }).join('');
+}
+
+// ── MODES ──────────────────────────────────────────────────────
+function setIntm(m){
+  intmMode=m;
+  document.getElementById('tgDir').classList.toggle('on',m==='direct');
+  document.getElementById('tgInt').classList.toggle('on',m==='intermediate');
+  document.getElementById('intmPanel').style.display=m==='intermediate'?'block':'none';
+  document.getElementById('directNote').style.display=m==='direct'?'block':'none';
+  update();
+}
+function setFill(d){
+  fillDir=d;
+  const sel=document.getElementById('fillSelect');
+  if(sel) sel.value=d;
+  update();
+}
+function setShowReps(v){
+  showReps=v;
+  document.getElementById('tgROn').classList.toggle('on',v);
+  document.getElementById('tgROff').classList.toggle('on',!v);
+  update();
+}
+function changeReps(d){reps=Math.max(1,Math.min(12,reps+d));document.getElementById('repCount').textContent=reps;update();}
+function syncSlider(){const v=document.getElementById('intmSlider').value;document.getElementById('intmConc').value=v;document.getElementById('slv').textContent=Number(v).toLocaleString();update();}
+function syncInput(){const v=parseFloat(document.getElementById('intmConc').value)||0;document.getElementById('intmSlider').value=Math.min(10000,v);document.getElementById('slv').textContent=v.toLocaleString();update();}
+
+// ── PARAMS ─────────────────────────────────────────────────────
+function P(){
+  return {
+    stockConc:parseFloat(document.getElementById('stockConc').value)||25000,
+    stockVol:parseFloat(document.getElementById('stockVol').value)||25000,
+    cultureVol:parseFloat(document.getElementById('cultureVol').value)||200,
+    cultureTotal:parseFloat(document.getElementById('cultureTotal').value)||25000,
+    intmConc:parseFloat(document.getElementById('intmConc').value)||1600,
+    intmPrepVol:parseFloat(document.getElementById('intmPrepVol').value)||1000,
+    expName:document.getElementById('expName').value,
+    researcher:document.getElementById('researcher').value,
+    expNotes:document.getElementById('expNotes').value,
+    expDate:document.getElementById('expDate').value,
+    inducerName:document.getElementById('inducerName').value||'Compound',
+    cultureName:document.getElementById('cultureName').value||'Culture',
+    units:document.getElementById('concUnits').value,
+  };
+}
+
+// ── CALC ───────────────────────────────────────────────────────
+function calcWells(p){
+  const src=intmMode==='intermediate'?p.intmConc:p.stockConc;
+  const rows=[];
+  concs.forEach((c,i)=>{
+    const iv=(c/src)*p.cultureVol;
+    rows.push({type:'cond',label:`Cond ${i+1} (${c})`,conc:c,cultVol:p.cultureVol,indVol:iv,finalVol:p.cultureVol+iv,pip:pipCheck(iv,c),color:condColors[c]||CC[i%CC.length],reps});
+  });
+  controls.filter(c=>c.on).forEach(c=>{
+    const maxC=concs.length?Math.max(...concs):0;
+    const iv=c.hasInducer?(maxC/src)*p.cultureVol:0;
+    const cv=c.hasCulture?p.cultureVol:0;
+    const mv=!c.hasCulture?p.cultureVol:0;
+    rows.push({type:'ctrl',label:c.name,conc:c.hasInducer?maxC:0,cultVol:cv,mediaVol:mv,indVol:iv,finalVol:cv+mv+iv,pip:{label:c.isBlank?'blank':'control',cls:'bn'},color:c.color,reps:c.reps,isBlank:c.isBlank});
+  });
+  return rows;
+}
+
+function pipCheck(vol,conc){
+  if(conc===0)return{label:'control',cls:'bn'};
+  if(vol<0.1) return{label:'< 0.1 µL — impossible',cls:'bd'};
+  if(vol<0.5) return{label:`${vol.toFixed(3)} µL — too small`,cls:'bd'};
+  if(vol<1.0) return{label:`${vol.toFixed(3)} µL — borderline`,cls:'bw'};
+  if(vol>100) return{label:`${vol.toFixed(1)} µL — very large`,cls:'bw'};
+  return{label:'good',cls:'bg'};
+}
+
+// ── UPDATE ─────────────────────────────────────────────────────
+function update(){
+  const p=P(); const w=calcWells(p);
+  _cachedWells=w;
+  // Welcome banner
+  const wb=document.getElementById('welcomeBanner');
+  wb.style.display=(concs.length===0&&!controls.some(c=>c.on))?'block':'none';
+  // Header badges & labels
+  document.getElementById('expBadge').textContent=p.expName?`— ${p.expName}`:'';
+  document.getElementById('repLabel').textContent=reps;
+  document.getElementById('unitsHint').textContent=p.units;
+  document.getElementById('thConc').textContent=`Target (${p.units})`;
+  document.getElementById('thCult').textContent=`${p.cultureName} (µL)`;
+  document.getElementById('thInd').textContent=`${p.inducerName} (µL)`;
+  document.getElementById('thIndMM').textContent=`${p.inducerName} total (µL)`;
+  document.getElementById('directNoteCompound').textContent=p.inducerName||'Compound';
+  renderMets(p,w); renderWTable(p,w); renderMM(p,w); renderSteps(p,w); renderPlate(w); renderIntmR(p);
+}
+
+// ── METRICS ────────────────────────────────────────────────────
+function renderMets(p,wells){
+  const tot=wells.reduce((s,w)=>s+w.reps,0);
+  const cw=wells.filter(w=>w.type==='cond');
+  const allOk=cw.every(w=>w.pip.cls!=='bd');
+  const totC=wells.filter(w=>w.cultVol>0).reduce((s,w)=>s+w.cultVol*w.reps,0)*OV;
+  const vs=cw.map(w=>w.indVol).filter(v=>v>0);
+  const fold=vs.length>=2?(Math.max(...vs)/Math.min(...vs)):1;
+  const excl=excludedWells.size;
+  document.getElementById('mets').innerHTML=`
+    <div class="mc ${tot<=(96-excl)?'g':'b'}"><div class="mv">${tot}/${96-excl}</div><div class="ml">WELLS PLANNED</div></div>
+    <div class="mc ${allOk?'g':'b'}"><div class="mv">${cw.length===0?'—':allOk?'✓ OK':'⚠ Check'}</div><div class="ml">PIPETTABILITY</div></div>
+    <div class="mc"><div class="mv">${(totC/1000).toFixed(2)} mL</div><div class="ml">CULTURE NEEDED</div></div>
+    <div class="mc ${fold<=4?'g':fold<=16?'w':'b'}"><div class="mv">${cw.length>=2?fold.toFixed(1)+'×':'—'}</div><div class="ml">VOL SPREAD</div></div>
+    <div class="mc ${p.cultureTotal>=totC?'g':'b'}"><div class="mv">${p.cultureTotal>=totC?'✓ OK':'Low'}</div><div class="ml">CULTURE STOCK</div></div>
+    <div class="mc g"><div class="mv">${reps}</div><div class="ml">REPLICATES</div></div>`;
+}
+
+// ── WELL TABLE ─────────────────────────────────────────────────
+function renderWTable(p,wells){
+  const cw=wells.filter(w=>w.type==='cond');
+  const maxV=cw.length?Math.max(...cw.map(w=>w.indVol)):1;
+  const src=intmMode==='intermediate'?'intm':'stock';
+  document.getElementById('wbody').innerHTML=wells.map(w=>{
+    const bw=w.type==='cond'?Math.round((w.indVol/Math.max(maxV,0.001))*80):0;
+    const bar=`<span style="display:inline-block;width:80px;height:5px;background:var(--border);border-radius:2px;vertical-align:middle;margin-left:6px;"><span style="display:block;width:${bw}px;height:5px;background:${w.color};border-radius:2px;"></span></span>`;
+    const typeB=w.type==='cond'?`<span class="badge bp">condition</span>`:w.isBlank?`<span class="badge bn">blank</span>`:`<span class="badge bb">control</span>`;
+    const concB=w.type==='cond'?`<span class="badge bp">${w.conc} ${p.units}</span>`:w.indVol>0?`<span class="badge bb">${w.conc} ${p.units}</span>`:`<span class="badge bn">—</span>`;
+    const ivTxt=w.indVol===0?`<span class="badge bn">—</span>`:`${w.indVol.toFixed(3)} <span style="font-size:9px;color:var(--text3);">(${src})</span>${bar}`;
+    const cvTxt=w.cultVol>0?w.cultVol.toFixed(1):`<span style="color:var(--text3);">—</span>`;
+    return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${w.color};margin-right:6px;vertical-align:middle;border:1px solid rgba(0,0,0,0.12);"></span>${w.label}</td><td>${typeB}</td><td>${concB}</td><td>${cvTxt}</td><td>${ivTxt}</td><td>${w.finalVol.toFixed(2)}</td><td><span class="badge ${w.pip.cls}">${w.pip.label}</span></td></tr>`;
+  }).join('');
+  document.getElementById('wclabel').textContent=`${wells.reduce((s,w)=>s+w.reps,0)} wells total`;
+}
+
+// ── MASTER MIX ─────────────────────────────────────────────────
+function renderMM(p,wells){
+  document.getElementById('mmbody').innerHTML=wells.map(w=>{
+    const n=w.reps*OV;
+    const typeB=w.type==='cond'?`<span class="badge bp">condition</span>`:w.isBlank?`<span class="badge bn">blank</span>`:`<span class="badge bb">control</span>`;
+    const concTxt=w.type==='cond'?`${w.conc} ${p.units}`:w.indVol>0?`${w.conc} ${p.units}`:'—';
+    return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${w.color};margin-right:6px;vertical-align:middle;border:1px solid rgba(0,0,0,0.12);"></span>${w.label}</td><td>${typeB}</td><td>${concTxt}</td><td>${w.cultVol>0?(w.cultVol*n).toFixed(1):'—'}</td><td>${w.indVol>0?(w.indVol*n).toFixed(2):'—'}</td><td>${(w.finalVol*n).toFixed(1)}</td></tr>`;
+  }).join('');
+}
+
+// ── INTERMEDIATE RECIPE ────────────────────────────────────────
+function renderIntmR(p){
+  if(intmMode!=='intermediate')return;
+  const el=document.getElementById('intmRecipe');
+  const vfs=(p.intmConc/p.stockConc)*p.intmPrepVol;
+  const vm=p.intmPrepVol-vfs;
+  if(vfs<0.5){el.className='ibox d';el.textContent=`⚠ Need ${vfs.toFixed(2)} µL from stock — too small. Lower intermediate conc or increase prep volume.`;}
+  else{el.className='ibox';el.textContent=`Add ${vfs.toFixed(2)} µL of ${p.stockConc.toLocaleString()} ${p.units} stock + ${vm.toFixed(2)} µL media → ${p.intmPrepVol} µL at ${p.intmConc.toLocaleString()} ${p.units}`;}
+}
+
+// ── BENCH STEPS ────────────────────────────────────────────────
+function renderSteps(p,wells){
+  const src=intmMode==='intermediate'?`${p.intmConc.toLocaleString()} ${p.units} intermediate`:`${p.stockConc.toLocaleString()} ${p.units} stock`;
+  const steps=[];let n=1;
+  steps.push({n:n++,ac:false,t:'Prepare workspace',d:`Label all tubes and wells. Prepare ice if needed.\nDate: ${p.expDate||'____________'}   Researcher: ${p.researcher||'____________'}\nExperiment: ${p.expName||'____________'}\nCompound: ${p.inducerName}`});
+
+  if(intmMode==='intermediate'){
+    const vfs=(p.intmConc/p.stockConc)*p.intmPrepVol;
+    const vm=p.intmPrepVol-vfs;
+    steps.push({n:n++,ac:true,t:`Make intermediate stock (${p.intmConc.toLocaleString()} ${p.units})`,d:`1. Pipette ${vfs.toFixed(2)} µL of ${p.stockConc.toLocaleString()} ${p.units} ${p.inducerName} into a labelled tube\n2. Add ${vm.toFixed(2)} µL media/buffer\n3. Vortex or mix by pipetting (×10)\n→ ${p.intmPrepVol} µL at ${p.intmConc.toLocaleString()} ${p.units} — enough for all wells with overage`});
+  }
+
+  const conds=wells.filter(w=>w.type==='cond');
+  const ctrls=wells.filter(w=>w.type==='ctrl'&&!w.isBlank);
+  const blanks=wells.filter(w=>w.isBlank);
+
+  if(conds.length){
+    steps.push({n:n++,ac:false,t:'Prepare condition master mixes',d:`One tube per condition — volumes include 10% overage:\n\n`+conds.map((w,i)=>{
+      const nm=w.reps*OV;
+      return `Tube ${i+1} — ${w.conc} ${p.units}:\n  ${(w.cultVol*nm).toFixed(1)} µL ${p.cultureName}\n  + ${(w.indVol*nm).toFixed(2)} µL ${src}\n  Mix gently before aliquoting`;
+    }).join('\n\n')});
+  }
+
+  if(ctrls.length){
+    steps.push({n:n++,ac:false,t:'Prepare control master mixes',d:ctrls.map(w=>{
+      const nm=w.reps*OV;
+      return `${w.label} (${w.reps} wells):\n  ${w.cultVol>0?(w.cultVol*nm).toFixed(1)+' µL '+p.cultureName:''}${w.indVol>0?' + '+(w.indVol*nm).toFixed(2)+' µL '+src:''}`;
+    }).join('\n\n')});
+  }
+
+  if(blanks.length){
+    steps.push({n:n++,ac:false,t:'Prepare blanks',d:blanks.map(w=>`${w.label} (${w.reps} wells):\n  ${(w.finalVol*w.reps*OV).toFixed(1)} µL media/buffer — no cells, no compound`).join('\n\n')});
+  }
+
+  steps.push({n:n++,ac:false,t:'Aliquot into 96-well plate',d:`Dispense ${p.cultureVol} µL from each master mix into corresponding wells.\nWork low → high concentration to minimise carryover.\nRefer to the plate map for well positions and replicate identity.`});
+  steps.push({n:n++,ac:true,t:'Seal, incubate, and read',d:`Seal plate with breathable membrane or lid.\nIncubate under your standard conditions.\nRead at appropriate timepoint and wavelength/endpoint.`});
+
+  document.getElementById('steps').innerHTML=steps.map(s=>`
+    <div class="step">
+      <div class="sn ${s.ac?'ac':''}">${s.n}</div>
+      <div class="sb"><div class="stitle">${s.t}</div><pre class="sdetail">${s.d}</pre></div>
+    </div>`).join('');
+}
+
+// ── PLATE MAP ──────────────────────────────────────────────────
+function renderPlate(wells){
+  if(!wells){wells=_cachedWells;}
+  const p2=P();
+  const ROWS=['A','B','C','D','E','F','G','H'];
+
+  // Build ordered position list based on fillDir
+  let allPositions=[];
+  switch(fillDir){
+    case 'col-ttb':
+      for(let c=0;c<12;c++)for(let r=0;r<8;r++)allPositions.push([r,c]);
+      break;
+    case 'col-btt':
+      for(let c=0;c<12;c++)for(let r=7;r>=0;r--)allPositions.push([r,c]);
+      break;
+    case 'row-ltr':
+      for(let r=0;r<8;r++)for(let c=0;c<12;c++)allPositions.push([r,c]);
+      break;
+    case 'row-rtl':
+      for(let r=0;r<8;r++)for(let c=11;c>=0;c--)allPositions.push([r,c]);
+      break;
+    case 'snake':
+      for(let r=0;r<8;r++){
+        if(r%2===0){for(let c=0;c<12;c++)allPositions.push([r,c]);}
+        else{for(let c=11;c>=0;c--)allPositions.push([r,c]);}
+      }
+      break;
+    case 'spread':
+      // col-ttb order as base
+      for(let c=0;c<12;c++)for(let r=0;r<8;r++)allPositions.push([r,c]);
+      break;
+    default:
+      for(let c=0;c<12;c++)for(let r=0;r<8;r++)allPositions.push([r,c]);
+  }
+
+  // Filter out excluded wells
+  const available=allPositions.filter(([r,c])=>!excludedWells.has(`${r},${c}`));
+
+  // Build wmap
+  const wmap={};
+  if(fillDir==='spread'){
+    // Stride-based spread across available positions
+    const totalSlots=wells.reduce((s,w)=>s+w.reps,0);
+    if(totalSlots>0 && available.length>0){
+      const stride=Math.max(1,Math.floor(available.length/totalSlots));
+      let usedIdx=new Set();
+      let cursor=0;
+      wells.forEach(w=>{
+        for(let rep=1;rep<=w.reps;rep++){
+          // advance cursor to next unused slot
+          while(usedIdx.has(cursor)&&cursor<available.length)cursor++;
+          if(cursor>=available.length){
+            // wrap: find first unused
+            cursor=0;
+            while(usedIdx.has(cursor)&&cursor<available.length)cursor++;
+          }
+          if(cursor<available.length){
+            const[r,c]=available[cursor];
+            wmap[`${r},${c}`]={w,rep};
+            usedIdx.add(cursor);
+            cursor+=stride;
+          }
+        }
+      });
+    }
+  } else {
+    let pos=0;
+    wells.forEach(w=>{
+      for(let rep=1;rep<=w.reps;rep++){
+        if(pos<available.length){
+          const[r,c]=available[pos++];
+          wmap[`${r},${c}`]={w,rep};
+        }
+      }
+    });
+  }
+
+  // Luminance helper
+  function lum(hex){
+    try{const r=parseInt(hex.slice(1,3),16)/255,g=parseInt(hex.slice(3,5),16)/255,b=parseInt(hex.slice(5,7),16)/255;return 0.299*r+0.587*g+0.114*b;}
+    catch(e){return 0.5;}
+  }
+
+  // Render plate HTML
+  let html='<div></div>';
+  for(let c=0;c<12;c++)html+=`<div class="pcl">${c+1}</div>`;
+  ROWS.forEach((row,ri)=>{
+    html+=`<div class="prl">${row}</div>`;
+    for(let ci=0;ci<12;ci++){
+      const key=`${ri},${ci}`;
+      const isExcl=excludedWells.has(key);
+      if(isExcl){
+        html+=`<div class="well excl" data-row="${ri}" data-col="${ci}" data-tip="Excluded"></div>`;
+      } else if(key in wmap){
+        const{w,rep}=wmap[key];
+        const tc=lum(w.color)>0.48?'#1a1814':'#ffffff';
+        const lbl=w.type==='cond'?(w.conc<1?w.conc.toFixed(2):String(w.conc)):w.label.substring(0,4).trim();
+        const tip=`${w.label} | ${w.conc||'—'} ${p2.units} | ${p2.cultureName}: ${w.cultVol.toFixed(0)} µL + ${p2.inducerName}: ${w.indVol.toFixed(3)} µL | Rep ${rep}/${w.reps}`;
+        html+=`<div class="well" style="background:${w.color};border-color:rgba(0,0,0,0.2);color:${tc};" data-row="${ri}" data-col="${ci}" data-tip="${tip}">
+          <span class="wl">${lbl}</span>
+          ${showReps?`<span class="wr" style="color:${tc};">r${rep}</span>`:''}
+        </div>`;
+      } else {
+        html+=`<div class="well empty" data-row="${ri}" data-col="${ci}"></div>`;
+      }
+    }
+  });
+
+  document.getElementById('plate').innerHTML=html;
+  const placed=Object.keys(wmap).length;
+  document.getElementById('plateUsed').textContent=`${placed} wells placed / ${96-excludedWells.size} available`;
+
+  // Update legend
+  const cname=p2.inducerName||'Compound';
+  document.getElementById('legend').innerHTML=
+    `<div class="li" style="width:100%;font-family:var(--sans);font-size:10px;font-weight:700;color:var(--text3);margin-bottom:2px;">${cname}</div>`+
+    wells.map(w=>`<div class="li"><span class="ld" style="background:${w.color};"></span>${w.label}${w.type==='cond'?' ('+w.conc+')':''} ×${w.reps}</div>`).join('')+
+    `<div class="li"><span class="ld" style="background:var(--surface2);border:1px solid var(--border);"></span>empty</div>`+
+    (excludedWells.size?`<div class="li"><span class="ld" style="background:repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,#f5f5f5 2px,#f5f5f5 6px);border:1px solid #ccc;"></span>excluded (${excludedWells.size})</div>`:'');
+
+  // Update exclusion button states
+  for(let r=0;r<8;r++){
+    const allExcl=Array.from({length:12},(_,c)=>excludedWells.has(`${r},${c}`)).every(Boolean);
+    const btn=document.getElementById(`rowbtn-${r}`);
+    if(btn) btn.classList.toggle('excl-active',allExcl);
+  }
+  for(let c=0;c<12;c++){
+    const allExcl=Array.from({length:8},(_,r)=>excludedWells.has(`${r},${c}`)).every(Boolean);
+    const btn=document.getElementById(`colbtn-${c}`);
+    if(btn) btn.classList.toggle('excl-active',allExcl);
+  }
+}
+
+// ── EXCLUSION CONTROLS ─────────────────────────────────────────
+function toggleRowExclusion(r){
+  const allExcl=Array.from({length:12},(_,c)=>excludedWells.has(`${r},${c}`)).every(Boolean);
+  for(let c=0;c<12;c++){
+    if(allExcl) excludedWells.delete(`${r},${c}`);
+    else excludedWells.add(`${r},${c}`);
+  }
+  renderPlate(_cachedWells);
+}
+function toggleColExclusion(c){
+  const allExcl=Array.from({length:8},(_,r)=>excludedWells.has(`${r},${c}`)).every(Boolean);
+  for(let r=0;r<8;r++){
+    if(allExcl) excludedWells.delete(`${r},${c}`);
+    else excludedWells.add(`${r},${c}`);
+  }
+  renderPlate(_cachedWells);
+}
+function clearExclusions(){
+  excludedWells.clear();
+  renderPlate(_cachedWells);
+}
+
+// ── PLATE DRAG INTERACTION ─────────────────────────────────────
+(function(){
+  const plateEl=document.getElementById('plate');
+
+  plateEl.addEventListener('mousedown',e=>{
+    const well=e.target.closest('[data-row]');
+    if(!well||!well.dataset.row)return;
+    e.preventDefault();
+    const r=parseInt(well.dataset.row),c=parseInt(well.dataset.col);
+    const key=`${r},${c}`;
+    _dragging=true;
+    _dragExclude=!excludedWells.has(key); // if currently included → will exclude; if excluded → will include
+    if(_dragExclude) excludedWells.add(key);
+    else excludedWells.delete(key);
+    renderPlate(_cachedWells);
+  });
+
+  plateEl.addEventListener('mouseover',e=>{
+    if(!_dragging)return;
+    const well=e.target.closest('[data-row]');
+    if(!well||!well.dataset.row)return;
+    const r=parseInt(well.dataset.row),c=parseInt(well.dataset.col);
+    const key=`${r},${c}`;
+    if(_dragExclude) excludedWells.add(key);
+    else excludedWells.delete(key);
+    renderPlate(_cachedWells);
+  });
+
+  document.addEventListener('mouseup',()=>{
+    if(_dragging){ _dragging=false; _dragExclude=null; renderPlate(_cachedWells); }
+  });
+})();
+
+// ── COLOR PICKER ───────────────────────────────────────────────
+let _cpTarget=null; // {kind:'cond'|'ctrl', key:value, swatchEl}
+
+function openColorPicker(kind,key,swatchEl){
+  _cpTarget={kind,key,swatchEl};
+  const popup=document.getElementById('colorPickerPopup');
+  let currentColor='#74b480';
+  if(kind==='cond') currentColor=condColors[key]||CC[concs.indexOf(Number(key))%CC.length]||'#74b480';
+  else { const ctrl=controls.find(c=>c.id===key); if(ctrl) currentColor=ctrl.color; }
+
+  document.getElementById('cpTitle').textContent=kind==='cond'?`Color — ${key}`:controls.find(c=>c.id===key)?.name||'Control';
+  document.getElementById('cpNativeInput').value=currentColor;
+  document.getElementById('cpHexInput').value=currentColor;
+
+  // Render palette
+  document.getElementById('cpSwatches').innerHTML=PALETTE.map(col=>
+    `<span style="background:${col};border:2px solid ${col===currentColor?'var(--text)':'transparent'};" onclick="selectPaletteSwatch('${col}')" title="${col}"></span>`
+  ).join('');
+
+  // Position popup
+  const rect=swatchEl.getBoundingClientRect();
+  const top=rect.bottom+window.scrollY+6;
+  const left=Math.min(rect.left+window.scrollX,window.innerWidth-240);
+  popup.style.top=top+'px';
+  popup.style.left=left+'px';
+  popup.style.display='block';
+
+  document.getElementById('cpNativeInput').oninput=function(){
+    document.getElementById('cpHexInput').value=this.value;
+    previewPickerColor(this.value);
+  };
+}
+
+function selectPaletteSwatch(color){
+  document.getElementById('cpNativeInput').value=color;
+  document.getElementById('cpHexInput').value=color;
+  document.querySelectorAll('#cpSwatches span').forEach(s=>{
+    s.style.borderColor=s.style.background===color||s.title===color?'var(--text)':'transparent';
+  });
+  previewPickerColor(color);
+}
+
+function previewPickerColor(color){
+  if(!_cpTarget)return;
+  if(_cpTarget.kind==='cond') condColors[Number(_cpTarget.key)]=color;
+  else { const ctrl=controls.find(c=>c.id===_cpTarget.key); if(ctrl) ctrl.color=color; }
+  renderCtags();
+  renderClist();
+  renderPlate(_cachedWells);
+}
+
+function applyPickerColor(){
+  const hex=document.getElementById('cpHexInput').value.trim();
+  const color=/^#[0-9a-fA-F]{6}$/.test(hex)?hex:document.getElementById('cpNativeInput').value;
+  previewPickerColor(color);
+  closeColorPicker();
+}
+
+function closeColorPicker(){
+  document.getElementById('colorPickerPopup').style.display='none';
+  _cpTarget=null;
+}
+
+// Close picker on outside click
+document.addEventListener('click',function(e){
+  const popup=document.getElementById('colorPickerPopup');
+  if(popup.style.display!=='none' && !popup.contains(e.target)
+    && !e.target.classList.contains('cswatch') && !e.target.classList.contains('cdot')){
+    closeColorPicker();
+  }
+});
+
+// ── PRINT / EXPORT ─────────────────────────────────────────────
+function printReport(){
+  const p=P();
+  document.getElementById('pr-name').textContent=p.expName||'(unnamed)';
+  document.getElementById('pr-date').textContent=p.expDate||new Date().toLocaleDateString();
+  document.getElementById('pr-researcher').textContent=p.researcher||'—';
+  document.getElementById('pr-notes').textContent=p.expNotes||'—';
+  document.getElementById('pr-inducer').textContent=p.inducerName;
+  document.getElementById('pr-stock').textContent=`${p.stockConc.toLocaleString()} ${p.units}`;
+  document.getElementById('pr-culture').textContent=`${p.cultureName} — ${p.cultureVol} µL/well, ${(p.cultureTotal/1000).toFixed(1)} mL total available`;
+  window.print();
+}
+
+function printPlateOnly(){
+  const p=P();
+  document.getElementById('poCompound').textContent=p.inducerName||'Dilution Designer';
+  const expPart=p.expName?` | ${p.expName}`:'';
+  const datePart=p.expDate?` | ${p.expDate}`:` | ${new Date().toLocaleDateString()}`;
+  document.getElementById('poExp').textContent=expPart;
+  document.getElementById('poDate').textContent=datePart;
+  document.body.classList.add('print-plate-mode');
+  window.addEventListener('afterprint',function handler(){
+    document.body.classList.remove('print-plate-mode');
+    window.removeEventListener('afterprint',handler);
+  });
+  window.print();
+}
+
+function copyText(){
+  const p=P();const w=calcWells(p);
+  const src=intmMode==='intermediate'?`${p.intmConc} ${p.units} intermediate`:`${p.stockConc} ${p.units} stock`;
+  let t=`DILUTION EXPERIMENT — ${p.expName||'Unnamed'}\nDate: ${p.expDate||new Date().toLocaleDateString()} | Researcher: ${p.researcher||'—'}\n${p.expNotes}\n${'─'.repeat(50)}\n\n`;
+  t+=`${p.inducerName}: ${p.stockConc} ${p.units} stock | ${p.cultureName}: ${p.cultureVol} µL/well | Replicates: ${reps}\n\n`;
+  if(intmMode==='intermediate'){const vfs=(p.intmConc/p.stockConc)*p.intmPrepVol;t+=`INTERMEDIATE: ${vfs.toFixed(2)} µL stock + ${(p.intmPrepVol-vfs).toFixed(2)} µL media → ${p.intmPrepVol} µL at ${p.intmConc} ${p.units}\n\n`;}
+  t+=`PER-WELL VOLUMES\n`;
+  w.forEach(x=>{t+=`  ${x.label} (${x.conc||'—'} ${p.units}): ${x.cultVol} µL culture + ${x.indVol.toFixed(3)} µL ${src} = ${x.finalVol.toFixed(2)} µL total\n`;});
+  t+=`\nMASTER MIX (×reps + 10% overage)\n`;
+  w.forEach(x=>{const n=x.reps*OV;t+=`  ${x.label}: ${(x.cultVol*n).toFixed(1)} µL culture + ${(x.indVol*n).toFixed(2)} µL compound | ${x.reps} wells\n`;});
+  navigator.clipboard.writeText(t).then(()=>{
+    const btns=document.querySelectorAll('.btn');
+    btns.forEach(b=>{if(b.textContent==='Copy text'){b.textContent='Copied!';setTimeout(()=>b.textContent='Copy text',2000);}});
+  });
+}
+
+function downloadCSV(){
+  const p=P();const w=calcWells(p);
+  let csv=`Experiment,${p.expName}\nDate,${p.expDate}\nResearcher,${p.researcher}\nNotes,${p.expNotes}\nCompound,${p.inducerName}\nStock conc (${p.units}),${p.stockConc}\nCulture,${p.cultureName}\nCulture per well (uL),${p.cultureVol}\nReplicates,${reps}\nFill order,${fillDir}\nExcluded wells,${excludedWells.size}\n\n`;
+  csv+=`PER-WELL VOLUMES\nCondition,Type,Target (${p.units}),${p.cultureName} (uL),${p.inducerName} (uL),Final vol (uL),Replicates,Pipettable\n`;
+  w.forEach(x=>{ csv+=`"${x.label}","${x.type}","${x.conc||0}","${x.cultVol.toFixed(2)}","${x.indVol.toFixed(3)}","${x.finalVol.toFixed(2)}","${x.reps}","${x.pip.label}"\n`; });
+  csv+=`\nMASTER MIX (x${reps} reps + 10% overage)\nCondition,${p.cultureName} total (uL),${p.inducerName} total (uL),Total vol (uL)\n`;
+  w.forEach(x=>{const n=x.reps*OV; csv+=`"${x.label}","${(x.cultVol*n).toFixed(1)}","${(x.indVol*n).toFixed(2)}","${(x.finalVol*n).toFixed(1)}"\n`;});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=`dilution-${(p.expName||'experiment').replace(/\s+/g,'_')}.csv`;
+  a.click();
+}
+
+// ── LISTENERS ──────────────────────────────────────────────────
+['stockConc','stockVol','cultureVol','cultureTotal','intmPrepVol','expName','researcher','expNotes','expDate','inducerName','cultureName','concUnits'].forEach(id=>{
+  const el=document.getElementById(id);
+  if(el){el.addEventListener('input',update);el.addEventListener('change',update);}
+});
+
+// ── INIT ───────────────────────────────────────────────────────
+document.getElementById('expDate').valueAsDate=new Date();
+renderCtags();
+renderClist();
+update();
+</script>
+</body>
+</html>
