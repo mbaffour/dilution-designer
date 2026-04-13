@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dilution Designer — A Free Tool for 96-Well Plate Experiments</title>
-<meta name="description" content="Dilution Designer is a free, browser-based tool for planning 96-well plate experiments. Calculate dilution volumes, design plate maps, and export to CSV — built by a scientist for scientists.">
+<meta name="description" content="Dilution Designer is a free, browser-based tool for planning 96-well plate experiments. Plasmid/induction mode, phage infection mode, MOI calculator, serial dilution planner, Gen5-style plate layout, and more — built by a scientist for scientists.">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -20,6 +20,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--sans); line-he
 /* NAV */
 nav { background:var(--text); color:var(--bg); padding:14px 40px; display:flex; align-items:center; gap:16px; position:sticky; top:0; z-index:100; }
 nav .brand { font-size:16px; font-weight:800; letter-spacing:-0.03em; }
+nav .mantra { font-family:var(--mono); font-size:10px; color:#666; }
 nav a.tool-link { margin-left:auto; font-family:var(--mono); font-size:11px; padding:7px 16px; border-radius:5px; background:var(--accent2); color:#fff; text-decoration:none; letter-spacing:0.05em; transition:background 0.15s; }
 nav a.tool-link:hover { background:var(--accent); }
 
@@ -45,6 +46,13 @@ li { line-height:1.7; }
 li strong { color:var(--text); }
 
 .callout { background:var(--accent-bg); border-left:3px solid var(--accent2); border-radius:0 6px 6px 0; padding:14px 18px; margin:24px 0; font-family:var(--mono); font-size:12px; color:var(--accent); line-height:1.7; }
+
+.mode-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; margin:24px 0; }
+.mode-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:22px 24px; }
+.mode-card .mode-icon { font-size:28px; margin-bottom:10px; }
+.mode-card h3 { margin:0 0 10px; font-size:15px; color:var(--text); }
+.mode-card p { font-size:13px; margin:0 0 10px; }
+.mode-card ul { font-size:13px; margin:0; gap:4px; }
 
 .feature-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; margin:24px 0; }
 .feature-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:18px 20px; }
@@ -79,12 +87,13 @@ footer a { color:var(--accent2); text-decoration:none; }
 
 <nav>
   <span class="brand">Dilution Designer</span>
+  <span class="mantra">Built with passion for science and discovery</span>
   <a class="tool-link" href="index.html">Open the tool →</a>
 </nav>
 
 <div class="hero">
   <h1>Design your 96-well plate<br><span>in minutes, not hours</span></h1>
-  <p>A free, browser-based tool for calculating dilution volumes, visualizing plate layouts, and exporting bench-ready instructions — built by a scientist who got tired of doing this math from scratch.</p>
+  <p>A free, browser-based tool for planning any 96-well plate experiment — dose-response, growth inhibition, phage infection, dye assays, and more. Paint wells directly, calculate volumes, export to CSV. No login. No install.</p>
   <a class="hero-cta" href="index.html">Launch Dilution Designer →</a>
   <div class="hero-sub">No login. No install. Runs entirely in your browser. Free forever.</div>
 </div>
@@ -94,7 +103,7 @@ footer a { color:var(--accent2); text-decoration:none; }
   <h2>Why I built this</h2>
 
   <p>
-    I use 96-well plates regularly in a plate reader — dose-response assays, growth inhibition curves, dye uptake experiments. Every time I sit down to design a new experiment, I end up doing the same mental gymnastics: <em>how much stock do I need per well? how many wells do I have for this replicate count? does this volume even pipette reliably?</em>
+    I use 96-well plates regularly in a plate reader — dose-response assays, growth inhibition curves, dye uptake experiments, phage infection assays. Every time I sit down to design a new experiment, I end up doing the same mental gymnastics: <em>how much stock do I need per well? how many wells do I have for this replicate count? does this volume even pipette reliably?</em>
   </p>
 
   <p>
@@ -102,60 +111,104 @@ footer a { color:var(--accent2); text-decoration:none; }
   </p>
 
   <p>
-    I also change things constantly. A colleague asks to borrow a row for their control. My stock concentration changes. I want to add a replicate. I needed a tool that lets me adjust things on the fly and see the effects instantly — without re-doing a spreadsheet from scratch.
+    I also change things constantly. A colleague asks to borrow a row for their control. My stock concentration changes. I want to add a replicate. I want to design a phage infection with different MOIs across the same plate. I needed a tool that lets me adjust things on the fly and see the effects instantly — without re-doing a spreadsheet from scratch.
   </p>
 
   <div class="callout">
     Dilution Designer was built for exactly this: fast, flexible experiment planning for anyone who works with 96-well plates. No account, no subscription, no install — just open the page and start planning.
   </div>
 
+  <h2>Two experiment modes</h2>
+
+  <div class="mode-grid">
+    <div class="mode-card">
+      <div class="mode-icon">⚗️</div>
+      <h3>Plasmid / Induction Mode</h3>
+      <p>For concentration-gradient experiments: antibiotics, inducers (IPTG, doxycycline), small molecules, dyes, enzymes.</p>
+      <ul>
+        <li>Set stock concentration and target concentrations</li>
+        <li>Volumes calculated per well (compound + culture)</li>
+        <li>Master mix table with 10% overage</li>
+        <li>Intermediate stock support for high concentrations</li>
+        <li>Pipettability warnings for tricky volumes</li>
+      </ul>
+    </div>
+    <div class="mode-card">
+      <div class="mode-icon">🦠</div>
+      <h3>Phage Infection Mode</h3>
+      <p>For MOI-based infection assays: phage dose-response, host range testing, plaque formation, infection efficiency.</p>
+      <ul>
+        <li>Enter bacterial concentration and phage titer</li>
+        <li>Set target MOI per condition</li>
+        <li>Exact phage volume per well calculated automatically</li>
+        <li>Built-in MOI calculator for quick single-well checks</li>
+        <li>Serial dilution planner for prep from stock</li>
+      </ul>
+    </div>
+  </div>
+
   <h2>What it does</h2>
 
   <div class="feature-grid">
     <div class="feature-card">
-      <div class="icon">⚗️</div>
-      <h3>Volume calculations</h3>
-      <p>Enter your stock concentration and target concentrations — the tool calculates exactly how much compound and culture to add to each well, with pipettability warnings for tricky volumes.</p>
+      <div class="icon">🎨</div>
+      <h3>Interactive plate painting</h3>
+      <p>Four tools: <strong>Paint</strong> (assign a condition to any well), <strong>Replicate</strong> (drag horizontally or vertically to fill a run of wells with the same condition), <strong>Erase</strong>, and <strong>Exclude</strong>. Click or drag directly on the plate map.</p>
     </div>
     <div class="feature-card">
-      <div class="icon">🗺️</div>
-      <h3>Live plate map</h3>
-      <p>See your experiment on a full 96-well plate in real time. Colors, replicate labels, and concentration values update instantly as you change inputs.</p>
+      <div class="icon">🧬</div>
+      <h3>Gen5-style plate layout</h3>
+      <p>Large square wells (inspired by Biotek Gen5 software), well IDs visible in each cell (A1–H12), clear condition color fill. Each replicate is shown as its own independent well — never summed or collapsed.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🔬</div>
+      <h3>MOI calculator</h3>
+      <p>Standalone calculator in the sidebar: enter bacterial concentration (CFU/mL), phage titer (PFU/mL), desired MOI, and infection volume — get the exact phage volume to add in µL.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">💉</div>
+      <h3>Serial dilution planner</h3>
+      <p>Plan a dilution series from stock to working titer. Set your minimum pipettable volume — the planner enforces it at every step and outputs a complete recipe with transfer and diluent volumes.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🌙</div>
+      <h3>Three UI themes</h3>
+      <p><strong>Day</strong> (bright, high-contrast), <strong>Night</strong> (dark mode), and <strong>Ambient</strong> (warm, low-contrast — easy on the eyes during long bench sessions). Toggle in the header.</p>
     </div>
     <div class="feature-card">
       <div class="icon">🎨</div>
       <h3>Fully customizable colors</h3>
-      <p>Click any condition swatch or control dot to open a color picker. Choose from a palette or enter a custom hex code — the plate map updates live.</p>
+      <p>Click any condition swatch or control dot to open a color picker. Choose from a quick palette or enter a custom hex code — the plate map updates live.</p>
     </div>
     <div class="feature-card">
       <div class="icon">🚫</div>
       <h3>Exclude wells, rows, or columns</h3>
-      <p>Click the row/column buttons to exclude entire rows or columns. Or click and drag directly on the plate to exclude individual wells — concentrations automatically redistribute.</p>
-    </div>
-    <div class="feature-card">
-      <div class="icon">📐</div>
-      <h3>6 fill order modes</h3>
-      <p>By column (top→bottom or bottom→top), by row (left→right or right→left), snake/serpentine, or spread (replicates distributed evenly across the plate).</p>
+      <p>Click row/column buttons to exclude entire rows or columns. Or use the Exclude tool and drag directly on the plate to mark individual wells as off-limits. Excluded wells show a striped pattern and are omitted from all calculations.</p>
     </div>
     <div class="feature-card">
       <div class="icon">🧫</div>
       <h3>Controls & blanks</h3>
-      <p>Toggle negative controls, media blanks, culture blanks, and positive controls — each with their own replicate count and color. Add custom controls for any use case.</p>
+      <p>Toggle negative controls, media blanks, culture blanks, and positive controls — each with their own color. Add custom controls for any use case.</p>
     </div>
     <div class="feature-card">
       <div class="icon">📋</div>
       <h3>Master mix table</h3>
-      <p>Automatically calculates master mix volumes with 10% overage so you don't run out mid-experiment.</p>
+      <p>Automatically calculates master mix volumes with 10% overage so you don't run out mid-experiment. Groups by condition and lists all well IDs in each group.</p>
     </div>
     <div class="feature-card">
       <div class="icon">📤</div>
       <h3>Export options</h3>
-      <p>Download a CSV with all per-well volumes and master mix data, copy a plain-text summary to clipboard, print the full protocol, or print just the plate map.</p>
+      <p>Download a minimal CSV (plate map + per-well volumes — no extra clutter), copy a plain-text summary, print the full protocol, or print just the plate map to take to the bench.</p>
     </div>
     <div class="feature-card">
       <div class="icon">🧪</div>
       <h3>Intermediate stock support</h3>
       <p>If your stock is too concentrated to pipette directly, switch to intermediate stock mode and get a recipe for making the right dilution first.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🏷️</div>
+      <h3>Compound / reagent name</h3>
+      <p>Name your compound or reagent — it appears throughout the protocol, legend, bench instructions, and CSV header so your exports are self-documenting.</p>
     </div>
   </div>
 
@@ -168,27 +221,38 @@ footer a { color:var(--accent2); text-decoration:none; }
   <ul>
     <li><strong>Dose-response / IC50 assays</strong> — antibiotics, small molecules, enzymes, toxins</li>
     <li><strong>Growth inhibition assays</strong> — MIC determination, antifungals, phage</li>
+    <li><strong>Phage infection assays</strong> — MOI dose-response, host range, infection efficiency</li>
     <li><strong>Dye uptake assays</strong> — crystal violet, propidium iodide, fluorescent dyes</li>
-    <li><strong>Reporter assays</strong> — GFP/luciferase induction curves with inducers like IPTG or doxycycline</li>
+    <li><strong>Reporter assays</strong> — GFP/luciferase induction curves with IPTG or doxycycline</li>
     <li><strong>Enzyme kinetics</strong> — substrate titration, inhibitor dose-response</li>
     <li><strong>Cell viability assays</strong> — MTT, alamarBlue, resazurin</li>
-    <li><strong>Any experiment where you're testing a compound at multiple concentrations with replicates</strong></li>
+    <li><strong>Any experiment where you're testing conditions at multiple levels with replicates</strong></li>
   </ul>
 
   <h2>How to use it</h2>
 
+  <h3>Plasmid / induction experiments</h3>
   <ol>
-    <li><strong>Enter your compound name</strong> — first field in the sidebar. This appears throughout the protocol and exports.</li>
-    <li><strong>Set your stock concentration and culture volume per well</strong> — the math is based on these.</li>
-    <li><strong>Add target concentrations</strong> — type them one by one, or use a preset dilution series (2×, log-ish, linear).</li>
-    <li><strong>Configure replicates and fill order</strong> — choose how many replicates per condition and how the plate fills.</li>
-    <li><strong>Exclude any wells, rows, or columns</strong> you don't want to use — click row/column buttons or drag on the plate map.</li>
+    <li><strong>Select Plasmid mode</strong> from the mode toggle at the top of the sidebar.</li>
+    <li><strong>Enter your compound name</strong> — appears throughout the protocol and exports.</li>
+    <li><strong>Set your stock concentration and culture volume per well.</strong></li>
+    <li><strong>Add conditions</strong> — type target concentrations. Each appears in the palette.</li>
+    <li><strong>Paint the plate</strong> — select a condition from the palette, pick the Paint or Replicate tool, and click/drag wells to assign them.</li>
     <li><strong>Toggle controls</strong> as needed — negative control, blanks, positive control, or add a custom one.</li>
-    <li><strong>Export</strong> — download the CSV, print the full protocol, or print just the plate map to take to the bench.</li>
+    <li><strong>Export</strong> — download the CSV, print the full protocol, or print the plate map.</li>
+  </ol>
+
+  <h3>Phage infection experiments</h3>
+  <ol>
+    <li><strong>Select Phage mode</strong> from the mode toggle.</li>
+    <li><strong>Enter your bacterial concentration</strong> (CFU/mL), <strong>phage titer</strong> (PFU/mL), and <strong>infection volume per well</strong> (µL).</li>
+    <li><strong>Add MOI conditions</strong> — each condition represents a target MOI. The phage volume to add is calculated automatically.</li>
+    <li><strong>Use the serial dilution planner</strong> if you need to prepare working titer from a concentrated stock — set your minimum pipettable volume and get a step-by-step recipe.</li>
+    <li><strong>Paint the plate and export</strong> — same as Plasmid mode.</li>
   </ol>
 
   <div class="callout">
-    Tip: everything updates live. Change your stock concentration, add a condition, switch fill direction — the plate map, volume table, and bench instructions all update instantly. You don't need to "submit" anything.
+    Tip: everything updates live. Change your stock concentration, repaint a well, switch modes, toggle a theme — the plate map, volume table, and bench instructions all update instantly. You don't need to "submit" anything.
   </div>
 
   <hr>
@@ -229,7 +293,7 @@ footer a { color:var(--accent2); text-decoration:none; }
 </div>
 
 <footer>
-  <p>Dilution Designer — built for scientists who use 96-well plates &nbsp;·&nbsp; <a href="index.html">Open the tool</a> &nbsp;·&nbsp; <a href="https://github.com/mbaffour/dilution-designer" target="_blank" rel="noopener">GitHub</a></p>
+  <p>Dilution Designer — built with passion for science and discovery &nbsp;·&nbsp; <a href="index.html">Open the tool</a> &nbsp;·&nbsp; <a href="https://github.com/mbaffour/dilution-designer" target="_blank" rel="noopener">GitHub</a></p>
 </footer>
 
 </body>
