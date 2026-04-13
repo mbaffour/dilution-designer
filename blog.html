@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dilution Designer — A Free Tool for 96-Well Plate Experiments</title>
-<meta name="description" content="Dilution Designer is a free, browser-based tool for planning 96-well plate experiments. Plasmid/induction mode, phage infection mode, MOI calculator, serial dilution planner, Gen5-style plate layout, and more — built by a scientist for scientists.">
+<meta name="description" content="Dilution Designer is a free, browser-based tool for planning 96-well plate experiments. Undo/redo, auto-save, JSON save/load, PNG export, input validation, plasmid and phage infection modes, MOI calculator, serial dilution planner — built by a scientist for scientists.">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -93,7 +93,7 @@ footer a { color:var(--accent2); text-decoration:none; }
 
 <div class="hero">
   <h1>Design your 96-well plate<br><span>in minutes, not hours</span></h1>
-  <p>A free, browser-based tool for planning any 96-well plate experiment — dose-response, growth inhibition, phage infection, dye assays, and more. Paint wells directly, calculate volumes, export to CSV. No login. No install.</p>
+  <p>A free, browser-based tool for planning any 96-well plate experiment — dose-response, growth inhibition, phage infection, dye assays, and more. Paint wells directly, calculate volumes, undo mistakes, save your work, and export to CSV or PNG. No login. No install.</p>
   <a class="hero-cta" href="index.html">Launch Dilution Designer →</a>
   <div class="hero-sub">No login. No install. Runs entirely in your browser. Free forever.</div>
 </div>
@@ -156,9 +156,34 @@ footer a { color:var(--accent2); text-decoration:none; }
       <p>Four tools: <strong>Paint</strong> (assign a condition to any well), <strong>Replicate</strong> (drag horizontally or vertically to fill a run of wells with the same condition), <strong>Erase</strong>, and <strong>Exclude</strong>. Click or drag directly on the plate map.</p>
     </div>
     <div class="feature-card">
+      <div class="icon">↩</div>
+      <h3>Undo / Redo</h3>
+      <p><strong>Ctrl+Z</strong> undoes any paint, erase, exclude, or condition change — up to 30 steps back. <strong>Ctrl+Y</strong> (or Ctrl+Shift+Z) redoes. Toolbar buttons too. One drag stroke = one undo action, no matter how many wells you swept.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">💾</div>
+      <h3>Auto-save + JSON save/load</h3>
+      <p>Your plate, conditions, and settings are <strong>automatically saved</strong> to the browser — reload the page and everything is exactly where you left it. Use <strong>💾 Save</strong> to download a <code>.json</code> file and <strong>📂 Load</strong> to restore it on any device.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🖼</div>
+      <h3>Plate PNG export</h3>
+      <p>Download a crisp, retina-quality image of your plate map — condition colors, well IDs, and a footer with experiment name and date. Ready to drop into a notebook, slide, or report.</p>
+    </div>
+    <div class="feature-card">
       <div class="icon">🧬</div>
       <h3>Gen5-style plate layout</h3>
       <p>Large square wells (inspired by Biotek Gen5 software), well IDs visible in each cell (A1–H12), clear condition color fill. Each replicate is shown as its own independent well — never summed or collapsed.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🔍</div>
+      <h3>Calculation breakdown tooltip</h3>
+      <p>Hover any filled well to see a floating tooltip with the exact formula used — numbers plugged in. For plasmid mode: <em>(target ÷ stock) × well vol = X µL</em>. For phage mode: <em>(MOI × cells × vol) ÷ titer = X µL</em>. No more guessing how a volume was calculated.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">⚠️</div>
+      <h3>Input validation</h3>
+      <p>Enter an impossible value — zero stock concentration, an intermediate that exceeds your stock, a negative titer — and you get a <strong>red border with an inline error</strong> immediately. Volume warnings appear when your planned pipetting would exceed the stock or culture you have available.</p>
     </div>
     <div class="feature-card">
       <div class="icon">🔬</div>
@@ -173,7 +198,7 @@ footer a { color:var(--accent2); text-decoration:none; }
     <div class="feature-card">
       <div class="icon">🌙</div>
       <h3>Three UI themes</h3>
-      <p><strong>Day</strong> (bright, high-contrast), <strong>Night</strong> (dark mode), and <strong>Ambient</strong> (warm, low-contrast — easy on the eyes during long bench sessions). Toggle in the header.</p>
+      <p><strong>Day</strong> (bright, high-contrast), <strong>Night</strong> (dark mode), and <strong>Ambient</strong> (warm, low-contrast — easy on the eyes during long bench sessions). Toggle in the header. Your choice is remembered.</p>
     </div>
     <div class="feature-card">
       <div class="icon">🎨</div>
@@ -198,7 +223,7 @@ footer a { color:var(--accent2); text-decoration:none; }
     <div class="feature-card">
       <div class="icon">📤</div>
       <h3>Export options</h3>
-      <p>Download a minimal CSV (plate map + per-well volumes — no extra clutter), copy a plain-text summary, print the full protocol, or print just the plate map to take to the bench.</p>
+      <p>Download a <strong>JSON</strong> (full experiment state), <strong>CSV</strong> (full or minimal), or <strong>PNG</strong> plate image. Copy a plain-text protocol summary, print the full bench report, or print just the plate map.</p>
     </div>
     <div class="feature-card">
       <div class="icon">🧪</div>
@@ -208,7 +233,7 @@ footer a { color:var(--accent2); text-decoration:none; }
     <div class="feature-card">
       <div class="icon">🏷️</div>
       <h3>Compound / reagent name</h3>
-      <p>Name your compound or reagent — it appears throughout the protocol, legend, bench instructions, and CSV header so your exports are self-documenting.</p>
+      <p>Name your compound or reagent — it appears throughout the protocol, legend, bench instructions, CSV header, and PNG footer so your exports are self-documenting.</p>
     </div>
   </div>
 
@@ -233,26 +258,26 @@ footer a { color:var(--accent2); text-decoration:none; }
 
   <h3>Plasmid / induction experiments</h3>
   <ol>
-    <li><strong>Select Plasmid mode</strong> from the mode toggle at the top of the sidebar.</li>
-    <li><strong>Enter your compound name</strong> — appears throughout the protocol and exports.</li>
-    <li><strong>Set your stock concentration and culture volume per well.</strong></li>
-    <li><strong>Add conditions</strong> — type target concentrations. Each appears in the palette.</li>
-    <li><strong>Paint the plate</strong> — select a condition from the palette, pick the Paint or Replicate tool, and click/drag wells to assign them.</li>
+    <li><strong>Select Plasmid mode</strong> from the mode toggle at the top of the header.</li>
+    <li><strong>Enter your compound name</strong> — appears throughout the protocol, legend, and all exports.</li>
+    <li><strong>Set your stock concentration and culture volume per well.</strong> The tool validates these in real time and warns you if something is off.</li>
+    <li><strong>Add conditions</strong> — click <em>+ Add condition</em>, enter a target concentration, pick a color. Each condition appears in the palette.</li>
+    <li><strong>Paint the plate</strong> — select a condition, pick the Paint or Replicate tool, and click/drag wells to assign them. Hover any filled well to see the exact formula used to calculate its volumes.</li>
     <li><strong>Toggle controls</strong> as needed — negative control, blanks, positive control, or add a custom one.</li>
-    <li><strong>Export</strong> — download the CSV, print the full protocol, or print the plate map.</li>
+    <li><strong>Export</strong> — 💾 Save to JSON, download CSV, export a PNG image, or print the full protocol.</li>
   </ol>
 
   <h3>Phage infection experiments</h3>
   <ol>
     <li><strong>Select Phage mode</strong> from the mode toggle.</li>
     <li><strong>Enter your bacterial concentration</strong> (CFU/mL), <strong>phage titer</strong> (PFU/mL), and <strong>infection volume per well</strong> (µL).</li>
-    <li><strong>Add MOI conditions</strong> — each condition represents a target MOI. The phage volume to add is calculated automatically.</li>
+    <li><strong>Add MOI conditions</strong> — each condition represents a target MOI. The phage volume to add is calculated automatically per well.</li>
     <li><strong>Use the serial dilution planner</strong> if you need to prepare working titer from a concentrated stock — set your minimum pipettable volume and get a step-by-step recipe.</li>
-    <li><strong>Paint the plate and export</strong> — same as Plasmid mode.</li>
+    <li><strong>Paint the plate and export</strong> — same as Plasmid mode. The MOI panel below the plate shows per-condition totals.</li>
   </ol>
 
   <div class="callout">
-    Tip: everything updates live. Change your stock concentration, repaint a well, switch modes, toggle a theme — the plate map, volume table, and bench instructions all update instantly. You don't need to "submit" anything.
+    <strong>Tips:</strong> Everything updates live — no submit button. Use <strong>Ctrl+Z</strong> to undo any mistake. Your experiment <strong>auto-saves</strong> to the browser and restores on reload. Use <strong>💾 Save</strong> to download a <code>.json</code> file you can reload on any computer. Hover any filled well to see the <strong>calculation breakdown</strong> with your actual numbers.
   </div>
 
   <hr>
