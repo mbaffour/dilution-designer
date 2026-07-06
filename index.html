@@ -995,7 +995,11 @@ function calcWellData(r,c,p){
     const iv=hasInd&&src>0?(targetConc/src)*p.cultureVol:0;
     const cv=cond.type==='blank'?0:Math.max(0,p.cultureVol-iv);
     const mv=cond.type==='blank'?Math.max(0,p.cultureVol-iv):0;
-    return{wellId,cond,conc:targetConc,cultVol:cv,mediaVol:mv,indVol:iv,finalVol:cv+mv+iv,pip:pipCheck(iv,targetConc)};
+    // Physically-impossible case: target > source stock. The required compound volume
+    // (iv) then exceeds the culture volume, so the target concentration cannot be reached
+    // by dilution. Surface a clear danger warning instead of silently under-delivering.
+    const pip=hasInd&&src>0&&targetConc>src?{label:'target > stock — impossible',cls:'bd'}:pipCheck(iv,targetConc);
+    return{wellId,cond,conc:targetConc,cultVol:cv,mediaVol:mv,indVol:iv,finalVol:cv+mv+iv,pip};
   } else {
     const moi=cond.moi||0;
     const phageVol=moi>0?(moi*p.bacterialConc*p.infVol)/p.phageTiter:0;
@@ -1585,11 +1589,12 @@ function loadJSON(event){
 const _LAYOUTS_KEY='dd_layouts';
 function _readLayouts(){try{return JSON.parse(localStorage.getItem(_LAYOUTS_KEY)||'{}')||{};}catch(e){return{};}}
 function _writeLayouts(obj){try{localStorage.setItem(_LAYOUTS_KEY,JSON.stringify(obj));}catch(e){}}
+function _escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function refreshLayoutSelect(){
   const sel=document.getElementById('layoutSelect');if(!sel)return;
   const names=Object.keys(_readLayouts()).sort((a,b)=>a.localeCompare(b));
   const cur=sel.value;
-  sel.innerHTML='<option value="">Saved layouts…</option>'+names.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">${n}</option>`).join('');
+  sel.innerHTML='<option value="">Saved layouts…</option>'+names.map(n=>`<option value="${_escHtml(n)}">${_escHtml(n)}</option>`).join('');
   if(names.includes(cur))sel.value=cur;
 }
 function saveNamedLayout(){
