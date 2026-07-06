@@ -287,6 +287,12 @@ body.print-plate-mode .excl-bar{display:none!important;}
   <div class="hactions">
     <button class="btn" onclick="saveJSON()" title="Save experiment to file">💾 Save</button>
     <label class="btn" style="cursor:pointer;" title="Load experiment from file">📂 Load<input type="file" accept=".json" id="loadJSONInput" style="display:none;" onchange="loadJSON(event)"></label>
+    <span class="btn" style="cursor:default;padding:0;border:none;background:none;display:inline-flex;gap:4px;align-items:center;">
+      <select id="layoutSelect" title="Saved layouts in this browser" style="max-width:150px;font-family:var(--mono);font-size:11px;padding:4px 6px;"><option value="">Saved layouts…</option></select>
+      <button class="btn" onclick="loadNamedLayout()" title="Load selected saved layout">Open</button>
+      <button class="btn" onclick="saveNamedLayout()" title="Save current experiment as a named layout in this browser">＋ Save layout</button>
+      <button class="btn" onclick="deleteNamedLayout()" title="Delete selected saved layout">🗑</button>
+    </span>
     <button class="btn" onclick="exportPlatePNG()" title="Export plate as PNG image">🖼 PNG</button>
     <button class="btn" onclick="copyText()">Copy</button>
     <button class="btn" onclick="downloadCSV()">CSV</button>
@@ -382,6 +388,17 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <div id="paletteList"></div>
     <div style="display:flex;gap:6px;margin-top:4px;">
       <button class="addbtn" onclick="openCondModal(null)" style="flex:1;padding:7px;">+ Add condition</button>
+    </div>
+    <!-- SERIAL-DILUTION CONDITION GENERATOR (plasmid mode) -->
+    <div id="serialGenPanel" style="margin-top:8px;">
+      <div class="sl" style="margin-top:4px;">Serial-dilution series</div>
+      <div class="r2">
+        <div class="f"><label>Top concentration</label><input type="number" id="sgTop" value="10000" min="0" step="any"><span class="h" id="sgUnitsHint">nM</span></div>
+        <div class="f"><label>Dilution factor</label><input type="number" id="sgFactor" value="2" min="1.01" step="any"></div>
+      </div>
+      <div class="f"><label>Number of points</label><input type="number" id="sgPoints" value="8" min="1" max="12" step="1"></div>
+      <button class="addbtn" onclick="generateSerialConditions()" style="width:100%;padding:7px;" title="Create a set of conditions stepped down by the dilution factor">+ Generate series</button>
+      <div class="ibox" style="margin-top:4px;font-size:10px;">Adds N conditions (e.g. 10000, 5000, 2500…) so you can paint a full dose-response gradient in seconds. Existing conditions are kept.</div>
     </div>
   </div>
 
@@ -670,6 +687,8 @@ function setMode(m) {
   document.getElementById('stepsPanel').style.display= m==='plasmid'?'':'none';
   document.getElementById('compLabel').textContent   = m==='plasmid'?'Compound / reagent name':'Phage / sample name';
   document.getElementById('palTitle').textContent    = m==='plasmid'?'Conditions & controls':'MOI groups & controls';
+  const sgPanel=document.getElementById('serialGenPanel');
+  if(sgPanel)sgPanel.style.display = m==='plasmid'?'':'none';
   renderPalette();
   update();
 }
@@ -837,6 +856,33 @@ function buildFillOrder(){
   return pos;
 }
 
+// ── SERIAL-DILUTION CONDITION GENERATOR (plasmid mode) ──
+// Creates a set of `cond` entries stepped down from a top concentration by a
+// fixed dilution factor, so a full dose-response gradient can be painted quickly.
+// Additive: existing conditions/controls are preserved.
+function generateSerialConditions(){
+  if(appMode!=='plasmid'){showToast('Serial-dilution series is available in Plasmid / Induction mode','warn');return;}
+  const top=parseFloat(document.getElementById('sgTop').value);
+  const factor=parseFloat(document.getElementById('sgFactor').value);
+  const points=Math.max(1,Math.min(12,parseInt(document.getElementById('sgPoints').value,10)||0));
+  if(!top||top<=0){showToast('Top concentration must be > 0','warn');return;}
+  if(!factor||factor<=1){showToast('Dilution factor must be > 1','warn');return;}
+  snapshotForUndo();
+  const units=(document.getElementById('concUnits')||{}).value||'nM';
+  let firstNewId=null;
+  for(let i=0;i<points;i++){
+    const conc=top/Math.pow(factor,i);
+    const rounded=conc>=1?Math.round(conc*100)/100:parseFloat(conc.toPrecision(3));
+    _condIdCounter++;
+    const newId='c'+_condIdCounter;
+    if(!firstNewId)firstNewId=newId;
+    palette.push({id:newId,name:`${rounded} ${units}`,conc:rounded,moi:0,color:CC[(palette.length)%CC.length],type:'cond',builtin:false});
+  }
+  if(firstNewId)setActiveCondId(firstNewId);
+  renderPalette();renderPlate();update();
+  showToast(`✓ Added ${points} serial-dilution conditions`,'green');
+}
+
 // ── EXCLUSION ──
 function toggleRowExclusion(r){snapshotForUndo();const a=Array.from({length:12},(_,c)=>excludedWells.has(`${r},${c}`)).every(Boolean);for(let c=0;c<12;c++){if(a)excludedWells.delete(`${r},${c}`);else excludedWells.add(`${r},${c}`);}renderPlate();update();}
 function toggleColExclusion(c){snapshotForUndo();const a=Array.from({length:8},(_,r)=>excludedWells.has(`${r},${c}`)).every(Boolean);for(let r=0;r<8;r++){if(a)excludedWells.delete(`${r},${c}`);else excludedWells.add(`${r},${c}`);}renderPlate();update();}
@@ -941,9 +987,14 @@ function calcWellData(r,c,p){
     const maxCond=palette.filter(x=>x.type==='cond').reduce((m,x)=>Math.max(m,x.conc||0),0);
     const targetConc=cond.type==='pos'?maxCond:(cond.conc||0);
     const hasInd=cond.type==='cond'||cond.type==='pos';
+    // Volume-conserving dilution: the well's FINAL volume equals cultureVol.
+    // Deliver iv µL of compound at `src` concentration into a final volume of cultureVol,
+    // so delivered conc = iv*src/cultureVol = targetConc  →  iv = (targetConc/src)*cultureVol.
+    // The compound volume is taken OUT of the aliquot (culture for cond, media for blank),
+    // never added on top — otherwise the delivered concentration would be diluted below target.
     const iv=hasInd&&src>0?(targetConc/src)*p.cultureVol:0;
-    const cv=cond.type==='blank'?0:p.cultureVol;
-    const mv=cond.type==='blank'?p.cultureVol:0;
+    const cv=cond.type==='blank'?0:Math.max(0,p.cultureVol-iv);
+    const mv=cond.type==='blank'?Math.max(0,p.cultureVol-iv):0;
     return{wellId,cond,conc:targetConc,cultVol:cv,mediaVol:mv,indVol:iv,finalVol:cv+mv+iv,pip:pipCheck(iv,targetConc)};
   } else {
     const moi=cond.moi||0;
@@ -1205,6 +1256,7 @@ function update(){
   const wells=errors.length===0?getAllWells(p):[];
   document.getElementById('expBadge').textContent=p.expName?p.expName:'';
   document.getElementById('unitsHint').textContent=p.units;
+  const sgUnits=document.getElementById('sgUnitsHint');if(sgUnits)sgUnits.textContent=p.units;
   document.getElementById('directNoteCompound').textContent=p.inducerName||'Compound';
   renderPlate();
   renderMetrics(p,wells);
@@ -1449,15 +1501,16 @@ function buildCalcBreakdown(ri,ci,p){
     const maxCond=palette.filter(x=>x.type==='cond').reduce((m,x)=>Math.max(m,x.conc||0),0);
     const targetConc=cond.type==='pos'?maxCond:(cond.conc||0);
     const hasInd=cond.type==='cond'||cond.type==='pos';
+    // Volume-conserving: compound is taken out of the aliquot, final volume stays = cultureVol.
     const iv=hasInd&&src>0?(targetConc/src)*p.cultureVol:0;
-    const cv=cond.type==='blank'?0:p.cultureVol;
+    const cv=cond.type==='blank'?0:Math.max(0,p.cultureVol-iv);
     const lines=[`${wellId}  ·  ${cond.name}  ·  ${cond.type}`,''];
     if(hasInd&&src>0){
       lines.push(`${p.inducerName||'Compound'} vol:`);
       lines.push(`  (${targetConc} ${p.units} ÷ ${src} ${p.units}) × ${p.cultureVol} µL`);
       lines.push(`  = ${iv.toFixed(3)} µL  [from ${srcLbl}]`,'');
     }
-    lines.push(`Culture: ${cv>0?cv+' µL':'— (blank)'}`);
+    lines.push(`Culture: ${cv>0?cv.toFixed(2)+' µL':'— (blank)'}${hasInd&&iv>0?`  (${p.cultureVol} − ${iv.toFixed(3)})`:''}`);
     lines.push(`Final vol: ${(cv+iv).toFixed(2)} µL`);
     return lines.join('\n');
   } else {
@@ -1489,38 +1542,89 @@ function saveJSON(){
   _dl(JSON.stringify(_mkPayload(),null,2),`dd-${name}-${date}.json`,'application/json');
   showToast('✓ Experiment saved','green');
 }
+// Apply a saved payload (from a file or a named layout) to the live app state.
+function _applyState(s){
+  if(!s.version||!s.wellAssignments)throw new Error('Invalid');
+  if(s.appMode)appMode=s.appMode;
+  if(s.appTheme){appTheme=s.appTheme;document.body.dataset.theme=s.appTheme;}
+  if(s.intmMode)intmMode=s.intmMode;
+  if(s.activeTool)activeTool=s.activeTool;
+  if(s.repToolN)repToolN=s.repToolN;
+  if(s.repToolDir)repToolDir=s.repToolDir;
+  if(s.autoReps)autoReps=s.autoReps;
+  if(s.showReps!=null)showReps=s.showReps;
+  wellAssignments=s.wellAssignments.map(r=>[...r]);
+  excludedWells=new Set(s.excludedWells||[]);
+  palette=s.palette;
+  _condIdCounter=s._condIdCounter||0;
+  if(s.fields)Object.entries(s.fields).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
+  setMode(appMode);setTheme(appTheme);setTool(activeTool);setIntm(intmMode);
+  document.getElementById('repNDisplay').textContent=repToolN;
+  document.getElementById('autoRepsDisplay').textContent=autoReps;
+  document.getElementById('repLabelBtn').textContent=`Labels: ${showReps?'on':'off'}`;
+  const ic=document.getElementById('intmConc');
+  if(ic){const v=parseFloat(ic.value)||0;document.getElementById('intmSlider').value=Math.min(10000,v);document.getElementById('slv').textContent=v.toLocaleString();}
+  renderPalette();renderPlate();update();
+}
 function loadJSON(event){
   const file=event.target.files[0];if(!file)return;
   const reader=new FileReader();
   reader.onload=e=>{
     try{
-      const s=JSON.parse(e.target.result);
-      if(!s.version||!s.wellAssignments)throw new Error('Invalid');
-      if(s.appMode)appMode=s.appMode;
-      if(s.appTheme){appTheme=s.appTheme;document.body.dataset.theme=s.appTheme;}
-      if(s.intmMode)intmMode=s.intmMode;
-      if(s.activeTool)activeTool=s.activeTool;
-      if(s.repToolN)repToolN=s.repToolN;
-      if(s.repToolDir)repToolDir=s.repToolDir;
-      if(s.autoReps)autoReps=s.autoReps;
-      if(s.showReps!=null)showReps=s.showReps;
-      wellAssignments=s.wellAssignments.map(r=>[...r]);
-      excludedWells=new Set(s.excludedWells||[]);
-      palette=s.palette;
-      _condIdCounter=s._condIdCounter||0;
-      if(s.fields)Object.entries(s.fields).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
-      setMode(appMode);setTheme(appTheme);setTool(activeTool);setIntm(intmMode);
-      document.getElementById('repNDisplay').textContent=repToolN;
-      document.getElementById('autoRepsDisplay').textContent=autoReps;
-      document.getElementById('repLabelBtn').textContent=`Labels: ${showReps?'on':'off'}`;
-      const ic=document.getElementById('intmConc');
-      if(ic){const v=parseFloat(ic.value)||0;document.getElementById('intmSlider').value=Math.min(10000,v);document.getElementById('slv').textContent=v.toLocaleString();}
-      renderPalette();renderPlate();update();
+      _applyState(JSON.parse(e.target.result));
       showToast('✓ Experiment loaded','green');
     }catch(err){showToast('Could not load — invalid file','warn');}
   };
   reader.readAsText(file);
   event.target.value='';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// NAMED LAYOUTS (multiple named slots in localStorage, beyond autosave)
+// ══════════════════════════════════════════════════════════════════
+const _LAYOUTS_KEY='dd_layouts';
+function _readLayouts(){try{return JSON.parse(localStorage.getItem(_LAYOUTS_KEY)||'{}')||{};}catch(e){return{};}}
+function _writeLayouts(obj){try{localStorage.setItem(_LAYOUTS_KEY,JSON.stringify(obj));}catch(e){}}
+function refreshLayoutSelect(){
+  const sel=document.getElementById('layoutSelect');if(!sel)return;
+  const names=Object.keys(_readLayouts()).sort((a,b)=>a.localeCompare(b));
+  const cur=sel.value;
+  sel.innerHTML='<option value="">Saved layouts…</option>'+names.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">${n}</option>`).join('');
+  if(names.includes(cur))sel.value=cur;
+}
+function saveNamedLayout(){
+  const p=P();
+  const suggested=(p.expName||'').trim();
+  const name=(window.prompt('Save layout as (name):',suggested)||'').trim();
+  if(!name)return;
+  const layouts=_readLayouts();
+  if(layouts[name]&&!window.confirm(`Overwrite existing layout "${name}"?`))return;
+  layouts[name]=_mkPayload();
+  _writeLayouts(layouts);
+  refreshLayoutSelect();
+  document.getElementById('layoutSelect').value=name;
+  showToast(`✓ Layout "${name}" saved`,'green');
+}
+function loadNamedLayout(){
+  const name=document.getElementById('layoutSelect').value;
+  if(!name){showToast('Pick a saved layout first','warn');return;}
+  const s=_readLayouts()[name];
+  if(!s){showToast('Layout not found','warn');refreshLayoutSelect();return;}
+  try{
+    snapshotForUndo();
+    _applyState(s);
+    showToast(`✓ Layout "${name}" loaded`,'green');
+  }catch(err){showToast('Could not load layout','warn');}
+}
+function deleteNamedLayout(){
+  const name=document.getElementById('layoutSelect').value;
+  if(!name){showToast('Pick a saved layout first','warn');return;}
+  if(!window.confirm(`Delete saved layout "${name}"?`))return;
+  const layouts=_readLayouts();
+  delete layouts[name];
+  _writeLayouts(layouts);
+  refreshLayoutSelect();
+  showToast(`Layout "${name}" deleted`,'');
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1618,6 +1722,7 @@ if(_restored){
   renderPalette();
 }
 _ready=true;
+refreshLayoutSelect();
 update();
 showWelcomeBanner();
 </script>
