@@ -309,6 +309,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <button class="mode-tab" id="modeTabReagent" onclick="setMode('reagent')">Reagent Prep</button>
     <button class="mode-tab" id="modeTabDilcalc" onclick="setMode('dilcalc')">Dilution Calc</button>
     <button class="mode-tab" id="modeTabCalc" onclick="setMode('calc')">🧬 Calculators</button>
+    <button class="mode-tab" id="modeTabProto" onclick="setMode('proto')">📋 Protocols</button>
   </div>
   <div class="theme-group">
     <button class="theme-btn active" data-theme="day" onclick="setTheme('day')">Day</button>
@@ -496,6 +497,18 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div id="mbcList" class="mbc-list" role="listbox" aria-label="Calculators"></div>
     </aside>
     <section class="mbc-main" id="mbcMain"></section>
+  </div>
+</div>
+
+<!-- ══════════ PROTOCOLS MODULE ══════════ -->
+<div id="protoView" style="display:none;padding:16px 20px 60px;max-width:1180px;margin:0 auto;">
+  <div class="mbc-grid">
+    <aside class="mbc-nav">
+      <div class="sl">Protocols</div>
+      <input id="prSearch" placeholder="Search (e.g. miniprep, gel, plaque)…" oninput="PROTO.filter()" autocomplete="off" aria-label="Search protocols">
+      <div id="prList" class="mbc-list" role="listbox" aria-label="Protocols"></div>
+    </aside>
+    <section class="mbc-main" id="prMain"></section>
   </div>
 </div>
 
@@ -871,19 +884,22 @@ function setMode(m) {
   var mtD=document.getElementById('modeTabDilcalc'); if(mtD) mtD.classList.toggle('active',m==='dilcalc');
   var mtH=document.getElementById('modeTabHome'); if(mtH) mtH.classList.toggle('active',m==='home');
   var mtC=document.getElementById('modeTabCalc'); if(mtC) mtC.classList.toggle('active',m==='calc');
+  var mtP=document.getElementById('modeTabProto'); if(mtP) mtP.classList.toggle('active',m==='proto');
   // Home, Reagent Prep, Dilution Calc and Calculators are self-contained views — hide the plate workspace when active.
   var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView'), dv=document.getElementById('dilcalcView'),
-      hv=document.getElementById('homeView'), cv=document.getElementById('calcView');
-  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc');
+      hv=document.getElementById('homeView'), cv=document.getElementById('calcView'), pv=document.getElementById('protoView');
+  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto');
   if(rv) rv.style.display = m==='reagent'?'':'none';
   if(dv) dv.style.display = m==='dilcalc'?'':'none';
   if(hv) hv.style.display = m==='home'?'':'none';
   if(cv) cv.style.display = m==='calc'?'':'none';
+  if(pv) pv.style.display = m==='proto'?'':'none';
   if(appEl) appEl.style.display = special?'none':'';
   if(m==='reagent'){ rpInit(); return; }
   if(m==='dilcalc'){ dcInit(); return; }
   if(m==='home'){ if(window.renderHome) renderHome(); return; }
   if(m==='calc'){ if(window.MBC) MBC.init(); return; }
+  if(m==='proto'){ if(window.PROTO) PROTO.init(); return; }
   document.getElementById('sbPlasmid').style.display = m==='plasmid'?'':'none';
   document.getElementById('sbPhage').style.display   = m==='phage'?'':'none';
   document.getElementById('moiPanel').style.display  = m==='phage'?'':'none';
@@ -2983,8 +2999,9 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     var mods=[
       {m:'plasmid',icon:'🧫',title:'Plate Planner',desc:'Design 96 / 384 & multi-plate layouts — plasmid/induction & phage/MOI, master mix, randomization, bench checks.'},
       {m:'dilcalc',icon:'💧',title:'Dilution & Molarity',desc:'C1V1 across every unit, serial dilutions, molarity↔mass, and weigh-outs.'},
-      {m:'reagent',icon:'⚗️',title:'Reagent Prep',desc:'150+ verified buffer / media / stock recipes scaled to any volume, with printable prep sheets.'},
-      {m:'calc',icon:'🧬',title:'Molbio Calculators',desc:CALCS.length+' bench calculators: ng↔pmol, A260, ligation, primer Tm, OD→cells, phage titer/MOI, %↔molarity & more.'}
+      {m:'reagent',icon:'⚗️',title:'Reagent Prep',desc:'160 verified buffer / media / stock recipes — including miniprep P1/P2/P3, Buffer PE, CTAB — scaled to any volume.'},
+      {m:'calc',icon:'🧬',title:'Molbio Calculators',desc:CALCS.length+' bench calculators: ng↔pmol, A260, ligation, primer Tm, OD→cells, phage titer/MOI, %↔molarity & more.'},
+      {m:'proto',icon:'📋',title:'Protocols',desc:(window.PROTO?PROTO.list.length:10)+' step-by-step protocols — miniprep, CTAB gDNA, gels, transformation, plaque assay — that rescale as you change the numbers.'}
     ];
     var featured=['namass','a260','pctmolar','tm','od600','titer','ligation','moivol','doubling','rcf'];
     el.innerHTML='<div class="home-hero"><h1>Molecular Biology Bench Toolkit</h1><p>One place for dilutions, reagents, plate layouts, and the everyday molecular-biology math — all in your browser, works offline.</p></div>'+
@@ -3003,6 +3020,303 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   }
   // First-time visitors land on the Home hub (returning users restore their last view).
   if(window._ddFresh && (location.hash||'').indexOf('#s=')!==0){ try{ setMode('home'); }catch(e){} }
+})();
+
+/* ══════════════════════════ PROTOCOLS MODULE ══════════════════════════ */
+(function(){
+  var css=`
+  .pr-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+  .pr-chip{font:600 10px var(--mono);letter-spacing:.04em;text-transform:uppercase;padding:4px 9px;border-radius:999px;background:var(--surface2);color:var(--text3);border:1px solid var(--border);}
+  .pr-safety{background:rgba(192,57,43,.10);border:1px solid rgba(192,57,43,.45);border-radius:9px;padding:10px 13px;font-size:12.5px;color:var(--text2);margin-bottom:12px;line-height:1.5;}
+  .pr-sec{font:600 10.5px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--text3);margin:18px 0 8px;}
+  .pr-steps{list-style:none;margin:0;padding:0;counter-reset:prstep;}
+  .pr-step{display:flex;gap:11px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);}
+  .pr-step:last-child{border-bottom:0;}
+  .pr-step input{margin-top:3px;width:16px;height:16px;flex:none;cursor:pointer;}
+  .pr-step.done .pr-sbody{opacity:.45;text-decoration:line-through;}
+  .pr-num{counter-increment:prstep;font:700 11px var(--mono);color:var(--accent2);flex:none;min-width:18px;padding-top:2px;}
+  .pr-st{font-weight:700;font-size:13px;color:var(--text);margin-bottom:2px;}
+  .pr-sd{font-size:12.5px;color:var(--text2);line-height:1.5;}
+  .pr-sd b{color:var(--accent2);font-family:var(--mono);}
+  .pr-notes{font-size:12px;color:var(--text2);line-height:1.5;margin:0;padding-left:18px;}
+  .pr-notes li{margin:4px 0;}
+  .pr-src{margin-top:12px;font-size:11px;color:var(--text3);}
+  .pr-src a{color:var(--accent2);}
+  @media print{ .mbc-nav,.mode-tabs,header,.mbc-actions{display:none!important;} .mbc-grid{grid-template-columns:1fr!important;} .mbc-main{border:0!important;} }
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  function nm(x){ x=parseFloat(x); return isFinite(x)?x:NaN; }
+  function f(x,p){ p=p||4; if(x==null||isNaN(x)||!isFinite(x))return '—'; if(x===0)return '0'; var a=Math.abs(x); if(a<1e-4||a>=1e6)return x.toExponential(2); var d=Math.max(0,p-1-Math.floor(Math.log10(a))); return String(Number(x.toFixed(Math.min(d,12)))); }
+  function uL(v){ if(!isFinite(v))return '—'; if(v<1000)return f(v)+' µL'; if(v<1e6)return f(v/1000)+' mL'; return f(v/1e6)+' L'; }
+  function mL(v){ if(!isFinite(v))return '—'; if(v<1)return f(v*1000)+' µL'; if(v<1000)return f(v)+' mL'; return f(v/1000)+' L'; }
+  var OWW=[{title:'OpenWetWare / standard open lab protocols',url:'https://openwetware.org/wiki/Protocols'}];
+
+  var PROTOCOLS=[
+   { id:'miniprep', name:'Plasmid miniprep (alkaline lysis + spin column)', group:'DNA & RNA prep',
+     tags:'miniprep plasmid alkaline lysis p1 p2 p3 buffer pe eb column dna',
+     blurb:'The everyday plasmid prep. Buffer volumes and yields scale with your culture and number of preps.',
+     time:'~45 min', safety:'Buffer P2 contains NaOH (caustic). If you use a guanidine binding buffer, never mix that waste with bleach — it releases cyanide gas.',
+     params:[{k:'n',label:'Number of preps',def:6,min:1},{k:'cult',label:'Culture per prep (mL)',def:3,min:0.1},{k:'elute',label:'Elution volume (µL)',def:50,min:10}],
+     reagents:function(v){ return [
+       ['Buffer P1 (+RNase A)', uL(250*v.n), '250 µL per prep'],
+       ['Buffer P2 (fresh)', uL(250*v.n), '250 µL per prep'],
+       ['Buffer P3 (ice-cold)', uL(350*v.n), '350 µL per prep'],
+       ['Buffer PE (wash)', uL(750*v.n), '750 µL per prep'],
+       ['Buffer EB (elution)', uL(v.elute*v.n), v.elute+' µL per prep'],
+       ['Silica spin columns', v.n+' columns', 'plus '+v.n+' collection tubes'] ]; },
+     steps:function(v){ return [
+       {t:'Pellet the cells', d:'Spin <b>'+f(v.cult)+' mL</b> of overnight culture at 12,000 × g for 1 min. Pour off <i>all</i> medium — residual LB carries over salt.'},
+       {t:'Resuspend', d:'Add <b>250 µL P1</b> and vortex until no clumps remain. Incomplete resuspension is the single most common cause of poor yield.'},
+       {t:'Lyse', d:'Add <b>250 µL P2</b>. Invert gently 4–6 times — <b>do not vortex</b> (it shears chromosomal DNA into your prep). The lysate turns clear and viscous. Never leave longer than <b>5 min</b>.'},
+       {t:'Neutralise', d:'Add <b>350 µL ice-cold P3</b> and invert immediately. A thick white precipitate of protein, SDS and genomic DNA forms.'},
+       {t:'Clear the lysate', d:'Spin 12,000 × g for 10 min. A compact white pellet packs against the tube wall.'},
+       {t:'Bind to the column', d:'Transfer the supernatant to a silica spin column without disturbing the pellet. Spin 1 min; discard the flow-through.'},
+       {t:'Wash', d:'Add <b>750 µL Buffer PE</b>. Spin 1 min; discard the flow-through.'},
+       {t:'Dry the membrane', d:'Spin the <i>empty</i> column another 1 min. <b>Do not skip this</b> — carry-over ethanol inhibits ligation, PCR and sequencing.'},
+       {t:'Elute', d:'Move the column to a clean tube. Pipette <b>'+f(v.elute)+' µL Buffer EB</b> directly onto the centre of the membrane, stand 1 min, then spin 1 min.'},
+       {t:'Quantify', d:'Read A260. A high-copy plasmid from '+f(v.cult)+' mL typically yields <b>~'+f(v.cult*4)+' µg</b>; expect A260/A280 ≈ 1.8.'} ]; },
+     notes:['Low-copy plasmids (pBR322, BACs) need 5–10× more culture for the same yield.',
+            'Silica columns saturate around 15–20 µg — splitting a big culture over two columns beats overloading one.',
+            'Warm the elution buffer to 50 °C to squeeze out a little more DNA.'], sources:OWW },
+
+   { id:'gdna-ctab', name:'Genomic DNA extraction (CTAB)', group:'DNA & RNA prep',
+     tags:'genomic dna ctab extraction plant fungal bacterial chloroform isopropanol',
+     blurb:'CTAB prep for genomic DNA from plant, fungal or bacterial material — good where polysaccharides are a problem.',
+     time:'~3 h', safety:'2-Mercaptoethanol and chloroform are toxic — fume hood, double gloves. Phenol causes deep burns; keep PEG-400 nearby.',
+     params:[{k:'n',label:'Number of samples',def:6,min:1},{k:'tissue',label:'Tissue per sample (mg)',def:100,min:1},{k:'buf',label:'CTAB buffer per sample (µL)',def:700,min:100}],
+     reagents:function(v){ return [
+       ['2% CTAB buffer (65 °C)', uL(v.buf*v.n), f(v.buf)+' µL per sample'],
+       ['Chloroform : isoamyl alcohol 24:1', uL(v.buf*v.n), 'equal volume'],
+       ['Isopropanol (cold)', uL(0.7*v.buf*v.n), '0.7 volumes'],
+       ['70% ethanol (wash)', uL(500*v.n), '500 µL per sample'],
+       ['TE buffer or EB', uL(100*v.n), '100 µL per sample'],
+       ['RNase A, 10 mg/mL', uL(2*v.n), '~2 µL per sample'] ]; },
+     steps:function(v){ return [
+       {t:'Pre-warm the buffer', d:'Warm the 2% CTAB buffer to <b>65 °C</b> and add 2-mercaptoethanol to 0.2% fresh. CTAB precipitates when cold.'},
+       {t:'Disrupt the tissue', d:'Grind <b>'+f(v.tissue)+' mg</b> of tissue to a fine powder under liquid nitrogen (or bead-beat). Do not let it thaw.'},
+       {t:'Lyse', d:'Add <b>'+f(v.buf)+' µL</b> of warm CTAB buffer, vortex, and incubate at <b>65 °C for 30–60 min</b>, inverting every 10 min.'},
+       {t:'Extract', d:'Cool to room temperature. Add an equal volume (<b>'+f(v.buf)+' µL</b>) of chloroform:isoamyl 24:1 and mix by inversion for 5 min.'},
+       {t:'Separate the phases', d:'Spin 12,000 × g for 10 min. Transfer the <i>upper aqueous</i> phase to a fresh tube — do not carry over the white interface.'},
+       {t:'Precipitate', d:'Add <b>'+f(0.7*v.buf)+' µL</b> (0.7 volumes) cold isopropanol, mix gently by inversion, and hold at −20 °C for 30 min.'},
+       {t:'Pellet', d:'Spin 12,000 × g for 10 min. A translucent pellet should be visible.'},
+       {t:'Wash', d:'Wash the pellet with <b>500 µL 70% ethanol</b>, spin 5 min, and pour off. Air-dry 10 min — do not over-dry or it will not redissolve.'},
+       {t:'Resuspend', d:'Dissolve in <b>100 µL</b> TE or EB. Add RNase A to 20 µg/mL and hold at 37 °C for 30 min.'} ]; },
+     notes:['Add 1% (w/v) PVP-40 to the buffer for polyphenol-rich tissue.','Genomic DNA is fragile — pipette with cut tips and avoid vortexing after lysis.'], sources:OWW },
+
+   { id:'etoh-precip', name:'Ethanol precipitation of DNA', group:'DNA & RNA prep',
+     tags:'ethanol precipitation sodium acetate concentrate dna cleanup isopropanol',
+     blurb:'Concentrate or desalt a nucleic-acid sample. Salt and alcohol volumes scale off your sample.',
+     time:'~1 h', safety:null,
+     params:[{k:'samp',label:'Sample volume (µL)',def:200,min:1},{k:'resus',label:'Resuspend in (µL)',def:20,min:1}],
+     reagents:function(v){ var salt=v.samp/10, et=2.5*(v.samp+salt); return [
+       ['3 M sodium acetate pH 5.2', uL(salt), '0.1 volumes'],
+       ['100% ethanol (ice-cold)', uL(et), '2.5 volumes of sample + salt'],
+       ['70% ethanol (wash)', uL(500), 'per sample'],
+       ['TE or nuclease-free water', uL(v.resus), 'final resuspension'] ]; },
+     steps:function(v){ var salt=v.samp/10, et=2.5*(v.samp+salt); return [
+       {t:'Add salt', d:'Add <b>'+f(salt)+' µL</b> of 3 M sodium acetate pH 5.2 (0.1 volumes) to your '+f(v.samp)+' µL sample and mix.'},
+       {t:'Add ethanol', d:'Add <b>'+f(et)+' µL</b> ice-cold 100% ethanol (2.5 volumes). Invert to mix — the solution may go cloudy.'},
+       {t:'Precipitate', d:'Hold at <b>−20 °C for at least 30 min</b> (overnight for dilute or small fragments).'},
+       {t:'Pellet', d:'Spin at maximum speed (≥12,000 × g) for <b>15–30 min at 4 °C</b>. Mark the outside of the tube so you know where the pellet is — it is often invisible.'},
+       {t:'Wash', d:'Remove the supernatant. Add <b>500 µL 70% ethanol</b>, spin 5 min, and carefully remove all liquid.'},
+       {t:'Dry', d:'Air-dry 5–10 min. <b>Do not over-dry</b> — a glassy pellet is very hard to redissolve.'},
+       {t:'Resuspend', d:'Dissolve in <b>'+f(v.resus)+' µL</b> TE or nuclease-free water; warm to 50 °C and flick to help it go into solution.'} ]; },
+     notes:['Use isopropanol (0.7 volumes) instead when the sample volume is too large — but wash well, it carries more salt.','Add glycogen to 20 µg/mL as a carrier when precipitating < 100 ng.'], sources:OWW },
+
+   { id:'agarose-gel', name:'Agarose gel electrophoresis', group:'Analysis',
+     tags:'agarose gel electrophoresis dna tae running stain percent',
+     blurb:'Pour and run a gel — agarose mass and stain volume are computed from your gel size.',
+     time:'~1 h', safety:'Ethidium bromide is a mutagen — wear gloves and use a dedicated area. SYBR Safe is a lower-hazard alternative.',
+     params:[{k:'pct',label:'Gel percentage (%)',def:1,min:0.4,step:0.1},{k:'gvol',label:'Gel volume (mL)',def:50,min:10},{k:'volts',label:'Run voltage (V)',def:100,min:10}],
+     reagents:function(v){ return [
+       ['Agarose', f(v.pct/100*v.gvol)+' g', f(v.pct)+'% of '+f(v.gvol)+' mL'],
+       ['1× TAE buffer', mL(v.gvol), 'for the gel, plus ~500 mL for the tank'],
+       ['SYBR Safe (10,000×)', uL(v.gvol/10), '1:10,000 in the molten gel'] ]; },
+     steps:function(v){ return [
+       {t:'Weigh the agarose', d:'Weigh <b>'+f(v.pct/100*v.gvol)+' g</b> of agarose into <b>'+f(v.gvol)+' mL</b> of 1× TAE in a flask at least twice the volume.'},
+       {t:'Melt', d:'Microwave in 20–30 s bursts, swirling between each, until <b>no lens-shaped particles</b> remain. Superheating is a real burn risk — swirl gently.'},
+       {t:'Cool', d:'Cool to about <b>55 °C</b> (comfortable to hold). Pouring hotter warps the tray and degrades the stain.'},
+       {t:'Add stain', d:'Add <b>'+f(v.gvol/10)+' µL</b> of 10,000× SYBR Safe (or EtBr to 0.5 µg/mL) and swirl without making bubbles.'},
+       {t:'Pour', d:'Pour into a sealed tray, insert the comb, and pop any bubbles. Leave to set <b>20–30 min</b> until opaque and firm.'},
+       {t:'Load', d:'Cover with 1× TAE. Mix samples with 6× loading dye and load alongside a ladder.'},
+       {t:'Run', d:'Run at <b>'+f(v.volts)+' V</b> (aim for ~5 V per cm of electrode gap) until the dye front is two-thirds down — roughly 30–45 min.'},
+       {t:'Image', d:'Visualise on a blue-light or UV transilluminator. Minimise UV exposure if you intend to gel-extract and clone the band.'} ]; },
+     notes:['0.8% resolves 1–10 kb; 1% is the general default; 1.5–2% resolves 200 bp–1 kb.','TAE gives better resolution for large fragments; TBE runs cooler for long runs but inhibits some downstream enzymes.'], sources:OWW },
+
+   { id:'transformation', name:'Heat-shock transformation (chemically competent E. coli)', group:'Cloning & cells',
+     tags:'transformation heat shock competent cells plasmid soc plating',
+     blurb:'Standard 42 °C heat shock. Volumes scale with the number of transformations.',
+     time:'~2 h + overnight', safety:null,
+     params:[{k:'n',label:'Number of transformations',def:6,min:1},{k:'dna',label:'DNA per reaction (ng)',def:50,min:0.1},{k:'cells',label:'Competent cells (µL)',def:50,min:10},{k:'rec',label:'Recovery medium (µL)',def:950,min:100},{k:'plate',label:'Plate volume (µL)',def:100,min:10}],
+     reagents:function(v){ return [
+       ['Competent cells', uL(v.cells*v.n), f(v.cells)+' µL per reaction'],
+       ['SOC medium', uL(v.rec*v.n), f(v.rec)+' µL per reaction'],
+       ['Selective agar plates', v.n+' plates', 'pre-warm to 37 °C'],
+       ['Plasmid DNA', f(v.dna)+' ng each', 'keep the DNA volume under 5% of the cell volume'] ]; },
+     steps:function(v){ return [
+       {t:'Thaw on ice', d:'Thaw <b>'+f(v.cells)+' µL</b> of competent cells per reaction on ice for 10 min. Never warm them in your hand.'},
+       {t:'Add DNA', d:'Add <b>'+f(v.dna)+' ng</b> of plasmid (ideally ≤ <b>'+f(v.cells*0.05)+' µL</b>, i.e. under 5% of the cell volume). Flick to mix — do not pipette up and down.'},
+       {t:'Incubate on ice', d:'Rest on ice for <b>30 min</b>. This is where the DNA associates with the cell surface; do not shorten it.'},
+       {t:'Heat shock', d:'Move to a <b>42 °C</b> water bath for exactly <b>45 s</b> without shaking, then return straight to ice.'},
+       {t:'Recover on ice', d:'Ice for <b>2 min</b>.'},
+       {t:'Outgrowth', d:'Add <b>'+f(v.rec)+' µL</b> of SOC and shake at 37 °C, 220 rpm, for <b>1 h</b>. Skip this only for ampicillin; kanamycin and chloramphenicol need it.'},
+       {t:'Plate', d:'Spread <b>'+f(v.plate)+' µL</b> onto a pre-warmed selective plate. Plate a dilution series if you expect a high yield.'},
+       {t:'Incubate', d:'Invert and incubate at <b>37 °C overnight</b> (16–18 h). Longer incubations give satellite colonies on ampicillin.'} ]; },
+     notes:['Always run a no-DNA control plate — it tells you whether your antibiotic is working.','Ligation mixes transform 10–100× worse than supercoiled plasmid; use more cells or electroporation.'], sources:OWW },
+
+   { id:'competent-cacl2', name:'Making chemically competent cells (CaCl₂)', group:'Cloning & cells',
+     tags:'competent cells calcium chloride cacl2 transformation prep glycerol',
+     blurb:'Classic CaCl₂ method. Wash and resuspension volumes scale from your culture volume.',
+     time:'~3 h', safety:null,
+     params:[{k:'cult',label:'Culture volume (mL)',def:100,min:10},{k:'ali',label:'Aliquot size (µL)',def:100,min:20}],
+     reagents:function(v){ var w=0.4*v.cult, fin=0.02*v.cult; return [
+       ['LB medium', mL(v.cult), 'grow to OD₆₀₀ 0.35–0.4'],
+       ['0.1 M CaCl₂ (ice-cold)', mL(w+fin), mL(w)+' wash + '+mL(fin)+' final'],
+       ['Glycerol (for the final resuspension)', '15% (v/v) final', 'in the final CaCl₂'],
+       ['Cryovials', Math.floor(fin*1000/v.ali)+' vials', f(v.ali)+' µL each'] ]; },
+     steps:function(v){ var w=0.4*v.cult, fin=0.02*v.cult; return [
+       {t:'Grow', d:'Inoculate <b>'+mL(v.cult)+'</b> LB 1:100 from an overnight and grow at 37 °C to <b>OD₆₀₀ 0.35–0.4</b>. Overgrowing past 0.5 costs you most of your efficiency.'},
+       {t:'Chill', d:'Put the flask on ice for <b>20 min</b>. Everything from here stays ice-cold.'},
+       {t:'Harvest', d:'Spin 4,000 × g for 10 min at <b>4 °C</b> and pour off all medium.'},
+       {t:'First wash', d:'Gently resuspend in <b>'+mL(w)+'</b> ice-cold 0.1 M CaCl₂ (0.4 volumes). Swirl — do not vortex.'},
+       {t:'Rest on ice', d:'Hold on ice for <b>30 min</b>. This step is what makes the cells competent.'},
+       {t:'Re-pellet', d:'Spin 4,000 × g for 10 min at 4 °C and discard the supernatant.'},
+       {t:'Final resuspension', d:'Resuspend in <b>'+mL(fin)+'</b> ice-cold 0.1 M CaCl₂ containing <b>15% glycerol</b> (0.02 volumes).'},
+       {t:'Aliquot and freeze', d:'Dispense <b>'+f(v.ali)+' µL</b> per pre-chilled tube (~'+Math.floor(fin*1000/v.ali)+' vials), snap-freeze in liquid nitrogen and store at −80 °C.'},
+       {t:'Check efficiency', d:'Transform 100 pg of a known supercoiled plasmid. Expect 10⁶–10⁷ cfu/µg for this method.'} ]; },
+     notes:['Every degree above 4 °C costs efficiency — pre-chill tubes, rotor and buffers.','The Inoue method gives ~10× higher efficiency if you need a big library.'], sources:OWW },
+
+   { id:'plaque-assay', name:'Phage plaque assay (soft agar overlay)', group:'Phage & microbiology',
+     tags:'phage plaque assay soft agar overlay titer pfu double layer',
+     blurb:'Double-layer overlay to count plaques and titre a phage stock. Feeds straight into the titer calculator.',
+     time:'~1 h + overnight', safety:null,
+     params:[{k:'n',label:'Number of plates',def:8,min:1},{k:'top',label:'Top agar per plate (mL)',def:3,min:1},{k:'host',label:'Host culture per plate (µL)',def:300,min:50},{k:'phage',label:'Phage dilution per plate (µL)',def:100,min:10}],
+     reagents:function(v){ return [
+       ['LB top agar 0.7% (molten, 50 °C)', mL(v.top*v.n*1.1), f(v.top)+' mL per plate +10%'],
+       ['Host culture at OD₆₀₀ 0.4–0.6', uL(v.host*v.n), f(v.host)+' µL per plate'],
+       ['LB agar bottom plates (1.5%)', v.n+' plates', 'dry, at room temperature'],
+       ['SM buffer (for the dilution series)', mL(10), '900 µL per dilution tube'] ]; },
+     steps:function(v){ return [
+       {t:'Melt the top agar', d:'Melt 0.7% top agar and hold it in a <b>50 °C</b> bath. Hotter kills the host; cooler and it sets in the tube.'},
+       {t:'Prepare the host', d:'Grow the host to <b>OD₆₀₀ 0.4–0.6</b> (mid-log). Stationary cells adsorb phage poorly.'},
+       {t:'Dilute the phage', d:'Make a 10-fold dilution series in SM buffer. Plate several dilutions — you need a plate landing in the countable range.'},
+       {t:'Adsorb', d:'Mix <b>'+f(v.phage)+' µL</b> of each phage dilution with <b>'+f(v.host)+' µL</b> host in a tube and stand at 37 °C for <b>10–15 min</b>.'},
+       {t:'Overlay', d:'Add <b>'+f(v.top)+' mL</b> molten top agar to the tube, mix quickly without bubbles, and pour immediately onto a bottom plate.'},
+       {t:'Set', d:'Swirl to spread evenly and leave flat for <b>10 min</b> to solidify.'},
+       {t:'Incubate', d:'Invert and incubate at 37 °C <b>overnight</b> (or 4–6 h for fast phage).'},
+       {t:'Count and calculate', d:'Count a plate with <b>30–300 plaques</b>. Then use <i>Calculators → Phage titer</i>: PFU/mL = plaques × dilution factor ÷ mL plated.'} ]; },
+     notes:['Bubbles in the overlay look like plaques — pour smoothly and do not pipette the agar up and down.','Plates that are too wet smear the overlay; dry them lid-off in a hood for 15 min first.','Add CaCl₂/MgSO₄ to the top agar if your phage needs divalent cations for adsorption.'], sources:OWW },
+
+   { id:'serial-plate', name:'Serial dilution & viable plate count (CFU)', group:'Phage & microbiology',
+     tags:'serial dilution cfu plate count viable spread plating enumeration',
+     blurb:'Ten-fold series and spread plating to count viable cells. Transfer volumes are computed for you.',
+     time:'~40 min + overnight', safety:null,
+     params:[{k:'fold',label:'Dilution factor per step',def:10,min:2},{k:'steps',label:'Number of dilution steps',def:8,min:1},{k:'dil',label:'Diluent per tube (µL)',def:900,min:100},{k:'plate',label:'Volume plated (µL)',def:100,min:10}],
+     reagents:function(v){ var tr=v.dil/(v.fold-1); return [
+       ['Sterile diluent (PBS / saline / SM)', uL(v.dil*v.steps), f(v.dil)+' µL per tube × '+v.steps],
+       ['Microcentrifuge tubes', v.steps+' tubes', 'label before you start'],
+       ['Agar plates', (v.steps)+' plates', 'dry, pre-warmed'],
+       ['Transfer volume per step', uL(tr), 'gives a '+f(v.fold)+'-fold step'] ]; },
+     steps:function(v){ var tr=v.dil/(v.fold-1); return [
+       {t:'Set up the tubes', d:'Label <b>'+v.steps+'</b> tubes and add <b>'+f(v.dil)+' µL</b> of sterile diluent to each.'},
+       {t:'First dilution', d:'Vortex the sample, then transfer <b>'+f(tr)+' µL</b> into tube 1 and vortex. That is a <b>'+f(v.fold)+'-fold</b> step.'},
+       {t:'Carry the series', d:'Change tips, transfer <b>'+f(tr)+' µL</b> from tube 1 → tube 2, and repeat down the series. <b>A fresh tip every step</b> — reusing one is the classic source of a wrong count.'},
+       {t:'Plate', d:'Spread <b>'+f(v.plate)+' µL</b> of the last 3–4 dilutions onto labelled plates. Plate in duplicate if the count matters.'},
+       {t:'Dry and incubate', d:'Leave plates lid-up until the liquid absorbs, then invert and incubate at 37 °C overnight.'},
+       {t:'Count and calculate', d:'Count a plate with <b>30–300 colonies</b>. Then use <i>Calculators → CFU/mL</i>: CFU/mL = colonies × dilution factor ÷ mL plated.'} ]; },
+     notes:['Counts below 30 are statistically unreliable; above 300 colonies merge and undercount.','Vortex between every step — settled cells make the whole series wrong.'], sources:OWW },
+
+   { id:'gram-stain', name:'Gram stain', group:'Phage & microbiology',
+     tags:'gram stain crystal violet iodine safranin decolorize microscopy',
+     blurb:'The classic differential stain. Timings are the part people get wrong — especially decolourisation.',
+     time:'~15 min', safety:'Crystal violet and safranin stain skin and clothing. The decolouriser is flammable ethanol.',
+     params:[],
+     reagents:function(){ return [
+       ['Crystal violet (Hucker)', 'flood the smear', '1 min'],
+       ['Gram iodine (mordant)', 'flood the smear', '1 min'],
+       ['95% ethanol decolouriser', 'drop-wise', '10–15 s only'],
+       ['Safranin counterstain', 'flood the smear', '30–60 s'] ]; },
+     steps:function(){ return [
+       {t:'Make the smear', d:'Emulsify a small colony in a drop of water on a clean slide and spread thinly. Too thick a smear will not decolourise properly.'},
+       {t:'Air-dry and heat-fix', d:'Let it dry completely, then pass through a flame 2–3 times. Over-heating distorts the cells.'},
+       {t:'Crystal violet', d:'Flood the smear and leave <b>1 min</b>. Rinse briefly with water.'},
+       {t:'Iodine mordant', d:'Flood with Gram iodine for <b>1 min</b>. Rinse briefly. The iodine locks the dye into the peptidoglycan.'},
+       {t:'Decolourise', d:'Add 95% ethanol drop-wise for <b>10–15 s only</b>, until the runoff just stops being purple. <b>This is the step that decides your result</b> — over-decolourising turns Gram-positives pink.'},
+       {t:'Rinse immediately', d:'Stop the reaction with water at once.'},
+       {t:'Counterstain', d:'Flood with safranin for <b>30–60 s</b>, then rinse and blot dry.'},
+       {t:'Examine', d:'View under oil at 100×. <b>Purple = Gram-positive</b>, <b>pink/red = Gram-negative</b>.'} ]; },
+     notes:['Always use a fresh (< 24 h) culture — old Gram-positive cells stain falsely negative.','Run a known positive and negative control on the same slide when it matters.'], sources:OWW },
+
+   { id:'glycerol-stock', name:'Bacterial glycerol stock', group:'Cloning & cells',
+     tags:'glycerol stock freezer cryostock -80 storage strain',
+     blurb:'Bank a strain at −80 °C. Culture and glycerol volumes are computed from your target final percentage.',
+     time:'~10 min', safety:null,
+     params:[{k:'n',label:'Number of stocks',def:10,min:1},{k:'vial',label:'Volume per vial (µL)',def:1000,min:100},{k:'fin',label:'Final glycerol (%)',def:25,min:5},{k:'stk',label:'Glycerol stock (%)',def:50,min:10}],
+     reagents:function(v){ var gly=v.vial*v.fin/v.stk, cult=v.vial-gly; return [
+       ['Overnight culture', uL(cult*v.n), f(cult)+' µL per vial'],
+       [f(v.stk)+'% glycerol (sterile)', uL(gly*v.n), f(gly)+' µL per vial'],
+       ['Cryovials', v.n+' vials', 'label with strain, plasmid, date'] ]; },
+     steps:function(v){ var gly=v.vial*v.fin/v.stk, cult=v.vial-gly; return [
+       {t:'Grow', d:'Grow an overnight culture in the appropriate selective medium — bank it while it is healthy, not after weeks on a plate.'},
+       {t:'Label first', d:'Label <b>'+v.n+'</b> cryovials with strain, plasmid, antibiotic, your initials and the date. Use a solvent-proof marker.'},
+       {t:'Add glycerol', d:'Pipette <b>'+f(gly)+' µL</b> of sterile '+f(v.stk)+'% glycerol into each vial.'},
+       {t:'Add culture', d:'Add <b>'+f(cult)+' µL</b> of overnight culture to give <b>'+f(v.fin)+'%</b> glycerol in '+f(v.vial)+' µL.'},
+       {t:'Mix', d:'Vortex briefly, or invert 10 times, so the glycerol is evenly distributed — uneven glycerol kills cells on freezing.'},
+       {t:'Freeze', d:'Snap-freeze in liquid nitrogen or dry ice/ethanol, then transfer to <b>−80 °C</b>.'},
+       {t:'Record', d:'Log the position in your freezer index. To revive, scrape frozen chips with a sterile tip — <b>never thaw the whole vial</b>.'} ]; },
+     notes:['15–25% final glycerol is the usual range; below ~10% ice crystals damage the cells.','Bank two vials of anything precious and store them in different boxes.'], sources:OWW }
+  ];
+  var pById={}; PROTOCOLS.forEach(function(p){ pById[p.id]=p; });
+  var cur=null, done={};
+
+  function paramHtml(p){ return '<div class="mbc-f"><label for="pr_'+p.k+'">'+escapeHtml(p.label)+'</label><input id="pr_'+p.k+'" type="number" inputmode="decimal" step="'+(p.step||'any')+'"'+(p.min!=null?' min="'+p.min+'"':'')+' value="'+p.def+'" oninput="PROTO.recompute()">'+(p.hint?'<div class="mbc-hint">'+escapeHtml(p.hint)+'</div>':'')+'</div>'; }
+  function gather(pr){ var v={}; (pr.params||[]).forEach(function(p){ var el=document.getElementById('pr_'+p.k); var x=el?nm(el.value):p.def; v[p.k]=isFinite(x)?x:p.def; }); return v; }
+
+  function renderBody(){
+    var pr=pById[cur]; if(!pr)return; var v=gather(pr);
+    var reg=[], steps=[];
+    try{ reg=pr.reagents(v)||[]; steps=pr.steps(v)||[]; }catch(e){ reg=[]; steps=[]; }
+    var txt=[pr.name,''];
+    var h='<div class="pr-sec">You will need</div><div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Item</th><th>Amount</th><th>Note</th></tr></thead><tbody>'+
+      reg.map(function(r){ txt.push('- '+r[0]+': '+r[1]+(r[2]?' ('+r[2]+')':'')); return '<tr><td>'+escapeHtml(String(r[0]))+'</td><td><b>'+escapeHtml(String(r[1]))+'</b></td><td style="color:var(--text3)">'+escapeHtml(String(r[2]||''))+'</td></tr>'; }).join('')+'</tbody></table></div>';
+    txt.push('');
+    h+='<div class="pr-sec">Procedure</div><ol class="pr-steps">'+steps.map(function(s,i){
+      var d=String(s.d); txt.push((i+1)+'. '+s.t+' — '+d.replace(/<[^>]+>/g,''));
+      return '<li class="pr-step'+(done[cur+'_'+i]?' done':'')+'" id="prstep_'+i+'"><input type="checkbox" '+(done[cur+'_'+i]?'checked':'')+' onchange="PROTO.tick('+i+',this.checked)" aria-label="step '+(i+1)+' done"><span class="pr-num">'+(i+1)+'</span><span class="pr-sbody"><span class="pr-st">'+escapeHtml(s.t)+'</span><span class="pr-sd">'+d+'</span></span></li>';
+    }).join('')+'</ol>';
+    if(pr.notes&&pr.notes.length){ h+='<div class="pr-sec">Notes</div><ul class="pr-notes">'+pr.notes.map(function(x){ txt.push('Note: '+x); return '<li>'+escapeHtml(x)+'</li>'; }).join('')+'</ul>'; }
+    if(pr.sources&&pr.sources.length) h+='<div class="pr-src">Reference: '+pr.sources.map(function(s){return '<a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">'+escapeHtml(s.title)+'</a>';}).join(' · ')+' — always check against your own lab SOP.</div>';
+    document.getElementById('prBody').innerHTML=h;
+    PROTO._txt=txt.join('\n');
+  }
+  function open(id){
+    var pr=pById[id]; if(!pr)return; cur=id; try{localStorage.setItem('pr_last',id);}catch(e){}
+    renderNav();
+    var m=document.getElementById('prMain'); if(!m)return;
+    m.innerHTML='<div class="mbc-head"><h2>'+escapeHtml(pr.name)+'</h2><p>'+escapeHtml(pr.blurb||'')+'</p></div>'+
+      '<div class="pr-meta">'+(pr.time?'<span class="pr-chip">⏱ '+escapeHtml(pr.time)+'</span>':'')+'<span class="pr-chip">'+escapeHtml(pr.group)+'</span></div>'+
+      (pr.safety?'<div class="pr-safety"><b>Safety —</b> '+escapeHtml(pr.safety)+'</div>':'')+
+      ((pr.params&&pr.params.length)?'<div class="pr-sec">Scale it</div><div class="mbc-form">'+pr.params.map(paramHtml).join('')+'</div>':'')+
+      '<div class="mbc-actions"><button class="btn" onclick="PROTO.copy()">Copy protocol</button><button class="btn" onclick="window.print()">🖨 Print</button><button class="btn" onclick="PROTO.reset()">Reset ticks</button></div>'+
+      '<div id="prBody"></div>';
+    renderBody();
+  }
+  function renderNav(){
+    var el=document.getElementById('prList'); if(!el)return;
+    var q=((document.getElementById('prSearch')||{}).value||'').toLowerCase().trim();
+    var groups={}, order=[];
+    PROTOCOLS.forEach(function(p){ if(q&&(p.name+' '+(p.tags||'')+' '+(p.blurb||'')).toLowerCase().indexOf(q)<0)return; if(!groups[p.group]){groups[p.group]=[];order.push(p.group);} groups[p.group].push(p); });
+    el.innerHTML=order.map(function(g){ return '<div class="mbc-group">'+escapeHtml(g)+'</div>'+groups[g].map(function(p){ return '<button class="mbc-item'+(p.id===cur?' active':'')+'" role="option" onclick="PROTO.open(\''+p.id+'\')">'+escapeHtml(p.name)+'</button>'; }).join(''); }).join('')||'<div class="mbc-empty" style="padding:12px">No matches.</div>';
+  }
+  window.PROTO={
+    init:function(){ var last=null; try{last=localStorage.getItem('pr_last');}catch(e){} if(!pById[last]) last=PROTOCOLS[0].id; renderNav(); open(last); },
+    open:open, filter:renderNav, recompute:renderBody,
+    tick:function(i,on){ done[cur+'_'+i]=on; var el=document.getElementById('prstep_'+i); if(el) el.classList.toggle('done',on); },
+    reset:function(){ Object.keys(done).forEach(function(k){ if(k.indexOf(cur+'_')===0) delete done[k]; }); renderBody(); },
+    copy:function(){ dcCopyText(PROTO._txt); },
+    list:PROTOCOLS
+  };
 })();
 </script>
 </body>

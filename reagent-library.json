@@ -8262,6 +8262,561 @@
      ]
     }
    ]
+  },
+  {
+   "key": "nucleic-acid-extraction",
+   "title": "Nucleic acid extraction & miniprep",
+   "recipes": [
+    {
+     "id": "p1-resuspension",
+     "name": "P1 / Resuspension buffer (alkaline lysis)",
+     "aka": [
+      "Solution I",
+      "Cell resuspension buffer"
+     ],
+     "summary": "First alkaline-lysis buffer: resuspends the cell pellet; RNase A degrades host RNA.",
+     "components": [
+      {
+       "name": "Tris-HCl",
+       "molarity_M": 0.05,
+       "mw_gmol": 157.6,
+       "form": "Tris-HCl"
+      },
+      {
+       "name": "EDTA",
+       "molarity_M": 0.01,
+       "mw_gmol": 372.24,
+       "form": "EDTA disodium dihydrate"
+      },
+      {
+       "name": "RNase A",
+       "fromStock": {
+        "stockConc": 10,
+        "stockUnit": "mg/mL",
+        "finalConc": 100,
+        "finalUnit": "ug/mL"
+       },
+       "note": "add after autoclaving; store at 4 C once added"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": 8.0,
+     "adjustPHWith": "HCl",
+     "sterilization": "autoclave the Tris/EDTA base, then add RNase A",
+     "storage": "4 C once RNase A is added",
+     "shelfLife": "6 months at 4 C",
+     "hazards": null,
+     "notes": [
+      "Resuspend the pellet completely - clumps are the most common cause of poor yield.",
+      "Without RNase A the prep carries RNA and A260 readings are inflated."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    },
+    {
+     "id": "p2-lysis",
+     "name": "P2 / Lysis buffer (alkaline lysis)",
+     "aka": [
+      "Solution II",
+      "NaOH/SDS lysis"
+     ],
+     "summary": "Alkaline SDS lysis: denatures chromosomal DNA and protein while plasmid stays annealed.",
+     "components": [
+      {
+       "name": "Sodium hydroxide (NaOH)",
+       "molarity_M": 0.2,
+       "mw_gmol": 40.0,
+       "form": "NaOH pellets"
+      },
+      {
+       "name": "SDS",
+       "percent": {
+        "value": 1,
+        "type": "w/v"
+       }
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "none - prepare fresh from stocks",
+     "storage": "room temperature; make fresh",
+     "shelfLife": "prepare fresh (1 week maximum)",
+     "hazards": "NaOH is caustic; SDS powder is a respiratory irritant - weigh in a hood.",
+     "notes": [
+      "Make fresh from 10 M NaOH and 20% SDS stocks.",
+      "Invert gently 4-6 times - do NOT vortex, it shears chromosomal DNA.",
+      "Do not exceed 5 minutes in P2 or the plasmid becomes irreversibly denatured."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    },
+    {
+     "id": "p3-neutralisation",
+     "name": "P3 / N3 Neutralisation buffer (3 M potassium acetate, pH 5.5)",
+     "aka": [
+      "Solution III",
+      "Alkaline Lysis Solution III"
+     ],
+     "summary": "Neutralises the lysate and precipitates SDS, protein and chromosomal DNA.",
+     "components": [
+      {
+       "name": "Potassium acetate",
+       "molarity_M": 3.0,
+       "mw_gmol": 98.14,
+       "form": "potassium acetate, anhydrous"
+      },
+      {
+       "name": "Glacial acetic acid",
+       "note": "adjust to pH 5.5 (classically 11.5 mL glacial acetic acid per 100 mL)"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": 5.5,
+     "adjustPHWith": "glacial acetic acid",
+     "sterilization": "autoclave or 0.22 um filter",
+     "storage": "room temperature (use ice-cold)",
+     "shelfLife": "1 year",
+     "hazards": "Glacial acetic acid is corrosive - use a fume hood.",
+     "notes": [
+      "Identical to Alkaline Lysis Solution III in the stock-solutions pack.",
+      "Use ice-cold for cleaner precipitation of genomic DNA and protein."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    },
+    {
+     "id": "pb-binding-equiv",
+     "name": "PB / Binding buffer - silica column (community equivalent)",
+     "aka": [
+      "Buffer PB equivalent",
+      "chaotropic binding buffer"
+     ],
+     "summary": "Chaotropic buffer that makes DNA bind a silica membrane. Community equivalent of the proprietary kit buffer.",
+     "components": [
+      {
+       "name": "Guanidine hydrochloride",
+       "molarity_M": 5.0,
+       "mw_gmol": 95.53,
+       "form": "guanidine HCl"
+      },
+      {
+       "name": "Isopropanol",
+       "volumeFraction": {
+        "value": 30,
+        "type": "v/v"
+       }
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "0.22 um filter",
+     "storage": "room temperature",
+     "shelfLife": "6 months",
+     "hazards": "Guanidine HCl is harmful. NEVER mix guanidine waste with bleach - it releases cyanide gas.",
+     "notes": [
+      "Kit vendors keep their exact binding buffers proprietary; this is the widely published equivalent.",
+      "Typically 3-5 volumes of PB per volume of lysate."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    },
+    {
+     "id": "pe-wash-equiv",
+     "name": "PE / Wash buffer - silica column (community equivalent)",
+     "aka": [
+      "Buffer PE equivalent",
+      "ethanol wash buffer"
+     ],
+     "summary": "Ethanolic wash that strips salt and protein while DNA stays bound to the silica membrane.",
+     "components": [
+      {
+       "name": "Tris-HCl",
+       "molarity_M": 0.01,
+       "mw_gmol": 157.6,
+       "form": "Tris-HCl"
+      },
+      {
+       "name": "Ethanol",
+       "volumeFraction": {
+        "value": 80,
+        "type": "v/v"
+       },
+       "note": "add ethanol before first use"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": 7.5,
+     "adjustPHWith": "HCl",
+     "sterilization": "none required",
+     "storage": "room temperature, tightly capped",
+     "shelfLife": "1 year (ethanol evaporates - re-cap tightly)",
+     "hazards": "Flammable (80% ethanol) - keep away from ignition sources.",
+     "notes": [
+      "Qiagen Buffer PE is proprietary; this Tris/ethanol formulation is the standard published equivalent.",
+      "Kit concentrate ships ethanol-free - the ethanol must be added before first use.",
+      "ALWAYS spin the empty column an extra 1 min after the wash: carry-over ethanol inhibits ligation, PCR and sequencing."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    },
+    {
+     "id": "eb-elution",
+     "name": "EB / Elution buffer (10 mM Tris-HCl, pH 8.5)",
+     "aka": [
+      "Buffer EB",
+      "low-salt elution buffer"
+     ],
+     "summary": "Low-salt, slightly alkaline buffer for eluting DNA from a silica column.",
+     "components": [
+      {
+       "name": "Tris-HCl",
+       "molarity_M": 0.01,
+       "mw_gmol": 157.6,
+       "form": "Tris-HCl"
+      }
+     ],
+     "solvent": "nuclease-free water (bring to final volume)",
+     "finalPH": 8.5,
+     "adjustPHWith": "HCl / NaOH",
+     "sterilization": "autoclave or 0.22 um filter",
+     "storage": "room temperature",
+     "shelfLife": "1 year",
+     "hazards": null,
+     "notes": [
+      "pH 8.5 maximises elution efficiency; water (pH below 7) elutes less well and destabilises DNA on storage.",
+      "EDTA-free by design so the eluate can go straight into enzymatic reactions - use TE only for long-term storage."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    },
+    {
+     "id": "ctab-extraction",
+     "name": "CTAB Extraction Buffer, 2% (genomic DNA)",
+     "aka": [
+      "CTAB buffer",
+      "2% CTAB"
+     ],
+     "summary": "Detergent lysis buffer for genomic DNA from plants, fungi and bacteria; keeps polysaccharides away from the DNA.",
+     "components": [
+      {
+       "name": "CTAB (hexadecyltrimethylammonium bromide)",
+       "percent": {
+        "value": 2,
+        "type": "w/v"
+       }
+      },
+      {
+       "name": "Tris-HCl",
+       "molarity_M": 0.1,
+       "mw_gmol": 157.6,
+       "form": "Tris-HCl"
+      },
+      {
+       "name": "EDTA",
+       "molarity_M": 0.02,
+       "mw_gmol": 372.24,
+       "form": "EDTA disodium dihydrate"
+      },
+      {
+       "name": "Sodium chloride (NaCl)",
+       "molarity_M": 1.4,
+       "mw_gmol": 58.44,
+       "form": "NaCl"
+      },
+      {
+       "name": "2-Mercaptoethanol",
+       "volumeFraction": {
+        "value": 0.2,
+        "type": "v/v"
+       },
+       "note": "add fresh in a fume hood immediately before use"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": 8.0,
+     "adjustPHWith": "HCl",
+     "sterilization": "autoclave (without 2-mercaptoethanol)",
+     "storage": "room temperature; pre-warm to 65 C before use",
+     "shelfLife": "1 year (without BME)",
+     "hazards": "2-Mercaptoethanol is toxic and foul-smelling - fume hood only. CTAB dust is an irritant.",
+     "notes": [
+      "The 1.4 M NaCl keeps polysaccharides soluble so they do not co-precipitate with the DNA.",
+      "CTAB precipitates below about 15 C - warm the buffer to 65 C before use.",
+      "Add 1% (w/v) PVP-40 for tissues high in polyphenols."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    },
+    {
+     "id": "stet-buffer",
+     "name": "STET Buffer (boiling miniprep)",
+     "aka": [
+      "STET",
+      "boiling lysis buffer"
+     ],
+     "summary": "Sucrose/Triton lysis buffer for the rapid boiling-prep plasmid method.",
+     "components": [
+      {
+       "name": "Sucrose",
+       "percent": {
+        "value": 8,
+        "type": "w/v"
+       }
+      },
+      {
+       "name": "Triton X-100",
+       "volumeFraction": {
+        "value": 5,
+        "type": "v/v"
+       }
+      },
+      {
+       "name": "EDTA",
+       "molarity_M": 0.05,
+       "mw_gmol": 372.24,
+       "form": "EDTA disodium dihydrate"
+      },
+      {
+       "name": "Tris-HCl",
+       "molarity_M": 0.05,
+       "mw_gmol": 157.6,
+       "form": "Tris-HCl"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": 8.0,
+     "adjustPHWith": "HCl",
+     "sterilization": "autoclave",
+     "storage": "room temperature",
+     "shelfLife": "1 year",
+     "hazards": null,
+     "notes": [
+      "Used with lysozyme and a 45-60 s boil; fast but lower purity than column preps."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    },
+    {
+     "id": "pci-25-24-1",
+     "name": "Phenol : Chloroform : Isoamyl alcohol, 25:24:1 (pH 8.0)",
+     "aka": [
+      "PCI",
+      "P:C:I"
+     ],
+     "summary": "Organic extraction mix that strips protein from nucleic acid samples.",
+     "components": [
+      {
+       "name": "Buffered phenol (pH 8.0)",
+       "volumeFraction": {
+        "value": 50,
+        "type": "v/v"
+       }
+      },
+      {
+       "name": "Chloroform",
+       "volumeFraction": {
+        "value": 48,
+        "type": "v/v"
+       }
+      },
+      {
+       "name": "Isoamyl alcohol",
+       "volumeFraction": {
+        "value": 2,
+        "type": "v/v"
+       }
+      }
+     ],
+     "solvent": "none - mix the three components directly",
+     "finalPH": 8.0,
+     "adjustPHWith": "equilibrate against Tris pH 8.0",
+     "sterilization": "none",
+     "storage": "4 C, amber bottle, under a Tris buffer layer",
+     "shelfLife": "use while colourless - discard if pink or yellow (oxidised)",
+     "hazards": "SEVERE: phenol causes deep chemical burns; chloroform is a suspected carcinogen. Fume hood, double nitrile gloves, face protection. Keep PEG-400 or glycerol nearby for phenol splashes.",
+     "notes": [
+      "pH 8.0 keeps DNA in the aqueous phase; pH 4.5-5.0 drives DNA into the organic phase and is used for RNA.",
+      "Isoamyl alcohol suppresses foaming and sharpens the interface.",
+      "Always back-extract with chloroform:isoamyl 24:1 to remove residual phenol."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    },
+    {
+     "id": "proteinase-k-stock",
+     "name": "Proteinase K stock, 20 mg/mL",
+     "aka": [
+      "Prot K"
+     ],
+     "summary": "Broad-specificity protease that digests nucleases and protein during extraction.",
+     "components": [
+      {
+       "name": "Proteinase K",
+       "gramsPerLiter": 20
+      },
+      {
+       "name": "Tris-HCl",
+       "molarity_M": 0.01,
+       "mw_gmol": 157.6,
+       "form": "Tris-HCl"
+      },
+      {
+       "name": "Calcium chloride (CaCl2)",
+       "molarity_M": 0.001,
+       "mw_gmol": 147.01,
+       "form": "CaCl2 dihydrate",
+       "note": "stabilises the enzyme"
+      }
+     ],
+     "solvent": "nuclease-free water (bring to final volume)",
+     "finalPH": 7.5,
+     "adjustPHWith": "HCl",
+     "sterilization": "do NOT autoclave - filter if required",
+     "storage": "-20 C in single-use aliquots",
+     "shelfLife": "1 year at -20 C",
+     "hazards": "Inhaling the powder can sensitise - weigh carefully.",
+     "notes": [
+      "Typical working concentration 50-200 ug/mL at 50-56 C.",
+      "Add 50% glycerol for a freeze-thaw-tolerant stock."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    },
+    {
+     "id": "rnase-a-stock",
+     "name": "RNase A stock, 10 mg/mL (DNase-free)",
+     "aka": [
+      "RNase A"
+     ],
+     "summary": "Removes RNA from plasmid and genomic preps; boiled to destroy contaminating DNase.",
+     "components": [
+      {
+       "name": "RNase A",
+       "gramsPerLiter": 10
+      },
+      {
+       "name": "Tris-HCl",
+       "molarity_M": 0.01,
+       "mw_gmol": 157.6,
+       "form": "Tris-HCl"
+      },
+      {
+       "name": "Sodium chloride (NaCl)",
+       "molarity_M": 0.015,
+       "mw_gmol": 58.44,
+       "form": "NaCl"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": 7.5,
+     "adjustPHWith": "HCl",
+     "sterilization": "heat at 100 C for 15 min to inactivate DNases, then cool slowly to room temperature",
+     "storage": "-20 C in aliquots",
+     "shelfLife": "1 year at -20 C",
+     "hazards": null,
+     "notes": [
+      "The boil step is essential - untreated RNase A preparations carry DNase activity.",
+      "RNase A is very hard to remove from labware; keep dedicated tips and tubes away from RNA work."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    },
+    {
+     "id": "lysozyme-stock",
+     "name": "Lysozyme stock, 50 mg/mL",
+     "aka": [
+      "Lysozyme"
+     ],
+     "summary": "Digests peptidoglycan to lyse Gram-positive cells and stubborn Gram-negative pellets.",
+     "components": [
+      {
+       "name": "Lysozyme",
+       "gramsPerLiter": 50
+      },
+      {
+       "name": "Tris-HCl",
+       "molarity_M": 0.01,
+       "mw_gmol": 157.6,
+       "form": "Tris-HCl"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": 8.0,
+     "adjustPHWith": "HCl",
+     "sterilization": "0.22 um filter - do not autoclave",
+     "storage": "-20 C in aliquots",
+     "shelfLife": "6 months at -20 C",
+     "hazards": null,
+     "notes": [
+      "Typical working concentration 1-5 mg/mL, 37 C for 15-30 min.",
+      "Make fresh where possible; activity drops with freeze-thaw."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - plasmid miniprep / alkaline lysis",
+       "url": "https://openwetware.org/wiki/Plasmid_miniprep",
+       "license": "CC-BY-SA"
+      }
+     ]
+    }
+   ]
   }
  ]
 }
