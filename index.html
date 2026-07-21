@@ -814,6 +814,7 @@ let _undoStack = [];
 let _redoStack = [];
 const UNDO_LIMIT = 30;
 let _ready = false;
+let _sharedSession = false; // viewing a shared-link layout — don't autosave over the user's own work
 
 // Unified palette: conditions + controls
 let palette = [
@@ -993,7 +994,7 @@ function applyReplicate(r,c) {
   if (!activeCondId) return;
   for(let i=0;i<repToolN;i++){
     const nr=repToolDir==='v'?r+i:r, nc=repToolDir==='h'?c+i:c;
-    if(nr>=0&&nr<8&&nc>=0&&nc<12&&!excludedWells.has(`${nr},${nc}`)) wellAssignments[nr][nc]=activeCondId;
+    if(nr>=0&&nr<NR&&nc>=0&&nc<NC&&!excludedWells.has(`${nr},${nc}`)) wellAssignments[nr][nc]=activeCondId;
   }
 }
 function clearAllWells(){snapshotForUndo();wellAssignments=Array.from({length:NR},()=>Array(NC).fill(null));flushActive();renderPlate();update();}
@@ -1091,6 +1092,12 @@ function renderPlateTabs(){
     `<button class="ptab-add" onclick="addPlate()" title="Add a plate">＋ Plate</button>`+
     `<span class="ptab-fmt">Format <select id="plateFmtSel" onchange="setPlateFormat(this.value)"><option value="96"${_fmtKey()==='96'?' selected':''}>96-well</option><option value="384"${_fmtKey()==='384'?' selected':''}>384-well</option></select></span>`;
   const t=document.getElementById('plateTitle'); if(t) t.textContent=`${_fmtKey()}-well plate map`;
+}
+// Cheap live refresh of each tab's "fmt·used" badge (called from update() on every edit
+// so counts don't go stale — without rebuilding the tab strip / format <select>).
+function refreshTabCounts(){
+  const tabs=document.querySelectorAll('#plateTabs .ptab');
+  tabs.forEach((btn,i)=>{ if(i>=plates.length) return; const used=(i===activePlate?wellAssignments:plates[i].assign).flat().filter(Boolean).length; const s=btn.querySelector('small'); if(s) s.textContent=(i===activePlate?_fmtKey():plates[i].fmt)+'·'+used; });
 }
 function switchPlate(i){ if(i===activePlate||i<0||i>=plates.length) return; flushActive(); loadPlate(i); _undoStack=[]; _redoStack=[]; renderExclBar(); renderPlateTabs(); renderPlate(); update(); }
 function addPlate(){ flushActive(); const fmt=_fmtKey(), f=PLATE_FMT[fmt]; plates.push({fmt, name:'Plate '+(plates.length+1), assign:Array.from({length:f.nr},()=>Array(f.nc).fill(null)), excluded:new Set()}); switchPlate(plates.length-1); showToast('✓ Added '+plates[plates.length-1].name,'green'); }
@@ -1269,8 +1276,18 @@ function shareLink(){
 }
 function _loadFromHash(){
   const h=location.hash||''; if(h.indexOf('#s=')!==0) return false;
-  const s=JSON.parse(_b64d(h.slice(3))); _applyCompact(s); return true;
+  const s=JSON.parse(_b64d(h.slice(3)));
+  // A share link is often clicked just to view a colleague's layout — do NOT let it
+  // autosave over whatever the viewer already had in this browser until they take
+  // ownership with an explicit Save. Set the guard BEFORE _applyCompact (whose update()
+  // would otherwise autosave the shared layout over the user's work).
+  _sharedSession=true;
+  _applyCompact(s);
+  setTimeout(()=>showToast('Viewing a shared layout — your saved work is untouched. Use 💾 Save to keep this copy.','',5200),400);
+  return true;
 }
+// The user takes ownership of a shared layout (re-enables autosave) on an explicit save.
+function _claimSharedSession(){ if(_sharedSession){ _sharedSession=false; saveToStorage(); } }
 
 // ══════════════════════════════════════════════════════════════════
 // PLATE DRAG INTERACTION (event delegation)
@@ -1653,6 +1670,7 @@ function update(){
   const sgUnits=document.getElementById('sgUnitsHint');if(sgUnits)sgUnits.textContent=p.units;
   document.getElementById('directNoteCompound').textContent=p.inducerName||'Compound';
   renderPlate();
+  refreshTabCounts();
   renderMetrics(p,wells);
   renderBenchCheck(p,wells);
   renderWTable(p,wells);
@@ -1776,14 +1794,19 @@ function showToast(msg,variant='',duration=2200){
 // ══════════════════════════════════════════════════════════════════
 // UNDO / REDO
 // ══════════════════════════════════════════════════════════════════
-function _snap(){return{wellAssignments:wellAssignments.map(r=>[...r]),excludedWells:new Set(excludedWells),palette:palette.map(c=>({...c})),_condIdCounter};}
+function _snap(){return{wellAssignments:wellAssignments.map(r=>[...r]),excludedWells:new Set(excludedWells),palette:palette.map(c=>({...c})),_condIdCounter,fmt:_fmtKey()};}
 function snapshotForUndo(){_undoStack.push(_snap());if(_undoStack.length>UNDO_LIMIT)_undoStack.shift();_redoStack=[];}
 function _restoreSnapshot(snap){
+  // Restore the plate dimensions the snapshot was taken at BEFORE swapping in its
+  // (possibly differently-sized) grid — otherwise undo across a format change would
+  // leave NR/NC out of sync with wellAssignments and crash renderPlate.
+  if(snap.fmt){ setPlateDims(snap.fmt); plates[activePlate].fmt=snap.fmt; }
   wellAssignments=snap.wellAssignments.map(r=>[...r]);
   excludedWells=new Set(snap.excludedWells);
   palette=snap.palette.map(c=>({...c}));
   _condIdCounter=snap._condIdCounter;
-  renderPalette();renderPlate();update();
+  flushActive();
+  renderPalette();renderExclBar();renderPlateTabs();renderPlate();update();
 }
 function undo(){if(!_undoStack.length)return;_redoStack.push(_snap());_restoreSnapshot(_undoStack.pop());}
 function redo(){if(!_redoStack.length)return;_undoStack.push(_snap());_restoreSnapshot(_redoStack.pop());}
@@ -1797,7 +1820,7 @@ const _FIELDS=['stockConc','stockVol','cultureVol','cultureTotal','intmConc','in
   'sdTarget','sdFactor','sdMinPip','sdStepVol','fillSelect'];
 
 function saveToStorage(){
-  if(!_ready)return;
+  if(!_ready||_sharedSession)return;
   try{
     const fields=_FIELDS.reduce((a,id)=>{const el=document.getElementById(id);if(el)a[id]=el.value;return a;},{});
     localStorage.setItem('dd_state',JSON.stringify({v:2,appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,plates:_serializePlates(),activePlate,wellAssignments,excludedWells:[...excludedWells],palette,_condIdCounter,fields}));
@@ -1932,6 +1955,7 @@ function _mkPayload(){
   return{version:2,savedAt:new Date().toISOString(),appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,plates:platesData,activePlate,wellAssignments,excludedWells:[...excludedWells],palette,_condIdCounter,fields};
 }
 function saveJSON(){
+  _claimSharedSession();
   const p=P();
   const name=(p.expName||'experiment').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
   const date=p.expDate||new Date().toISOString().slice(0,10);
@@ -1998,6 +2022,7 @@ function saveNamedLayout(){
   if(layouts[name]&&!window.confirm(`Overwrite existing layout "${name}"?`))return;
   layouts[name]=_mkPayload();
   _writeLayouts(layouts);
+  _claimSharedSession();
   refreshLayoutSelect();
   document.getElementById('layoutSelect').value=name;
   showToast(`✓ Layout "${name}" saved`,'green');
