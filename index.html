@@ -2800,6 +2800,96 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   ];
   var byId={}; CALCS.forEach(function(c){ byId[c.id]=c; });
 
+  // ---------- PCR / qPCR master-mix builder (custom, dynamic table) ----------
+  var pcrCss=`
+  .pcr-cfg{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px;}
+  @media(max-width:560px){.pcr-cfg{grid-template-columns:1fr;}}
+  .pcr-presets{font-size:11px;color:var(--text3);margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+  .pcr-rows{display:flex;flex-direction:column;gap:6px;}
+  .pcr-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+  .pcr-row input,.pcr-row select{font-family:var(--mono);font-size:12px;padding:6px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);box-sizing:border-box;}
+  .pcr-row input:focus-visible,.pcr-row select:focus-visible{outline:2px solid var(--accent2);outline-offset:1px;}
+  .pcrn{flex:2;min-width:130px;}
+  .pcrpwrap{display:flex;gap:4px;align-items:center;flex:1;min-width:130px;}
+  .pcrp{width:66px;}
+  .pcrx{color:var(--text3);font-size:11px;}
+  .pcrtt{font-size:10.5px;color:var(--text3);display:flex;align-items:center;gap:3px;white-space:nowrap;}
+  .pcrdel{border:0;background:transparent;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 6px;}
+  .pcrdel:hover{color:#c0392b;}
+  `;
+  var ps=document.createElement('style'); ps.textContent=pcrCss; document.head.appendChild(ps);
+  var pcrState=null, pcrHost=null;
+
+  var PCR_PRESETS={
+    q5:{name:'Q5 / Phusion', rxn:25, rows:[
+      {name:'5× Q5 buffer',mode:'cf',stock:5,final:1},{name:'10 mM dNTPs',mode:'cf',stock:10,final:0.2},
+      {name:'10 µM forward primer',mode:'cf',stock:10,final:0.5},{name:'10 µM reverse primer',mode:'cf',stock:10,final:0.5},
+      {name:'Q5 polymerase',mode:'fixed',ul:0.25},{name:'Template DNA',mode:'ng',ng:10,conc:20,perTube:true} ]},
+    qpcr:{name:'qPCR (2× SYBR)', rxn:20, rows:[
+      {name:'2× SYBR master mix',mode:'cf',stock:2,final:1},{name:'10 µM forward primer',mode:'cf',stock:10,final:0.4},
+      {name:'10 µM reverse primer',mode:'cf',stock:10,final:0.4},{name:'cDNA template',mode:'fixed',ul:2,perTube:true} ]},
+    taq:{name:'Taq (10× buffer)', rxn:25, rows:[
+      {name:'10× Taq buffer',mode:'cf',stock:10,final:1},{name:'50 mM MgCl₂',mode:'cf',stock:50,final:1.5},
+      {name:'10 mM dNTPs',mode:'cf',stock:10,final:0.2},{name:'10 µM forward primer',mode:'cf',stock:10,final:0.4},
+      {name:'10 µM reverse primer',mode:'cf',stock:10,final:0.4},{name:'Taq polymerase',mode:'fixed',ul:0.125},
+      {name:'Template DNA',mode:'ng',ng:50,conc:50,perTube:true} ]}
+  };
+  function pcrPer(r,rxn){ if(r.mode==='cf') return (r.stock>0&&isFinite(r.final))? rxn*r.final/r.stock : 0; if(r.mode==='fixed') return r.ul>0?r.ul:0; if(r.mode==='ng') return (r.conc>0&&isFinite(r.ng))? r.ng/r.conc : 0; return 0; }
+  function pcrResults(){
+    var s=pcrState, rxn=s.rxn>0?s.rxn:0, out=document.getElementById('pcrOut'); if(!out)return;
+    var rows=s.rows.map(function(r){ return {r:r, per:pcrPer(r,rxn)}; });
+    var sumAll=rows.reduce(function(a,x){return a+x.per;},0);
+    var water=rxn-sumAll;
+    var rxns=Math.max(1,Math.ceil((s.n||1)*(1+(s.over||0)/100)));
+    var mixRows=rows.filter(function(x){return !x.r.perTube;});
+    var perTubeRows=rows.filter(function(x){return x.r.perTube;});
+    var mixPerRxn=mixRows.reduce(function(a,x){return a+x.per;},0)+Math.max(0,water);
+    var cols=['Component','µL / rxn','µL × '+rxns];
+    var trows=[]; mixRows.forEach(function(x){ trows.push([x.r.name, fmt(x.per), fmt(x.per*rxns)]); });
+    if(water>=0) trows.push(['Nuclease-free water', fmt(water), fmt(water*rxns)]);
+    trows.push(['Master mix subtotal', fmt(mixPerRxn), fmt(mixPerRxn*rxns)]);
+    var txt=['PCR master mix — '+rxn+' µL/rxn × '+rxns+' rxns (N='+s.n+' + '+s.over+'% overage)'];
+    trows.forEach(function(r){txt.push(r.join(' · '));});
+    var warn=[]; if(water<0) warn.push('Components total '+fmt(sumAll)+' µL — that exceeds the '+fmt(rxn)+' µL reaction volume. Reduce a component or raise the reaction volume.');
+    var html='<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr>'+cols.map(function(c){return '<th>'+escapeHtml(c)+'</th>';}).join('')+'</tr></thead><tbody>'+trows.map(function(r,i){return '<tr'+(i===trows.length-1?' style="font-weight:700;border-top:2px solid var(--border)"':'')+'>'+r.map(function(c){return '<td>'+escapeHtml(String(c))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div>';
+    if(perTubeRows.length){ var pt='<b>Per tube:</b> '+fmt(mixPerRxn)+' µL master mix'+perTubeRows.map(function(x){return ' + '+fmt(x.per)+' µL '+escapeHtml(x.r.name);}).join('')+' → '+fmt(rxn)+' µL.'; html+='<div class="mbc-note" style="font-style:normal;color:var(--text2);margin-top:10px;">'+pt+'</div>'; txt.push('Per tube: '+fmt(mixPerRxn)+' µL mix'+perTubeRows.map(function(x){return ' + '+fmt(x.per)+' µL '+x.r.name;}).join('')); }
+    if(warn.length) html+=warn.map(function(w){return '<div class="mbc-warn">⚠ '+escapeHtml(w)+'</div>';}).join('');
+    html+='<div class="mbc-note">Prepare '+rxns+' reactions-worth (N='+s.n+' + '+s.over+'% overage). Per-tube components (e.g. template) are added to each tube, not the shared mix.</div>';
+    out.innerHTML=html; MBC._txt=txt.join('\n');
+  }
+  function pcrModeParams(r,i){
+    if(r.mode==='cf') return '<input class="pcrp" type="number" step="any" inputmode="decimal" value="'+(r.stock!=null?r.stock:'')+'" oninput="MBC.pcrVal('+i+',\'stock\',this.value)" title="stock conc" placeholder="stock"><span class="pcrx">→</span><input class="pcrp" type="number" step="any" inputmode="decimal" value="'+(r.final!=null?r.final:'')+'" oninput="MBC.pcrVal('+i+',\'final\',this.value)" title="final conc" placeholder="final">';
+    if(r.mode==='fixed') return '<input class="pcrp" type="number" step="any" inputmode="decimal" value="'+(r.ul!=null?r.ul:'')+'" oninput="MBC.pcrVal('+i+',\'ul\',this.value)" title="µL per reaction" placeholder="µL/rxn"><span class="pcrx">µL</span>';
+    return '<input class="pcrp" type="number" step="any" inputmode="decimal" value="'+(r.ng!=null?r.ng:'')+'" oninput="MBC.pcrVal('+i+',\'ng\',this.value)" title="ng per reaction" placeholder="ng"><span class="pcrx">/</span><input class="pcrp" type="number" step="any" inputmode="decimal" value="'+(r.conc!=null?r.conc:'')+'" oninput="MBC.pcrVal('+i+',\'conc\',this.value)" title="stock ng/µL" placeholder="ng/µL">';
+  }
+  function pcrRender(host){
+    pcrHost=host; var s=pcrState;
+    var rowsHtml=s.rows.map(function(r,i){
+      return '<div class="pcr-row">'+
+        '<input class="pcrn" value="'+escapeHtml(r.name||'')+'" oninput="MBC.pcrVal('+i+',\'name\',this.value)" placeholder="component">'+
+        '<select class="pcrm" onchange="MBC.pcrMode('+i+',this.value)">'+['cf','fixed','ng'].map(function(m){var lab=m==='cf'?'stock→final':m==='fixed'?'µL/rxn':'ng (template)';return '<option value="'+m+'"'+(m===r.mode?' selected':'')+'>'+lab+'</option>';}).join('')+'</select>'+
+        '<span class="pcrpwrap">'+pcrModeParams(r,i)+'</span>'+
+        '<label class="pcrtt" title="added to each tube, not the shared mix"><input type="checkbox" '+(r.perTube?'checked':'')+' onchange="MBC.pcrVal('+i+',\'perTube\',this.checked)"> per-tube</label>'+
+        '<button class="pcrdel" onclick="MBC.pcrDel('+i+')" title="remove" aria-label="remove component">✕</button>'+
+      '</div>';
+    }).join('');
+    host.innerHTML=
+      '<div class="pcr-cfg">'+
+        '<div class="mbc-f"><label>Reaction volume (µL)</label><input type="number" step="any" inputmode="decimal" value="'+s.rxn+'" oninput="MBC.pcrCfg(\'rxn\',this.value)"></div>'+
+        '<div class="mbc-f"><label>Number of reactions</label><input type="number" step="1" inputmode="numeric" value="'+s.n+'" oninput="MBC.pcrCfg(\'n\',this.value)"></div>'+
+        '<div class="mbc-f"><label>Overage (%)</label><input type="number" step="any" inputmode="decimal" value="'+s.over+'" oninput="MBC.pcrCfg(\'over\',this.value)"></div>'+
+      '</div>'+
+      '<div class="pcr-presets">Presets: '+Object.keys(PCR_PRESETS).map(function(k){return '<button class="btn" onclick="MBC.pcrPreset(\''+k+'\')">'+escapeHtml(PCR_PRESETS[k].name)+'</button>';}).join(' ')+'</div>'+
+      '<div class="pcr-rows">'+rowsHtml+'</div>'+
+      '<div class="mbc-actions"><button class="btn" onclick="MBC.pcrAdd()">＋ Component</button><button class="btn" onclick="MBC.copy()">Copy protocol</button></div>'+
+      '<div id="pcrOut" class="mbc-result"></div>';
+    pcrResults();
+  }
+  var PCR={ id:'pcr', name:'PCR / qPCR master-mix builder', group:G_NA, tags:'pcr qpcr master mix reaction setup q5 taq sybr overage water',
+    blurb:'Build a master mix from components (stock→final, fixed µL, or ng template), with overage and auto water balance.', custom:pcrRender };
+  pcrState={rxn:25,n:10,over:10,rows:PCR_PRESETS.q5.rows.map(function(r){return Object.assign({},r);})};
+  CALCS.splice(0,0,PCR); byId.pcr=PCR;
+
   // ---------- field rendering ----------
   function hint(f){ return f.hint?'<div class="mbc-hint">'+escapeHtml(f.hint)+'</div>':''; }
   function fieldHtml(f){
@@ -2828,6 +2918,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   function recompute(){ var calc=byId[MBC._cur]; if(!calc||calc.custom)return; var res; try{ res=calc.compute(gather(calc)); }catch(e){ res={warn:['Check your inputs.']}; } renderResult(calc,res); }
   function openCalc(id){ var calc=byId[id]; if(!calc)return; MBC._cur=id; try{localStorage.setItem('mbc_last',id);}catch(e){} renderNav();
     var m=document.getElementById('mbcMain'); if(!m)return;
+    if(calc.custom){ m.innerHTML='<div class="mbc-head"><h2>'+escapeHtml(calc.name)+'</h2><p>'+escapeHtml(calc.blurb||'')+'</p></div><div id="mbcCustom"></div>'; calc.custom(document.getElementById('mbcCustom')); return; }
     m.innerHTML='<div class="mbc-head"><h2>'+escapeHtml(calc.name)+'</h2><p>'+escapeHtml(calc.blurb||'')+'</p></div>'+
       '<div class="mbc-form">'+(calc.fields||[]).map(fieldHtml).join('')+'</div>'+
       '<div class="mbc-actions"><button class="btn" onclick="MBC.copy()">Copy result</button></div>'+
@@ -2843,7 +2934,13 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   }
   function initCalc(){ var last=(MBC._cur&&byId[MBC._cur])?MBC._cur:null; if(!last){ try{last=localStorage.getItem('mbc_last');}catch(e){} } if(!byId[last]) last=CALCS[0].id; renderNav(); openCalc(last); }
 
-  window.MBC={ open:openCalc, init:initCalc, recompute:recompute, filter:renderNav, copy:function(){ dcCopyText(MBC._txt); }, calcs:CALCS };
+  window.MBC={ open:openCalc, init:initCalc, recompute:recompute, filter:renderNav, copy:function(){ dcCopyText(MBC._txt); }, calcs:CALCS,
+    pcrCfg:function(k,val){ pcrState[k]=(k==='n')?Math.max(1,Math.round(num(val)||1)):(num(val)||0); pcrResults(); },
+    pcrVal:function(i,k,val){ var r=pcrState.rows[i]; if(!r)return; if(k==='name') r.name=val; else if(k==='perTube') r.perTube=val; else r[k]=num(val); pcrResults(); },
+    pcrMode:function(i,m){ if(pcrState.rows[i]){ pcrState.rows[i].mode=m; } pcrRender(pcrHost); },
+    pcrDel:function(i){ pcrState.rows.splice(i,1); pcrRender(pcrHost); },
+    pcrAdd:function(){ pcrState.rows.push({name:'New component',mode:'cf',stock:10,final:1}); pcrRender(pcrHost); },
+    pcrPreset:function(k){ var p=PCR_PRESETS[k]; if(!p)return; pcrState={rxn:p.rxn,n:pcrState.n||10,over:pcrState.over||10,rows:p.rows.map(function(r){return Object.assign({},r);})}; pcrRender(pcrHost); } };
 
   // ---------- home hub ----------
   window.renderHome=function(){
