@@ -2658,12 +2658,15 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       fields:[ {k:'seq',label:'Sequence',kind:'seq',ph:'paste DNA/RNA (A C G T/U)'} ],
       compute:function(v){
         var s=cleanSeq(v.seq); if(s.length<1) return null;
-        var comp={A:'T',T:'A',U:'A',G:'C',C:'G',N:'N'};
+        // RNA input (contains U) must complement A→U, not A→T.
+        var isRNA=s.indexOf('U')>=0;
+        var comp=isRNA?{A:'U',U:'A',T:'A',G:'C',C:'G',N:'N'}:{A:'T',T:'A',U:'A',G:'C',C:'G',N:'N'};
         var c=s.split('').map(function(b){return comp[b]||'N';}).join('');
         var rc=c.split('').reverse().join('');
         var G=(s.match(/G/g)||[]).length, C=(s.match(/C/g)||[]).length;
         return {rows:[
           {label:'Length',value:s.length+' nt'},
+          {label:'Type',value:isRNA?'RNA (U detected)':'DNA'},
           {label:'GC content',value:fmt((G+C)/s.length*100,3)+' %'}
         ], note:'Reverse complement (5′→3′):', protocol:rc, table:{cols:['','Sequence (5′→3′)'],rows:[['Reverse complement',rc],['Complement',c]]} };
       } },
@@ -2961,6 +2964,8 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     cases.forEach(function(t){ var calc=byId[t[0]]; if(!calc||!calc.compute){ fails.push(t[0]+': no compute'); return; } var res; try{ res=calc.compute(t[1]); }catch(e){ fails.push(t[0]+': threw '+e.message); return; } t[2].forEach(function(chk){ n++; var got=_pnum(_rowVal(res,chk[0])); if(!_near(got,chk[1],chk[2])) fails.push(t[0]+' / '+chk[0]+': got '+got+' want '+chk[1]); }); });
     n++; try{ var lg=byId['ligation'].compute({vng:50,vbp:5000,ibp:1000,iconc:0,ratios:'3'}); if(!_near(_pnum(lg.table.rows[0][1]),30,0.5)) fails.push('ligation 3:1 got '+lg.table.rows[0][1]+' want 30'); }catch(e){ fails.push('ligation threw '+e.message); }
     n++; if(!_near(pcrPer({mode:'cf',stock:5,final:1},25),5,0.01)) fails.push('pcr cf per-rxn wrong');
+    n++; try{ var sd=byId['seqtool'].compute({seq:'ATGC'}); if(sd.protocol!=='GCAT') fails.push('seqtool DNA revcomp got '+sd.protocol+' want GCAT'); }catch(e){ fails.push('seqtool DNA threw '+e.message); }
+    n++; try{ var sr=byId['seqtool'].compute({seq:'AUGC'}); if(sr.protocol!=='GCAU') fails.push('seqtool RNA revcomp got '+sr.protocol+' want GCAU'); }catch(e){ fails.push('seqtool RNA threw '+e.message); }
     return {total:n, passed:n-fails.length, failures:fails};
   }
 
