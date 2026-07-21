@@ -277,6 +277,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
   <div class="mode-tabs">
     <button class="mode-tab active" id="modeTabPlasmid" onclick="setMode('plasmid')">Plasmid / Induction</button>
     <button class="mode-tab" id="modeTabPhage" onclick="setMode('phage')">Phage Infection</button>
+    <button class="mode-tab" id="modeTabReagent" onclick="setMode('reagent')">Reagent Prep</button>
   </div>
   <div class="theme-group">
     <button class="theme-btn active" data-theme="day" onclick="setTheme('day')">Day</button>
@@ -305,6 +306,42 @@ body.print-plate-mode .excl-bar{display:none!important;}
 <div id="welcomeBanner" role="alert">
   <div id="wbContent"><strong>Welcome to Dilution Designer!</strong> &nbsp;Add conditions in the left panel → paint them onto the plate → export your protocol. Switch between <em>Plasmid/Induction</em> and <em>Phage Infection</em> modes using the tabs above.</div>
   <button id="wbDismiss" onclick="dismissWelcome()" aria-label="Dismiss">✕</button>
+</div>
+
+<!-- ══════════ REAGENT PREP VIEW ══════════ -->
+<div id="reagentView" style="display:none;padding:16px 20px 60px;max-width:1180px;margin:0 auto;">
+  <div class="rp-grid">
+    <!-- LEFT: picker -->
+    <aside class="rp-picker">
+      <div class="sl">Reagent / buffer library</div>
+      <input id="rpSearch" placeholder="Search recipes (e.g. LB, TAE, ampicillin, PBS)…" oninput="rpRenderList()" autocomplete="off" aria-label="Search reagent library">
+      <div id="rpCatFilter" class="rp-cats"></div>
+      <div id="rpList" class="rp-list" role="listbox" aria-label="Recipes"></div>
+      <div class="rp-libtools">
+        <button class="btn" onclick="rpAddCustom()" title="Add your own recipe">＋ Add recipe</button>
+        <button class="btn" onclick="rpExportLibrary()" title="Download the whole library as JSON">⬇ Export</button>
+        <label class="btn" style="cursor:pointer;" title="Import recipes from a JSON file">⬆ Import<input type="file" id="rpImport" accept="application/json,.json" style="display:none" onchange="rpImportLibrary(event)"></label>
+      </div>
+      <div id="rpLibStatus" class="rp-libstatus"></div>
+    </aside>
+    <!-- RIGHT: prep sheet -->
+    <section class="rp-main">
+      <div class="rp-controls">
+        <div class="f" style="margin:0;">
+          <label>Final volume to prepare</label>
+          <div class="r2" style="grid-template-columns:1fr 90px;">
+            <input id="rpVolume" type="number" min="0" step="any" value="100" oninput="rpCompute()" aria-label="Final volume">
+            <select id="rpVolUnit" onchange="rpCompute()" aria-label="Volume unit"><option value="mL">mL</option><option value="L">L</option><option value="uL">µL</option></select>
+          </div>
+        </div>
+        <div class="rp-actions">
+          <button class="btn" onclick="rpPrint()" title="Print this prep sheet">🖨 Print sheet</button>
+          <button class="btn" onclick="rpCopy()" title="Copy prep sheet as text">Copy</button>
+        </div>
+      </div>
+      <div id="rpSheet" class="rp-sheet"><div class="rp-empty">Pick a reagent from the library to see exactly what to weigh and pipette for your volume.</div></div>
+    </section>
+  </div>
 </div>
 
 <div class="app">
@@ -684,6 +721,14 @@ function setMode(m) {
   appMode = m;
   document.getElementById('modeTabPlasmid').classList.toggle('active',m==='plasmid');
   document.getElementById('modeTabPhage').classList.toggle('active',m==='phage');
+  var mtR=document.getElementById('modeTabReagent'); if(mtR) mtR.classList.toggle('active',m==='reagent');
+  // Reagent Prep is a self-contained view — hide the plate workspace when active.
+  var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView');
+  if(rv){
+    rv.style.display = m==='reagent'?'':'none';
+    if(appEl) appEl.style.display = m==='reagent'?'none':'';
+    if(m==='reagent'){ rpInit(); return; }
+  }
   document.getElementById('sbPlasmid').style.display = m==='plasmid'?'':'none';
   document.getElementById('sbPhage').style.display   = m==='phage'?'':'none';
   document.getElementById('moiPanel').style.display  = m==='phage'?'':'none';
@@ -1734,6 +1779,110 @@ _ready=true;
 refreshLayoutSelect();
 update();
 showWelcomeBanner();
+
+/* ══════════════════════════ REAGENT PREP ══════════════════════════ */
+(function(){
+  var css = `
+  #reagentView .rp-grid{display:grid;grid-template-columns:320px 1fr;gap:18px;align-items:start;}
+  @media(max-width:820px){#reagentView .rp-grid{grid-template-columns:1fr;}}
+  .rp-picker{position:sticky;top:12px;display:flex;flex-direction:column;gap:8px;}
+  #rpSearch{width:100%;}
+  .rp-cats{display:flex;flex-wrap:wrap;gap:5px;}
+  .rp-cat{font:600 10px/1 var(--mono,monospace);letter-spacing:.02em;padding:5px 8px;border:1px solid var(--line,#d9d2c4);border-radius:999px;background:transparent;color:var(--text3,#8a8172);cursor:pointer;}
+  .rp-cat.active{background:var(--accent,#2f7d5b);color:#fff;border-color:var(--accent,#2f7d5b);}
+  .rp-catn{opacity:.7;}
+  .rp-list{max-height:52vh;overflow:auto;border:1px solid var(--line,#d9d2c4);border-radius:10px;background:var(--card,#fff);}
+  .rp-item{display:block;width:100%;text-align:left;padding:9px 11px;border:0;border-bottom:1px solid var(--line,#eee);background:transparent;cursor:pointer;}
+  .rp-item:hover{background:var(--bg2,#f4f0e7);}
+  .rp-item.active{background:var(--accent,#2f7d5b);}
+  .rp-item.active .rp-item-name,.rp-item.active .rp-item-sum{color:#fff;}
+  .rp-item-name{font-weight:700;font-size:12.5px;color:var(--text,#2a2519);}
+  .rp-item-sum{font-size:10.5px;color:var(--text3,#8a8172);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .rp-libtools{display:flex;gap:6px;}
+  .rp-libtools .btn{flex:1;justify-content:center;font-size:11px;}
+  .rp-libstatus{font:11px var(--mono,monospace);color:var(--text3,#8a8172);}
+  .rp-controls{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;}
+  .rp-actions{display:flex;gap:6px;margin-left:auto;}
+  .rp-sheet{border:1px solid var(--line,#d9d2c4);border-radius:12px;background:var(--card,#fff);padding:20px 22px;}
+  .rp-empty{color:var(--text3,#8a8172);text-align:center;padding:36px 12px;font-style:italic;}
+  .rp-title{font-family:var(--serif,Georgia,serif);font-size:1.35rem;font-weight:700;color:var(--text,#2a2519);margin:0 0 2px;}
+  .rp-sub{color:var(--text3,#8a8172);font-size:12px;margin-bottom:14px;}
+  .rp-vol-badge{display:inline-block;font:600 11px var(--mono,monospace);background:var(--accentL,#e7f1ec);color:var(--accent,#2f7d5b);padding:3px 9px;border-radius:6px;}
+  .rp-tbl{width:100%;border-collapse:collapse;margin:6px 0 4px;}
+  .rp-tbl td{padding:8px 6px;border-bottom:1px solid var(--line,#eee);vertical-align:top;}
+  .rp-cname{font-weight:600;color:var(--text,#2a2519);}
+  .rp-camt{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
+  .rp-camt strong{font-size:14px;}
+  .rp-cdetail{font:10.5px var(--mono,monospace);color:var(--text3,#8a8172);font-weight:400;margin-top:2px;}
+  .rp-cnote{font-size:10.5px;color:var(--text3,#8a8172);font-weight:400;margin-top:2px;}
+  .rp-chaz{font-size:10.5px;color:var(--danger,#c0392b);font-weight:600;margin-top:2px;}
+  .rp-note-amt{font-size:11px;color:var(--text3,#8a8172);font-style:italic;}
+  .rp-meta{margin-top:14px;display:grid;grid-template-columns:120px 1fr;gap:4px 12px;font-size:12px;}
+  .rp-meta dt{font-weight:700;color:var(--text3,#8a8172);}
+  .rp-meta dd{margin:0;color:var(--text,#2a2519);}
+  .rp-notes{margin-top:12px;font-size:12px;color:var(--text,#2a2519);}
+  .rp-notes li{margin:3px 0;}
+  .rp-src{margin-top:10px;font-size:11px;color:var(--text3,#8a8172);}
+  .rp-src a{color:var(--accent,#2f7d5b);}
+  .rp-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;}
+  .rp-modal{background:var(--card,#fff);border-radius:14px;max-width:560px;width:100%;max-height:88vh;overflow:auto;padding:22px;}
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+})();
+
+var rpLib=null, rpAllRecipes=[], rpActiveCat='all', rpSelectedId=null, rpLoaded=false, rpLastText='';
+
+function rpInit(){
+  if(rpLoaded){ rpRenderCats(); rpRenderList(); return; }
+  var s=document.getElementById('rpLibStatus'); if(s) s.textContent='Loading library…';
+  fetch('reagent-library.json',{cache:'no-cache'})
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(function(d){ rpLib=d; rpFinishLoad(); })
+    .catch(function(e){ var el=document.getElementById('rpLibStatus'); if(el) el.innerHTML='<span style="color:var(--danger,#c0392b)">Could not load reagent-library.json ('+escapeHtml(e.message)+'). Use the hosted version, not a local file.</span>'; });
+}
+function rpFinishLoad(){ rpLoaded=true; rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes'; }
+function rpFlatten(){ rpAllRecipes=[]; (rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ rpAllRecipes.push(Object.assign({_cat:c.title,_catKey:c.key}, r)); }); }); }
+function rpCustom(){ try{ return JSON.parse(localStorage.getItem('dd_reagent_custom')||'[]'); }catch(e){ return []; } }
+function rpMergeCustom(){ var cust=rpCustom(); var cat=(rpLib.categories||[]).find(function(c){return c.key==='custom';}); if(cust.length){ if(!cat){ cat={key:'custom',title:'My recipes',recipes:[]}; rpLib.categories.push(cat);} cat.recipes=cust; } else if(cat){ cat.recipes=[]; } }
+function rpRenderCats(){ var el=document.getElementById('rpCatFilter'); if(!el) return; var cats=[{key:'all',title:'All',n:rpAllRecipes.length}].concat((rpLib.categories||[]).map(function(c){return {key:c.key,title:c.title,n:(c.recipes||[]).length};})).filter(function(c){return c.n>0;}); el.innerHTML=cats.map(function(c){return '<button class="rp-cat'+(rpActiveCat===c.key?' active':'')+'" onclick="rpSetCat(\''+c.key+'\')">'+escapeHtml(c.title)+' <span class="rp-catn">'+c.n+'</span></button>';}).join(''); }
+function rpSetCat(k){ rpActiveCat=k; rpRenderCats(); rpRenderList(); }
+function rpRenderList(){ var q=(document.getElementById('rpSearch').value||'').trim().toLowerCase(); var list=rpAllRecipes.filter(function(r){return rpActiveCat==='all'||r._catKey===rpActiveCat;}); if(q) list=list.filter(function(r){ return (r.name+' '+(r.aka||[]).join(' ')+' '+(r.summary||'')+' '+r._cat).toLowerCase().indexOf(q)>=0; }); var el=document.getElementById('rpList'); if(!list.length){ el.innerHTML='<div class="rp-empty" style="padding:16px;">No matches.</div>'; return; } el.innerHTML=list.map(function(r){ return '<button class="rp-item'+(rpSelectedId===r.id?' active':'')+'" role="option" onclick="rpSelect(\''+r.id+'\')"><div class="rp-item-name">'+escapeHtml(r.name)+'</div><div class="rp-item-sum">'+escapeHtml(r.summary||r._cat)+'</div></button>'; }).join(''); }
+function rpSelect(id){ rpSelectedId=id; rpRenderList(); rpCompute(); }
+function rpVolumeMl(){ var v=parseFloat(document.getElementById('rpVolume').value)||0; var u=document.getElementById('rpVolUnit').value; return u==='L'?v*1000:u==='uL'?v/1000:v; }
+function rpConcCanon(value,unit){ var u=(unit||'').trim().toLowerCase().replace(/µ/g,'u'); var mv={'mg/ml':1,'ug/ml':0.001,'g/ml':1000,'ng/ml':1e-6,'g/l':1,'mg/l':0.001,'ug/l':1e-6,'ug/ul':1,'mg/ul':1000,'ng/ul':0.001}; var mo={'m':1000,'mm':1,'um':0.001,'nm':1e-6,'pm':1e-9}; if(mv[u]!=null) return {fam:'massvol',val:value*mv[u]}; if(mo[u]!=null) return {fam:'molar',val:value*mo[u]}; if(u==='x'||u==='fold') return {fam:'fold',val:value}; if(u.indexOf('%')>=0) return {fam:'pct',val:value}; if(u==='u/ml'||u==='units/ml') return {fam:'act',val:value}; return null; }
+function rpNum(n){ if(n==null||isNaN(n)) return '—'; if(n!==0&&(Math.abs(n)<0.001||Math.abs(n)>=1e5)) return Number(n).toExponential(2); return (Math.round(n*1000)/1000).toString(); }
+function rpMass(g){ if(g>=1) return rpNum(g)+' g'; if(g>=0.001) return rpNum(g*1000)+' mg'; return rpNum(g*1e6)+' µg'; }
+function rpVol(mL){ if(mL>=1000) return rpNum(mL/1000)+' L'; if(mL>=1) return rpNum(mL)+' mL'; return rpNum(mL*1000)+' µL'; }
+function rpComponentAmount(c,volMl){ var volL=volMl/1000; if(c.gramsPerLiter!=null) return {kind:'mass',grams:c.gramsPerLiter*volL,detail:c.gramsPerLiter+' g/L'}; if(c.molarity_M!=null&&c.mw_gmol!=null) return {kind:'mass',grams:c.molarity_M*c.mw_gmol*volL,detail:rpNum(c.molarity_M)+' M · MW '+rpNum(c.mw_gmol)+(c.form?' · '+c.form:'')}; if(c.percent){ if((c.percent.type||'w/v').toLowerCase()==='v/v') return {kind:'vol',mL:(c.percent.value/100)*volMl,detail:c.percent.value+'% v/v'}; return {kind:'mass',grams:(c.percent.value/100)*volMl,detail:c.percent.value+'% w/v'}; } if(c.volumeFraction) return {kind:'vol',mL:(c.volumeFraction.value/100)*volMl,detail:c.volumeFraction.value+'% v/v'}; if(c.fromStock){ var s=c.fromStock; var sc=rpConcCanon(s.stockConc,s.stockUnit), fc=rpConcCanon(s.finalConc,s.finalUnit); if(sc&&fc&&sc.fam===fc.fam&&sc.val>0){ return {kind:'vol',mL:(fc.val*volMl)/sc.val,detail:'from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock → '+rpNum(s.finalConc)+' '+s.finalUnit}; } return {kind:'note',text:'to '+rpNum(s.finalConc)+' '+s.finalUnit+' from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock'}; } return {kind:'note',text:c.note||'(see notes)'}; }
+function rpAmountStr(a){ return a.kind==='mass'?rpMass(a.grams):a.kind==='vol'?rpVol(a.mL):'—'; }
+function rpCompute(){ var r=rpAllRecipes.find(function(x){return x.id===rpSelectedId;}); var el=document.getElementById('rpSheet'); if(!r){ el.innerHTML='<div class="rp-empty">Pick a reagent from the library to see exactly what to weigh and pipette for your volume.</div>'; return; } var volMl=rpVolumeMl(); var lines=[]; var rows=(r.components||[]).map(function(c){ var a=rpComponentAmount(c,volMl); var amtTxt = a.kind==='note'?a.text:rpAmountStr(a); lines.push('  '+c.name+': '+amtTxt); var amt=a.kind==='note'?'<span class="rp-note-amt">'+escapeHtml(a.text)+'</span>':'<strong>'+escapeHtml(rpAmountStr(a))+'</strong>'; var det=a.detail?'<div class="rp-cdetail">'+escapeHtml(a.detail)+'</div>':''; var note=c.note?'<div class="rp-cnote">'+escapeHtml(c.note)+'</div>':''; var haz=c.hazard?'<div class="rp-chaz">⚠ '+escapeHtml(c.hazard)+'</div>':''; return '<tr><td class="rp-cname">'+escapeHtml(c.name)+det+note+haz+'</td><td class="rp-camt">'+amt+'</td></tr>'; }).join('');
+  var meta=[]; function m(k,v){ if(v!=null&&v!=='') meta.push('<dt>'+k+'</dt><dd>'+escapeHtml(String(v))+'</dd>'); }
+  m('Bring to volume with', r.solvent); m('Final pH', r.finalPH); m('Adjust pH with', r.adjustPHWith); m('Sterilize', r.sterilization); m('Storage', r.storage); m('Shelf life', r.shelfLife); if(r.hazards) meta.push('<dt style="color:var(--danger,#c0392b)">Hazards</dt><dd style="color:var(--danger,#c0392b)">'+escapeHtml(r.hazards)+'</dd>');
+  var notes=(r.notes&&r.notes.length)?'<div class="rp-notes"><strong>Notes</strong><ul>'+r.notes.map(function(n){return '<li>'+escapeHtml(n)+'</li>';}).join('')+'</ul></div>':'';
+  var src=(r.sources&&r.sources.length)?'<div class="rp-src">Sources: '+r.sources.map(function(s){ return s.url?'<a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">'+escapeHtml(s.title||s.url)+'</a>'+(s.license?' <em>('+escapeHtml(s.license)+')</em>':''):escapeHtml(s.title||''); }).join(' · ')+'</div>':'';
+  var unc=r.uncertain?'<div class="rp-chaz" style="margin:6px 0 0">⚠ Marked uncertain — verify against your own protocol before use.</div>':'';
+  var gap=r.openSourceGap?'<div class="rp-cnote" style="margin-top:4px">Note: no open-source citation yet for this recipe.</div>':'';
+  el.innerHTML='<h2 class="rp-title">'+escapeHtml(r.name)+'</h2>'+(r.aka&&r.aka.length?'<div class="rp-sub">a.k.a. '+escapeHtml(r.aka.join(', '))+'</div>':'')+(r.summary?'<div class="rp-sub">'+escapeHtml(r.summary)+'</div>':'')+'<div class="rp-vol-badge">For '+rpVol(volMl)+'</div>'+unc+'<table class="rp-tbl"><tbody>'+rows+'</tbody></table><dl class="rp-meta">'+meta.join('')+'</dl>'+notes+gap+src;
+  rpLastText=r.name+' — for '+rpVol(volMl)+'\n'+lines.join('\n')+'\nBring to volume with '+(r.solvent||'')+(r.finalPH!=null?'\npH '+r.finalPH:'')+(r.sterilization?'\nSterilize: '+r.sterilization:'');
+}
+function rpCopy(){ if(!rpLastText){ showToast('Pick a recipe first','warn'); return; } (navigator.clipboard?navigator.clipboard.writeText(rpLastText):Promise.reject()).then(function(){ showToast('Prep sheet copied'); }).catch(function(){ var ta=document.createElement('textarea'); ta.value=rpLastText; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy'); showToast('Prep sheet copied');}catch(e){showToast('Copy failed','warn');} ta.remove(); }); }
+function rpPrint(){ var sheet=document.getElementById('rpSheet'); if(!rpSelectedId){ showToast('Pick a recipe first','warn'); return; } var w=window.open('','_blank'); if(!w){ showToast('Pop-up blocked','warn'); return; } w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Prep sheet</title><style>body{font-family:Georgia,serif;max-width:640px;margin:24px auto;padding:0 16px;color:#1a1a1a;}h2{margin:0 0 6px;}table{width:100%;border-collapse:collapse;margin:10px 0;}td{padding:6px 4px;border-bottom:1px solid #ddd;vertical-align:top;}.rp-camt{text-align:right;white-space:nowrap;}dl{display:grid;grid-template-columns:130px 1fr;gap:3px 10px;font-size:13px;}dt{font-weight:700;}dd{margin:0;}.rp-cdetail,.rp-cnote,.rp-src{font-size:11px;color:#666;}.rp-chaz{color:#b00;font-size:11px;}small{color:#888;}</style></head><body>'+sheet.innerHTML+'<p><small>Generated by Dilution Designer · verify against your lab protocol.</small></p></body></html>'); w.document.close(); w.focus(); setTimeout(function(){ w.print(); }, 250); }
+function rpExportLibrary(){ var data=JSON.stringify({version:(rpLib&&rpLib.version)||'1.0',categories:(rpLib?rpLib.categories:[])},null,1); var blob=new Blob([data],{type:'application/json'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='reagent-library.json'; a.click(); setTimeout(function(){URL.revokeObjectURL(a.href);},1000); showToast('Library exported'); }
+function rpImportLibrary(ev){ var f=ev.target.files&&ev.target.files[0]; if(!f) return; var rd=new FileReader(); rd.onload=function(){ try{ var d=JSON.parse(rd.result); var recipes=[]; if(Array.isArray(d)) recipes=d; else if(d.categories) recipes=d.categories.reduce(function(a,c){return a.concat(c.recipes||[]);},[]); else if(d.recipes) recipes=d.recipes; if(!recipes.length) throw new Error('no recipes found'); var cust=rpCustom(); var byId={}; cust.forEach(function(r){byId[r.id]=r;}); recipes.forEach(function(r){ if(r&&r.id&&r.name) byId[r.id]=r; }); var merged=Object.keys(byId).map(function(k){return byId[k];}); localStorage.setItem('dd_reagent_custom',JSON.stringify(merged)); rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes'; showToast('Imported '+recipes.length+' recipe(s)'); }catch(e){ showToast('Import failed: '+e.message,'warn'); } ev.target.value=''; }; rd.readAsText(f); }
+function rpAddCustom(){
+  var bg=document.createElement('div'); bg.className='rp-modal-bg'; bg.onclick=function(e){ if(e.target===bg) bg.remove(); };
+  bg.innerHTML='<div class="rp-modal"><h2 style="margin:0 0 4px;font-family:var(--serif,Georgia,serif);">Add a recipe</h2><p style="font-size:12px;color:var(--text3,#8a8172);margin:0 0 12px;">Saved in this browser. Each component: pick a type and fill the amount.</p>'+
+    '<div class="f"><label>Name</label><input id="rcName" placeholder="e.g. My lysis buffer"></div>'+
+    '<div class="f"><label>Short description</label><input id="rcSum" placeholder="what it\'s for (optional)"></div>'+
+    '<div class="f"><label>Bring to volume with</label><input id="rcSolvent" value="deionized water (bring to final volume)"></div>'+
+    '<div class="f"><label>Sterilize / storage (optional)</label><input id="rcSteril" placeholder="e.g. 0.22 µm filter · 4 °C"></div>'+
+    '<div style="margin:10px 0 4px;font-weight:700;font-size:12px;">Components</div><div id="rcRows"></div>'+
+    '<button class="btn" onclick="rpAddCompRow()" style="margin-top:6px;">＋ Component</button>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;"><button class="btn" onclick="this.closest(\'.rp-modal-bg\').remove()">Cancel</button><button class="btn ac" onclick="rpSaveCustom()">Save recipe</button></div></div>';
+  document.body.appendChild(bg); rpAddCompRow(); rpAddCompRow();
+}
+function rpAddCompRow(){ var box=document.getElementById('rcRows'); if(!box) return; var row=document.createElement('div'); row.className='rc-row'; row.style.cssText='display:grid;grid-template-columns:1fr 110px 1fr 24px;gap:5px;margin-bottom:5px;align-items:center;'; row.innerHTML='<input class="rc-cn" placeholder="component"><select class="rc-ct"><option value="gL">g/L</option><option value="M">molarity+MW</option><option value="pctwv">% w/v</option><option value="pctvv">% v/v</option><option value="stock">from stock</option></select><input class="rc-cv" placeholder="value"><button class="btn" style="padding:2px 6px;" onclick="this.parentNode.remove()" title="remove">✕</button>'; box.appendChild(row); }
+function rpSaveCustom(){ var name=(document.getElementById('rcName').value||'').trim(); if(!name){ showToast('Name is required','warn'); return; } var comps=[]; document.querySelectorAll('#rcRows .rc-row').forEach(function(row){ var cn=(row.querySelector('.rc-cn').value||'').trim(); var ct=row.querySelector('.rc-ct').value; var cv=(row.querySelector('.rc-cv').value||'').trim(); if(!cn) return; if(ct==='gL'){ comps.push({name:cn,gramsPerLiter:parseFloat(cv)||0}); } else if(ct==='M'){ var p=cv.split(/[,;\s]+/).filter(Boolean); comps.push({name:cn,molarity_M:parseFloat(p[0])||0,mw_gmol:parseFloat(p[1])||0}); } else if(ct==='pctwv'){ comps.push({name:cn,percent:{value:parseFloat(cv)||0,type:'w/v'}}); } else if(ct==='pctvv'){ comps.push({name:cn,percent:{value:parseFloat(cv)||0,type:'v/v'}}); } else if(ct==='stock'){ var q=cv.split(/[,;]+/); comps.push({name:cn,note:'from stock: '+cv,fromStock:null}); if(!cv) comps[comps.length-1].note='from stock (add details)'; } }); if(!comps.length){ showToast('Add at least one component','warn'); return; } var rec={ id:'custom-'+Date.now(), name:name, summary:(document.getElementById('rcSum').value||'').trim()||'Custom recipe', components:comps, solvent:(document.getElementById('rcSolvent').value||'').trim(), sterilization:(document.getElementById('rcSteril').value||'').trim(), notes:['Custom recipe added by you.'], sources:[{title:'My lab protocol',license:'custom'}] }; var cust=rpCustom(); cust.push(rec); localStorage.setItem('dd_reagent_custom',JSON.stringify(cust)); rpMergeCustom(); rpFlatten(); rpActiveCat='custom'; rpSelectedId=rec.id; rpRenderCats(); rpRenderList(); rpCompute(); var bg=document.querySelector('.rp-modal-bg'); if(bg) bg.remove(); showToast('Recipe saved'); }
 </script>
 </body>
 </html>
