@@ -278,6 +278,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <button class="mode-tab active" id="modeTabPlasmid" onclick="setMode('plasmid')">Plasmid / Induction</button>
     <button class="mode-tab" id="modeTabPhage" onclick="setMode('phage')">Phage Infection</button>
     <button class="mode-tab" id="modeTabReagent" onclick="setMode('reagent')">Reagent Prep</button>
+    <button class="mode-tab" id="modeTabDilcalc" onclick="setMode('dilcalc')">Dilution Calc</button>
   </div>
   <div class="theme-group">
     <button class="theme-btn active" data-theme="day" onclick="setTheme('day')">Day</button>
@@ -342,6 +343,111 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div id="rpSheet" class="rp-sheet"><div class="rp-empty">Pick a reagent from the library to see exactly what to weigh and pipette for your volume.</div></div>
     </section>
   </div>
+</div>
+
+<!-- ══════════ DILUTION CALCULATOR VIEW ══════════ -->
+<div id="dilcalcView" style="display:none;padding:16px 20px 60px;max-width:1000px;margin:0 auto;">
+  <h2 class="dc-h">Dilution &amp; Molarity Calculator</h2>
+  <div class="dc-sub">C1V1 = C2V2 across M · mM · µM · nM · pM and mass units. Tell it what you have and what you want — it works out exactly how to make it, and warns you when a volume is too small to pipette.</div>
+
+  <div class="dc-tabs">
+    <button class="dc-tab active" id="dcTab1" onclick="dcSetTab('c1v1')">Dilute a stock</button>
+    <button class="dc-tab" id="dcTab2" onclick="dcSetTab('serial')">Serial dilution</button>
+    <button class="dc-tab" id="dcTab3" onclick="dcSetTab('convert')">Converters</button>
+  </div>
+
+  <!-- ── DILUTE A STOCK (C1V1) ── -->
+  <section id="dcPanelC1V1" class="dc-panel">
+    <div class="dc-grid3">
+      <div class="dc-f"><label>Stock concentration (C1) — what you have</label>
+        <div class="dc-cu"><input id="dcC1" type="number" step="any" min="0" value="1" placeholder="e.g. 100" oninput="dcCalc()">
+          <select id="dcC1u" onchange="dcCalc()">
+            <optgroup label="Molar"><option>M</option><option>mM</option><option>µM</option><option>nM</option><option>pM</option></optgroup>
+            <optgroup label="Mass / volume"><option>mg/mL</option><option>µg/mL</option><option>ng/µL</option><option>g/L</option><option>µg/µL</option><option>ng/mL</option></optgroup>
+            <optgroup label="Ratio / other"><option>% (w/v)</option><option>% (v/v)</option><option>X</option><option>U/mL</option><option>PFU/mL</option><option>CFU/mL</option><option>cells/mL</option><option>OD</option></optgroup>
+          </select></div>
+      </div>
+      <div class="dc-f"><label>Final concentration (C2) — what you want</label>
+        <div class="dc-cu"><input id="dcC2" type="number" step="any" min="0" value="50" placeholder="e.g. 10" oninput="dcCalc()">
+          <select id="dcC2u" onchange="dcCalc()">
+            <optgroup label="Molar"><option>M</option><option selected>mM</option><option>µM</option><option>nM</option><option>pM</option></optgroup>
+            <optgroup label="Mass / volume"><option>mg/mL</option><option>µg/mL</option><option>ng/µL</option><option>g/L</option><option>µg/µL</option><option>ng/mL</option></optgroup>
+            <optgroup label="Ratio / other"><option>% (w/v)</option><option>% (v/v)</option><option>X</option><option>U/mL</option><option>PFU/mL</option><option>CFU/mL</option><option>cells/mL</option><option>OD</option></optgroup>
+          </select></div>
+      </div>
+      <div class="dc-f"><label>Final volume (V2) — how much you want</label>
+        <div class="dc-cu"><input id="dcV2" type="number" step="any" min="0" value="10" placeholder="e.g. 50" oninput="dcCalc()">
+          <select id="dcV2u" onchange="dcCalc()"><option>L</option><option selected>mL</option><option>µL</option></select></div>
+      </div>
+    </div>
+    <div class="dc-optrow">
+      <div class="dc-f"><label>Molecular weight — optional, enables molar ⇄ mass</label><input id="dcMW" type="number" step="any" min="0" placeholder="g/mol, e.g. 58.44" oninput="dcCalc()"></div>
+      <div class="dc-f"><label>Stock name — optional</label><input id="dcName" placeholder="e.g. NaCl 5 M" oninput="dcCalc()"></div>
+      <div class="dc-f"><label>Diluent — optional</label><input id="dcDil" value="diluent" placeholder="e.g. water, TE, medium" oninput="dcCalc()"></div>
+    </div>
+    <div id="dcResult" class="dc-result"></div>
+    <div class="dc-actions"><button class="btn" onclick="dcCopy()">Copy recipe</button></div>
+  </section>
+
+  <!-- ── SERIAL DILUTION ── -->
+  <section id="dcPanelSerial" class="dc-panel" style="display:none;">
+    <div class="dc-grid3">
+      <div class="dc-f"><label>Starting concentration</label>
+        <div class="dc-cu"><input id="dsC0" type="number" step="any" min="0" value="100" oninput="dcSerial()">
+          <select id="dsC0u" onchange="dcSerial()">
+            <optgroup label="Molar"><option>M</option><option>mM</option><option selected>µM</option><option>nM</option><option>pM</option></optgroup>
+            <optgroup label="Mass / volume"><option>mg/mL</option><option>µg/mL</option><option>ng/µL</option><option>g/L</option><option>ng/mL</option></optgroup>
+            <optgroup label="Ratio / other"><option>X</option><option>PFU/mL</option><option>CFU/mL</option><option>cells/mL</option><option>U/mL</option><option>OD</option></optgroup>
+          </select></div>
+      </div>
+      <div class="dc-f"><label>Dilution factor (fold per step)</label><input id="dsFold" type="number" step="any" min="1" value="10" oninput="dcSerial()"></div>
+      <div class="dc-f"><label>Number of dilutions</label><input id="dsN" type="number" step="1" min="1" value="6" oninput="dcSerial()"></div>
+    </div>
+    <div class="dc-optrow" style="grid-template-columns:1fr 1fr;">
+      <div class="dc-f"><label>Volume in each tube / well</label>
+        <div class="dc-cu"><input id="dsVt" type="number" step="any" min="0" value="200" oninput="dcSerial()">
+          <select id="dsVtu" onchange="dcSerial()"><option>L</option><option>mL</option><option selected>µL</option></select></div>
+      </div>
+      <div class="dc-f" style="justify-content:flex-end;"><label style="display:flex;align-items:center;gap:7px;font-weight:600;cursor:pointer;"><input type="checkbox" id="dsInclStock" style="width:auto;" onchange="dcSerial()"> Show the undiluted stock as a row</label></div>
+    </div>
+    <div id="dcSerialOut"></div>
+  </section>
+
+  <!-- ── CONVERTERS ── -->
+  <section id="dcPanelConvert" class="dc-panel" style="display:none;">
+    <div class="dc-conv-grid">
+      <div class="dc-card">
+        <div class="dc-ctitle">Concentration converter</div>
+        <div class="dc-note">Express one concentration in every unit. Add a molecular weight to cross between molar and mass.</div>
+        <div class="dc-cu" style="margin-top:12px;"><input id="dvConc" type="number" step="any" min="0" value="1" oninput="dcConvert()">
+          <select id="dvConcu" onchange="dcConvert()">
+            <optgroup label="Molar"><option>M</option><option>mM</option><option>µM</option><option>nM</option><option>pM</option></optgroup>
+            <optgroup label="Mass / volume"><option>mg/mL</option><option>µg/mL</option><option>ng/µL</option><option>g/L</option><option>µg/µL</option><option>ng/mL</option></optgroup>
+          </select></div>
+        <div class="dc-f" style="margin-top:9px;"><label>Molecular weight (g/mol)</label><input id="dvMW" type="number" step="any" min="0" value="58.44" oninput="dcConvert()"></div>
+        <div id="dvOut" class="dc-eq" style="margin-top:12px;"></div>
+      </div>
+      <div class="dc-card">
+        <div class="dc-ctitle">Weigh-out &amp; moles</div>
+        <div class="dc-note">How much to weigh (or pipette) for a target concentration and volume — and how many moles that is.</div>
+        <div class="dc-cu2" style="margin-top:12px;">
+          <div class="dc-f"><label>Target concentration</label>
+            <div class="dc-cu"><input id="dwConc" type="number" step="any" min="0" value="50" oninput="dcWeigh()">
+              <select id="dwConcu" onchange="dcWeigh()">
+                <optgroup label="Molar"><option>M</option><option selected>mM</option><option>µM</option><option>nM</option><option>pM</option></optgroup>
+                <optgroup label="Mass / volume"><option>mg/mL</option><option>µg/mL</option><option>ng/µL</option><option>g/L</option></optgroup>
+              </select></div>
+          </div>
+          <div class="dc-f"><label>Final volume</label>
+            <div class="dc-cu"><input id="dwVol" type="number" step="any" min="0" value="500" oninput="dcWeigh()">
+              <select id="dwVolu" onchange="dcWeigh()"><option>L</option><option selected>mL</option><option>µL</option></select></div>
+          </div>
+        </div>
+        <div class="dc-f" style="margin-top:9px;"><label>Molecular weight (g/mol)</label><input id="dwMW" type="number" step="any" min="0" value="58.44" oninput="dcWeigh()"></div>
+        <div id="dwOut" class="dc-eq" style="margin-top:12px;"></div>
+      </div>
+    </div>
+  </section>
 </div>
 
 <div class="app">
@@ -722,13 +828,15 @@ function setMode(m) {
   document.getElementById('modeTabPlasmid').classList.toggle('active',m==='plasmid');
   document.getElementById('modeTabPhage').classList.toggle('active',m==='phage');
   var mtR=document.getElementById('modeTabReagent'); if(mtR) mtR.classList.toggle('active',m==='reagent');
-  // Reagent Prep is a self-contained view — hide the plate workspace when active.
-  var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView');
-  if(rv){
-    rv.style.display = m==='reagent'?'':'none';
-    if(appEl) appEl.style.display = m==='reagent'?'none':'';
-    if(m==='reagent'){ rpInit(); return; }
-  }
+  var mtD=document.getElementById('modeTabDilcalc'); if(mtD) mtD.classList.toggle('active',m==='dilcalc');
+  // Reagent Prep and Dilution Calc are self-contained views — hide the plate workspace when active.
+  var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView'), dv=document.getElementById('dilcalcView');
+  var dcSpecial=(m==='reagent'||m==='dilcalc');
+  if(rv) rv.style.display = m==='reagent'?'':'none';
+  if(dv) dv.style.display = m==='dilcalc'?'':'none';
+  if(appEl) appEl.style.display = dcSpecial?'none':'';
+  if(m==='reagent'){ rpInit(); return; }
+  if(m==='dilcalc'){ dcInit(); return; }
   document.getElementById('sbPlasmid').style.display = m==='plasmid'?'':'none';
   document.getElementById('sbPhage').style.display   = m==='phage'?'':'none';
   document.getElementById('moiPanel').style.display  = m==='phage'?'':'none';
@@ -1883,6 +1991,191 @@ function rpAddCustom(){
 }
 function rpAddCompRow(){ var box=document.getElementById('rcRows'); if(!box) return; var row=document.createElement('div'); row.className='rc-row'; row.style.cssText='display:grid;grid-template-columns:1fr 110px 1fr 24px;gap:5px;margin-bottom:5px;align-items:center;'; row.innerHTML='<input class="rc-cn" placeholder="component"><select class="rc-ct"><option value="gL">g/L</option><option value="M">molarity+MW</option><option value="pctwv">% w/v</option><option value="pctvv">% v/v</option><option value="stock">from stock</option></select><input class="rc-cv" placeholder="value"><button class="btn" style="padding:2px 6px;" onclick="this.parentNode.remove()" title="remove">✕</button>'; box.appendChild(row); }
 function rpSaveCustom(){ var name=(document.getElementById('rcName').value||'').trim(); if(!name){ showToast('Name is required','warn'); return; } var comps=[]; document.querySelectorAll('#rcRows .rc-row').forEach(function(row){ var cn=(row.querySelector('.rc-cn').value||'').trim(); var ct=row.querySelector('.rc-ct').value; var cv=(row.querySelector('.rc-cv').value||'').trim(); if(!cn) return; if(ct==='gL'){ comps.push({name:cn,gramsPerLiter:parseFloat(cv)||0}); } else if(ct==='M'){ var p=cv.split(/[,;\s]+/).filter(Boolean); comps.push({name:cn,molarity_M:parseFloat(p[0])||0,mw_gmol:parseFloat(p[1])||0}); } else if(ct==='pctwv'){ comps.push({name:cn,percent:{value:parseFloat(cv)||0,type:'w/v'}}); } else if(ct==='pctvv'){ comps.push({name:cn,percent:{value:parseFloat(cv)||0,type:'v/v'}}); } else if(ct==='stock'){ var q=cv.split(/[,;]+/); comps.push({name:cn,note:'from stock: '+cv,fromStock:null}); if(!cv) comps[comps.length-1].note='from stock (add details)'; } }); if(!comps.length){ showToast('Add at least one component','warn'); return; } var rec={ id:'custom-'+Date.now(), name:name, summary:(document.getElementById('rcSum').value||'').trim()||'Custom recipe', components:comps, solvent:(document.getElementById('rcSolvent').value||'').trim(), sterilization:(document.getElementById('rcSteril').value||'').trim(), notes:['Custom recipe added by you.'], sources:[{title:'My lab protocol',license:'custom'}] }; var cust=rpCustom(); cust.push(rec); localStorage.setItem('dd_reagent_custom',JSON.stringify(cust)); rpMergeCustom(); rpFlatten(); rpActiveCat='custom'; rpSelectedId=rec.id; rpRenderCats(); rpRenderList(); rpCompute(); var bg=document.querySelector('.rp-modal-bg'); if(bg) bg.remove(); showToast('Recipe saved'); }
+
+/* ══════════════════════════ DILUTION & MOLARITY CALCULATOR ══════════════════════════ */
+(function(){
+  var css = `
+  #dilcalcView .dc-h{font-family:var(--serif,Georgia,serif);font-size:1.45rem;font-weight:700;color:var(--text,#2a2519);margin:0 0 3px;}
+  #dilcalcView .dc-sub{color:var(--text3,#8a8172);font-size:12.5px;margin-bottom:16px;max-width:720px;line-height:1.5;}
+  .dc-tabs{display:flex;gap:2px;margin-bottom:18px;border-bottom:1px solid var(--line,#d9d2c4);}
+  .dc-tab{font:600 12px var(--mono,monospace);padding:8px 15px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--text3,#8a8172);cursor:pointer;margin-bottom:-1px;}
+  .dc-tab:hover{color:var(--text,#2a2519);}
+  .dc-tab.active{color:var(--accent,#2f7d5b);border-bottom-color:var(--accent,#2f7d5b);}
+  .dc-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+  .dc-optrow{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:12px;}
+  @media(max-width:760px){#dilcalcView .dc-grid3,#dilcalcView .dc-optrow,#dilcalcView .dc-cu2,#dilcalcView .dc-conv-grid{grid-template-columns:1fr;}}
+  .dc-f{display:flex;flex-direction:column;gap:5px;}
+  .dc-f label{font-size:11px;font-weight:600;color:var(--text3,#8a8172);}
+  #dilcalcView .dc-f input,#dilcalcView .dc-f select,#dilcalcView .dc-cu input,#dilcalcView .dc-cu select{font-family:var(--mono,monospace);font-size:13px;padding:8px 9px;border:1px solid var(--line,#d9d2c4);border-radius:8px;background:var(--card,#fff);color:var(--text,#2a2519);width:100%;box-sizing:border-box;}
+  .dc-cu{display:grid;grid-template-columns:1fr 104px;gap:6px;}
+  .dc-cu2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .dc-result{margin-top:18px;}
+  .dc-card{border:1px solid var(--line,#d9d2c4);border-radius:12px;background:var(--card,#fff);padding:18px 20px;}
+  .dc-big{font-family:var(--serif,Georgia,serif);font-size:1.18rem;line-height:1.55;color:var(--text,#2a2519);}
+  .dc-big b{color:var(--accent,#2f7d5b);font-weight:700;}
+  .dc-fold{display:inline-block;font:600 11px var(--mono,monospace);background:var(--accentL,#e7f1ec);color:var(--accent,#2f7d5b);padding:3px 10px;border-radius:6px;margin-top:10px;}
+  .dc-steps{margin:14px 0 0;padding-left:20px;font-size:13px;color:var(--text,#2a2519);}
+  .dc-steps li{margin:5px 0;line-height:1.45;}
+  .dc-steps b{color:var(--accent,#2f7d5b);}
+  .dc-warn{margin-top:13px;padding:11px 13px;border-radius:9px;font-size:12.5px;line-height:1.5;border:1px solid;}
+  .dc-warn.err{background:#fdecea;border-color:#f5b7b1;color:#943126;}
+  .dc-warn.info{background:#fef9e7;border-color:#f7dc6f;color:#7d6608;}
+  .dc-warn.ok{background:var(--accentL,#e7f1ec);border-color:#a9dfbf;color:#1e6b4f;}
+  .dc-warn b{font-weight:700;}
+  .dc-warn .dc-steps{margin-top:6px;color:inherit;}
+  .dc-warn .dc-steps b{color:inherit;}
+  .dc-tbl{width:100%;border-collapse:collapse;margin-top:14px;font-size:12.5px;}
+  .dc-tbl th{text-align:left;font:600 10.5px var(--mono,monospace);letter-spacing:.02em;color:var(--text3,#8a8172);border-bottom:2px solid var(--line,#d9d2c4);padding:8px 6px;}
+  .dc-tbl td{padding:7px 6px;border-bottom:1px solid var(--line,#eee);font-variant-numeric:tabular-nums;color:var(--text,#2a2519);}
+  .dc-tbl tr.stock td{background:var(--bg2,#f7f4ee);font-weight:600;}
+  .dc-actions{margin-top:13px;display:flex;gap:8px;}
+  .dc-conv-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .dc-ctitle{font-family:var(--serif,Georgia,serif);font-size:1.08rem;font-weight:700;color:var(--text,#2a2519);}
+  .dc-eq{font-family:var(--mono,monospace);font-size:12.5px;line-height:2;color:var(--text,#2a2519);}
+  .dc-eq b{color:var(--accent,#2f7d5b);}
+  .dc-note{font-size:11.5px;color:var(--text3,#8a8172);margin-top:4px;line-height:1.45;}
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+})();
+
+var dcTab='c1v1', dcLastText='', dcSerialLastText='', dcInited=false;
+
+function dcInit(){ dcInited=true; dcCalc(); dcSerial(); dcConvert(); dcWeigh(); }
+function dcSetTab(t){ dcTab=t;
+  document.getElementById('dcTab1').classList.toggle('active',t==='c1v1');
+  document.getElementById('dcTab2').classList.toggle('active',t==='serial');
+  document.getElementById('dcTab3').classList.toggle('active',t==='convert');
+  document.getElementById('dcPanelC1V1').style.display=t==='c1v1'?'':'none';
+  document.getElementById('dcPanelSerial').style.display=t==='serial'?'':'none';
+  document.getElementById('dcPanelConvert').style.display=t==='convert'?'':'none';
+}
+function dcNumIn(id){ var el=document.getElementById(id); var v=el?parseFloat(el.value):NaN; return isFinite(v)?v:NaN; }
+
+// Canonicalise a concentration to a family + value (molar->M, mass->g/L, else self)
+function dcConc(value,unit){
+  var molar={'M':1,'mM':1e-3,'µM':1e-6,'nM':1e-9,'pM':1e-12};
+  var mass={'g/L':1,'mg/mL':1,'µg/µL':1,'µg/mL':1e-3,'ng/µL':1e-3,'ng/mL':1e-6};
+  if(molar[unit]!=null) return {fam:'molar',val:value*molar[unit]};
+  if(mass[unit]!=null) return {fam:'mass',val:value*mass[unit]};
+  if(unit==='% (w/v)') return {fam:'mass',val:value*10};   // 1% w/v = 10 g/L
+  if(unit==='X') return {fam:'X',val:value};
+  if(unit==='% (v/v)') return {fam:'%v/v',val:value};
+  return {fam:'u:'+unit,val:value};                         // U/mL, PFU/mL, cells/mL, OD…
+}
+// Fold factor C1/C2. Same family -> direct; molar<->mass needs a molecular weight.
+function dcFactor(s,f,mw){
+  if(s.fam===f.fam) return s.val/f.val;
+  var cross=((s.fam==='molar'&&f.fam==='mass')||(s.fam==='mass'&&f.fam==='molar'));
+  if(cross&&mw>0){ var sGL=s.fam==='molar'?s.val*mw:s.val, fGL=f.fam==='molar'?f.val*mw:f.val; return sGL/fGL; }
+  return null;
+}
+function dcVolMl(v,u){ return u==='L'?v*1000:u==='µL'?v/1000:u==='nL'?v/1e6:v; }
+function dcGe(a,b){ return a>=b*(1-1e-9); }   // decade-boundary-safe >=
+function dcFmtVol(mL){ if(!isFinite(mL)) return '—'; if(dcGe(mL,1000)) return rpNum(mL/1000)+' L'; if(dcGe(mL,1)) return rpNum(mL)+' mL'; if(dcGe(mL,1e-3)) return rpNum(mL*1000)+' µL'; return rpNum(mL*1e6)+' nL'; }
+function dcFmtConc(fam,val){
+  if(fam==='molar'){ var m=val; if(dcGe(m,1)) return rpNum(m)+' M'; if(dcGe(m,1e-3)) return rpNum(m*1e3)+' mM'; if(dcGe(m,1e-6)) return rpNum(m*1e6)+' µM'; if(dcGe(m,1e-9)) return rpNum(m*1e9)+' nM'; return rpNum(m*1e12)+' pM'; }
+  if(fam==='mass'){ var g=val; if(dcGe(g,1)) return rpNum(g)+' mg/mL'; if(dcGe(g,1e-3)) return rpNum(g*1e3)+' µg/mL'; return rpNum(g*1e6)+' ng/mL'; }
+  if(fam==='X') return rpNum(val)+'×';
+  if(fam==='%v/v') return rpNum(val)+'% v/v';
+  return rpNum(val)+' '+fam.replace(/^u:/,'');
+}
+function dcFmtMol(mol){ if(dcGe(mol,1)) return rpNum(mol)+' mol'; if(dcGe(mol,1e-3)) return rpNum(mol*1e3)+' mmol'; if(dcGe(mol,1e-6)) return rpNum(mol*1e6)+' µmol'; if(dcGe(mol,1e-9)) return rpNum(mol*1e9)+' nmol'; return rpNum(mol*1e12)+' pmol'; }
+
+function dcCalc(){
+  var out=document.getElementById('dcResult'); if(!out) return;
+  var c1=dcNumIn('dcC1'), c2=dcNumIn('dcC2'), v2=dcNumIn('dcV2');
+  var u1=document.getElementById('dcC1u').value, u2=document.getElementById('dcC2u').value, uv=document.getElementById('dcV2u').value;
+  var mw=dcNumIn('dcMW'); if(!(mw>0)) mw=0;
+  var name=(document.getElementById('dcName').value||'').trim();
+  var dil=(document.getElementById('dcDil').value||'').trim()||'diluent';
+  dcLastText='';
+  if(!(c1>0)||!(c2>0)||!(v2>0)){ out.innerHTML='<div class="dc-warn info">Enter your stock concentration, the final concentration you want, and the final volume.</div>'; return; }
+  var s=dcConc(c1,u1), f=dcConc(c2,u2), factor=dcFactor(s,f,mw);
+  if(factor==null){
+    var cross=((s.fam==='molar'&&f.fam==='mass')||(s.fam==='mass'&&f.fam==='molar'));
+    var hint=cross?' Add the molecular weight above and it will convert between molar and mass.':' Use the same kind of unit for both (both molar, both mass, etc.).';
+    out.innerHTML='<div class="dc-warn err"><b>These units don’t match.</b> Stock is in '+escapeHtml(u1)+', target is in '+escapeHtml(u2)+'.'+hint+'</div>'; return;
+  }
+  var v2ml=dcVolMl(v2,uv);
+  if(factor<1){
+    out.innerHTML='<div class="dc-warn err"><b>Can’t dilute up.</b> Your target ('+escapeHtml(c2+' '+u2)+') is more concentrated than your stock ('+escapeHtml(c1+' '+u1)+'). You’d need a stronger stock, or to concentrate the sample.</div>'; return;
+  }
+  if(Math.abs(factor-1)<1e-9){
+    out.innerHTML='<div class="dc-card"><div class="dc-big">Stock already equals the target — use it <b>undiluted</b>. Measure <b>'+dcFmtVol(v2ml)+'</b>, no diluent needed.</div></div>';
+    dcLastText=(name||'Stock')+': use undiluted, '+dcFmtVol(v2ml)+'.'; return;
+  }
+  var v1ml=v2ml/factor, vdil=v2ml-v1ml;
+  var stockLabel=name||('the '+c1+' '+u1+' stock');
+  var big='<div class="dc-big">Take <b>'+dcFmtVol(v1ml)+'</b> of '+escapeHtml(stockLabel)+', add <b>'+dcFmtVol(vdil)+'</b> of '+escapeHtml(dil)+' → <b>'+dcFmtVol(v2ml)+'</b> total.</div>';
+  var fold='<div class="dc-fold">'+rpNum(factor)+'× dilution · C1V1 = C2V2</div>';
+  var steps='<ol class="dc-steps"><li>Measure <b>'+dcFmtVol(v1ml)+'</b> of '+escapeHtml(stockLabel)+'.</li><li>Add <b>'+dcFmtVol(vdil)+'</b> of '+escapeHtml(dil)+'.</li><li>Mix. Final: <b>'+dcFmtVol(v2ml)+'</b> at <b>'+escapeHtml(c2+' '+u2)+'</b>.</li></ol>';
+  var warn='';
+  if(v1ml>0&&v1ml<0.001){ // < 1 µL: suggest an intermediate pre-dilution
+    var p=Math.pow(10,Math.ceil(Math.log10(0.002/v1ml)));
+    var interV1=v1ml*p, interConc=dcFmtConc(s.fam,s.val/p);
+    warn='<div class="dc-warn info"><b>'+dcFmtVol(v1ml)+' is too little to pipette accurately.</b> Make an intermediate first:'+
+      '<ol class="dc-steps"><li>Dilute the stock <b>1:'+rpNum(p)+'</b> (e.g. 10 µL stock + '+rpNum((p-1)*10)+' µL '+escapeHtml(dil)+') → intermediate ≈ '+interConc+'.</li>'+
+      '<li>From that, take <b>'+dcFmtVol(interV1)+'</b> + '+dcFmtVol(v2ml-interV1)+' '+escapeHtml(dil)+' → '+dcFmtVol(v2ml)+'.</li></ol></div>';
+  } else if(factor<1.1){
+    warn='<div class="dc-warn info">This is barely a dilution ('+rpNum(factor)+'×) — pipetting error will dominate. Consider preparing fresh at the final concentration instead.</div>';
+  } else if(vdil>0&&vdil<0.001){
+    warn='<div class="dc-warn info">Almost no diluent ('+dcFmtVol(vdil)+') — hard to mix evenly at this ratio. A larger final volume will be more accurate.</div>';
+  }
+  out.innerHTML='<div class="dc-card">'+big+fold+steps+warn+'</div>';
+  dcLastText=(name?name+' — ':'')+'Dilution '+rpNum(factor)+'x ('+c1+' '+u1+' -> '+c2+' '+u2+'), final '+dcFmtVol(v2ml)+':\n'+
+    '  1) '+dcFmtVol(v1ml)+' stock\n  2) + '+dcFmtVol(vdil)+' '+dil+'\n  3) mix -> '+dcFmtVol(v2ml)+' at '+c2+' '+u2+'.';
+}
+function dcCopy(){ dcCopyText(dcLastText); }
+
+function dcSerial(){
+  var out=document.getElementById('dcSerialOut'); if(!out) return;
+  var c0=dcNumIn('dsC0'), fold=dcNumIn('dsFold'), n=Math.round(dcNumIn('dsN')), vt=dcNumIn('dsVt');
+  var u0=document.getElementById('dsC0u').value, vu=document.getElementById('dsVtu').value;
+  var incl=document.getElementById('dsInclStock').checked;
+  dcSerialLastText='';
+  if(!(c0>0)||!(fold>0)||!(n>0)||!(vt>0)){ out.innerHTML='<div class="dc-warn info">Enter a starting concentration, a fold factor, how many dilutions, and the volume per tube.</div>'; return; }
+  if(fold<=1){ out.innerHTML='<div class="dc-warn err">The fold factor must be greater than 1 (e.g. 2 for two-fold, 10 for ten-fold).</div>'; return; }
+  if(n>40) n=40;
+  var s=dcConc(c0,u0), vtml=dcVolMl(vt,vu), transfer=vtml/fold, diluent=vtml-transfer;
+  var rows='', txt='Serial '+rpNum(fold)+'x dilution, '+dcFmtVol(vtml)+'/tube:\n';
+  if(incl){ rows+='<tr class="stock"><td>Stock</td><td>'+dcFmtConc(s.fam,s.val)+'</td><td>—</td><td>—</td><td>'+dcFmtVol(vtml)+'</td></tr>'; }
+  for(var i=1;i<=n;i++){
+    var conc=s.val/Math.pow(fold,i), from=i===1?'stock':('tube '+(i-1));
+    rows+='<tr><td>'+i+'</td><td>'+dcFmtConc(s.fam,conc)+'</td><td>'+dcFmtVol(transfer)+' from '+from+'</td><td>'+dcFmtVol(diluent)+'</td><td>'+dcFmtVol(vtml)+'</td></tr>';
+    txt+='  Tube '+i+': '+dcFmtConc(s.fam,conc)+' — '+dcFmtVol(transfer)+' from '+from+' + '+dcFmtVol(diluent)+' diluent\n';
+  }
+  out.innerHTML='<table class="dc-tbl"><thead><tr><th>Tube</th><th>Concentration</th><th>Transfer in</th><th>+ Diluent</th><th>Final vol</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '<div class="dc-warn ok" style="margin-top:13px;">Put <b>'+dcFmtVol(diluent)+'</b> of diluent in each tube first, then transfer <b>'+dcFmtVol(transfer)+'</b> from the previous tube and mix well before the next. Discard '+dcFmtVol(transfer)+' from the last tube so all volumes match. Total diluent ≈ <b>'+dcFmtVol(diluent*n)+'</b> (plus '+dcFmtVol(vtml)+' to start tube 1).</div>'+
+    '<div class="dc-actions"><button class="btn" onclick="dcCopySerial()">Copy table</button></div>';
+  dcSerialLastText=txt+'Add diluent first, then transfer; discard the last transfer to equalise volumes.';
+}
+function dcCopySerial(){ dcCopyText(dcSerialLastText); }
+
+function dcConvert(){
+  var out=document.getElementById('dvOut'); if(!out) return;
+  var v=dcNumIn('dvConc'), u=document.getElementById('dvConcu').value, mw=dcNumIn('dvMW'); if(!(mw>0)) mw=0;
+  if(!(v>0)){ out.innerHTML='<span class="dc-note">Enter a concentration.</span>'; return; }
+  var c=dcConc(v,u), lines=[];
+  if(c.fam==='molar'){ lines.push(dcMolarLine(c.val)); lines.push(mw>0?dcMassLine(c.val*mw):'<span class="dc-note">Enter a molecular weight to also get g/L, mg/mL, µg/mL.</span>'); }
+  else if(c.fam==='mass'){ lines.push(dcMassLine(c.val)); lines.push(mw>0?dcMolarLine(c.val/mw):'<span class="dc-note">Enter a molecular weight to also get M, mM, µM.</span>'); }
+  else { out.innerHTML='<span class="dc-note">'+escapeHtml(u)+' is a ratio/activity unit — no molar or mass conversion applies.</span>'; return; }
+  out.innerHTML=lines.join('<br>');
+}
+function dcMolarLine(M){ return '<b>Molar:</b> '+rpNum(M)+' M = '+rpNum(M*1e3)+' mM = '+rpNum(M*1e6)+' µM = '+rpNum(M*1e9)+' nM'; }
+function dcMassLine(gL){ return '<b>Mass:</b> '+rpNum(gL)+' g/L = '+rpNum(gL)+' mg/mL = '+rpNum(gL*1e3)+' µg/mL = '+rpNum(gL*1e6)+' ng/mL'; }
+
+function dcWeigh(){
+  var out=document.getElementById('dwOut'); if(!out) return;
+  var v=dcNumIn('dwConc'), u=document.getElementById('dwConcu').value, vol=dcNumIn('dwVol'), vu=document.getElementById('dwVolu').value, mw=dcNumIn('dwMW'); if(!(mw>0)) mw=0;
+  if(!(v>0)||!(vol>0)){ out.innerHTML='<span class="dc-note">Enter a target concentration and a final volume.</span>'; return; }
+  var c=dcConc(v,u), volL=dcVolMl(vol,vu)/1000, lines=[];
+  if(c.fam==='molar'){ var mol=c.val*volL; lines.push('<b>Amount:</b> '+dcFmtMol(mol)); lines.push(mw>0?'<b>Weigh:</b> '+rpMass(mol*mw):'<span class="dc-note">Enter a molecular weight to get the mass to weigh.</span>'); }
+  else if(c.fam==='mass'){ var g=c.val*volL; lines.push('<b>Weigh:</b> '+rpMass(g)); if(mw>0) lines.push('<b>Amount:</b> '+dcFmtMol(g/mw)); }
+  else { out.innerHTML='<span class="dc-note">Pick a molar or mass unit for weigh-outs.</span>'; return; }
+  out.innerHTML=lines.join('<br>');
+}
+
+function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); return; } (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(function(){ showToast('Copied'); }).catch(function(){ var ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); showToast('Copied'); }catch(e){ showToast('Copy failed','warn'); } ta.remove(); }); }
 </script>
 </body>
 </html>
