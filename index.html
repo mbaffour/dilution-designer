@@ -3,8 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dilution Designer — 96-Well Plate Planner</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<title>Dilution Designer — Molecular Biology Bench Toolkit</title>
+<meta name="description" content="Dilutions, reagent recipes, plate layouts, molecular-biology calculators and protocols. Runs entirely in your browser and works offline.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2f7d5b">
+<link rel="icon" href="favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bench Toolkit">
+<!-- Web fonts are a progressive enhancement only: if they fail (offline, or blocked)
+     the local stacks in :root take over and the app still looks and works fine. -->
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
@@ -17,7 +26,9 @@
   --purple:#3d2d6b;--purple-bg:#eeebf8;
   --blue:#1a3a6b;--blue-bg:#e8eef8;
   --plate-bg:#f0ede6;--well-empty:#e2dfd8;--well-border:rgba(0,0,0,0.10);
-  --mono:'DM Mono',monospace;--sans:'Syne',sans-serif;
+  /* Web fonts first, then solid local stacks so the offline/blocked case still looks deliberate. */
+  --mono:'DM Mono',ui-monospace,'Cascadia Code','SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
+  --sans:'Syne',system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
   --tool-active:#1a1814;
 }
 [data-theme="night"]{
@@ -2259,7 +2270,13 @@ function rpInit(){
   fetch('reagent-library.json',{cache:'no-cache'})
     .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
     .then(function(d){ rpLib=d; rpFinishLoad(); })
-    .catch(function(e){ var el=document.getElementById('rpLibStatus'); if(el) el.innerHTML='<span style="color:var(--danger,#c0392b)">Could not load reagent-library.json ('+escapeHtml(e.message)+'). Use the hosted version, not a local file.</span>'; });
+    .catch(function(e){
+      var el=document.getElementById('rpLibStatus'); if(!el) return;
+      var isFile=(location.protocol==='file:');
+      el.innerHTML='<span style="color:var(--danger,#c0392b)">'+(isFile
+        ? 'The recipe library can’t be read when index.html is opened directly from disk — browsers block file:// data requests. Open the hosted page (or run <code>python -m http.server</code> in this folder) and it will work, then stay available offline.'
+        : 'Could not load reagent-library.json ('+escapeHtml(e.message)+'). Make sure it sits next to index.html.')+'</span>';
+    });
 }
 function rpFinishLoad(){ rpLoaded=true; rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes'; }
 function rpFlatten(){ rpAllRecipes=[]; (rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ rpAllRecipes.push(Object.assign({_cat:c.title,_catKey:c.key}, r)); }); }); }
@@ -3004,10 +3021,10 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       {m:'proto',icon:'📋',title:'Protocols',desc:(window.PROTO?PROTO.list.length:10)+' step-by-step protocols — miniprep, CTAB gDNA, gels, transformation, plaque assay — that rescale as you change the numbers.'}
     ];
     var featured=['namass','a260','pctmolar','tm','od600','titer','ligation','moivol','doubling','rcf'];
-    el.innerHTML='<div class="home-hero"><h1>Molecular Biology Bench Toolkit</h1><p>One place for dilutions, reagents, plate layouts, and the everyday molecular-biology math — all in your browser, works offline.</p></div>'+
+    el.innerHTML='<div class="home-hero"><h1>Molecular Biology Bench Toolkit</h1><p>One place for dilutions, reagents, plate layouts, protocols and the everyday molecular-biology math. Everything is computed on your own machine — visit once and it keeps working with no network, so it is usable in a cold room or a BSL suite.</p></div>'+
       '<div class="home-cards">'+mods.map(function(x){return '<button class="home-card" onclick="setMode(\''+x.m+'\')"><div class="home-ico">'+x.icon+'</div><div class="home-ct"><div class="home-ctitle">'+escapeHtml(x.title)+'</div><div class="home-cdesc">'+escapeHtml(x.desc)+'</div></div></button>';}).join('')+'</div>'+
       '<div class="home-sub">Jump to a calculator</div><div class="home-chips">'+featured.filter(function(id){return byId[id];}).map(function(id){return '<button class="home-chip" onclick="MBC._cur=\''+id+'\';setMode(\'calc\')">'+escapeHtml(byId[id].name)+'</button>';}).join('')+'</div>'+
-      '<div style="text-align:center;margin-top:26px;font:11px var(--mono);color:var(--text3);">Dilution Designer · '+MB_VERSION+' · runs entirely in your browser</div>';
+      '<div style="text-align:center;margin-top:26px;font:11px var(--mono);color:var(--text3);line-height:1.7;">Dilution Designer · '+MB_VERSION+'<br>Every calculation runs on your machine — nothing is uploaded.<br>Offline: '+escapeHtml(window.ddPwaStatus?ddPwaStatus():'—')+'</div>';
   };
 
   // Self-test on ?selftest=1 (numeric assertions on every formula)
@@ -3317,6 +3334,55 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     copy:function(){ dcCopyText(PROTO._txt); },
     list:PROTOCOLS
   };
+})();
+
+/* ══════════════════════════ PWA / OFFLINE ══════════════════════════ */
+(function(){
+  var css=`
+  .pwa-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:99998;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;background:var(--accent2,#2f7d5b);color:#fff;font:12px/1.3 var(--mono,monospace);box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:92vw;}
+  .pwa-bar button{border:0;border-radius:6px;padding:5px 10px;background:rgba(255,255,255,.22);color:#fff;font:inherit;cursor:pointer;}
+  .pwa-bar button:hover{background:rgba(255,255,255,.34);}
+  .pwa-off{position:fixed;right:12px;bottom:12px;z-index:99997;padding:5px 11px;border-radius:999px;background:#8a6d1f;color:#fff;font:11px var(--mono,monospace);box-shadow:0 3px 10px rgba(0,0,0,.2);}
+  @media print{.pwa-bar,.pwa-off{display:none!important;}}
+  `;
+  var s=document.createElement('style'); s.textContent=css; document.head.appendChild(s);
+
+  // "You are offline" chip — reassures rather than alarms, since everything still works.
+  var offEl=null;
+  function syncOnline(){
+    if(navigator.onLine){ if(offEl){ offEl.remove(); offEl=null; } }
+    else if(!offEl){ offEl=document.createElement('div'); offEl.className='pwa-off'; offEl.textContent='⚡ Offline — all tools still work'; document.body.appendChild(offEl); }
+  }
+  window.addEventListener('online',syncOnline);
+  window.addEventListener('offline',syncOnline);
+  syncOnline();
+
+  window.ddPwaStatus=function(){
+    if(!('serviceWorker' in navigator)) return 'not supported in this browser';
+    if(!/^https?:$/.test(location.protocol)) return 'needs to be served over http(s) — open the hosted page once to enable offline';
+    return navigator.serviceWorker.controller ? 'ready — cached for offline use' : 'installing…';
+  };
+
+  if(!('serviceWorker' in navigator) || !/^https?:$/.test(location.protocol)) return;
+  window.addEventListener('load',function(){
+    navigator.serviceWorker.register('sw.js').then(function(reg){
+      reg.addEventListener('updatefound',function(){
+        var nw=reg.installing; if(!nw) return;
+        nw.addEventListener('statechange',function(){
+          // Only prompt when this is an UPDATE (a controller already exists), not first install.
+          if(nw.state==='installed' && navigator.serviceWorker.controller){
+            var b=document.createElement('div'); b.className='pwa-bar';
+            b.innerHTML='<span>A new version is ready.</span><button id="pwaReload">Reload</button><button id="pwaLater">Later</button>';
+            document.body.appendChild(b);
+            b.querySelector('#pwaReload').onclick=function(){ (reg.waiting||nw).postMessage('SKIP_WAITING'); };
+            b.querySelector('#pwaLater').onclick=function(){ b.remove(); };
+          }
+        });
+      });
+    }).catch(function(){});
+    var reloading=false;
+    navigator.serviceWorker.addEventListener('controllerchange',function(){ if(reloading) return; reloading=true; location.reload(); });
+  });
 })();
 </script>
 </body>
