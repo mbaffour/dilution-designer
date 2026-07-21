@@ -303,10 +303,12 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <span class="brand-mantra">Built with passion for science and discovery</span>
   </div>
   <div class="mode-tabs">
+    <button class="mode-tab" id="modeTabHome" onclick="setMode('home')">🏠 Home</button>
     <button class="mode-tab active" id="modeTabPlasmid" onclick="setMode('plasmid')">Plasmid / Induction</button>
     <button class="mode-tab" id="modeTabPhage" onclick="setMode('phage')">Phage Infection</button>
     <button class="mode-tab" id="modeTabReagent" onclick="setMode('reagent')">Reagent Prep</button>
     <button class="mode-tab" id="modeTabDilcalc" onclick="setMode('dilcalc')">Dilution Calc</button>
+    <button class="mode-tab" id="modeTabCalc" onclick="setMode('calc')">🧬 Calculators</button>
   </div>
   <div class="theme-group">
     <button class="theme-btn active" data-theme="day" onclick="setTheme('day')">Day</button>
@@ -478,6 +480,23 @@ body.print-plate-mode .excl-bar{display:none!important;}
       </div>
     </div>
   </section>
+</div>
+
+<!-- ══════════ HOME HUB ══════════ -->
+<div id="homeView" style="display:none;padding:20px;max-width:1180px;margin:0 auto;">
+  <div id="homeWrap"></div>
+</div>
+
+<!-- ══════════ CALCULATORS MODULE ══════════ -->
+<div id="calcView" style="display:none;padding:16px 20px 60px;max-width:1180px;margin:0 auto;">
+  <div class="mbc-grid">
+    <aside class="mbc-nav">
+      <div class="sl">Molecular biology calculators</div>
+      <input id="mbcSearch" placeholder="Search (e.g. PCR, Tm, OD, ligation)…" oninput="MBC.filter()" autocomplete="off" aria-label="Search calculators">
+      <div id="mbcList" class="mbc-list" role="listbox" aria-label="Calculators"></div>
+    </aside>
+    <section class="mbc-main" id="mbcMain"></section>
+  </div>
 </div>
 
 <div class="app">
@@ -850,14 +869,21 @@ function setMode(m) {
   document.getElementById('modeTabPhage').classList.toggle('active',m==='phage');
   var mtR=document.getElementById('modeTabReagent'); if(mtR) mtR.classList.toggle('active',m==='reagent');
   var mtD=document.getElementById('modeTabDilcalc'); if(mtD) mtD.classList.toggle('active',m==='dilcalc');
-  // Reagent Prep and Dilution Calc are self-contained views — hide the plate workspace when active.
-  var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView'), dv=document.getElementById('dilcalcView');
-  var dcSpecial=(m==='reagent'||m==='dilcalc');
+  var mtH=document.getElementById('modeTabHome'); if(mtH) mtH.classList.toggle('active',m==='home');
+  var mtC=document.getElementById('modeTabCalc'); if(mtC) mtC.classList.toggle('active',m==='calc');
+  // Home, Reagent Prep, Dilution Calc and Calculators are self-contained views — hide the plate workspace when active.
+  var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView'), dv=document.getElementById('dilcalcView'),
+      hv=document.getElementById('homeView'), cv=document.getElementById('calcView');
+  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc');
   if(rv) rv.style.display = m==='reagent'?'':'none';
   if(dv) dv.style.display = m==='dilcalc'?'':'none';
-  if(appEl) appEl.style.display = dcSpecial?'none':'';
+  if(hv) hv.style.display = m==='home'?'':'none';
+  if(cv) cv.style.display = m==='calc'?'':'none';
+  if(appEl) appEl.style.display = special?'none':'';
   if(m==='reagent'){ rpInit(); return; }
   if(m==='dilcalc'){ dcInit(); return; }
+  if(m==='home'){ if(window.renderHome) renderHome(); return; }
+  if(m==='calc'){ if(window.MBC) MBC.init(); return; }
   document.getElementById('sbPlasmid').style.display = m==='plasmid'?'':'none';
   document.getElementById('sbPhage').style.display   = m==='phage'?'':'none';
   document.getElementById('moiPanel').style.display  = m==='phage'?'':'none';
@@ -2447,6 +2473,393 @@ function dcWeigh(){
 }
 
 function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); return; } (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(function(){ showToast('Copied'); }).catch(function(){ var ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); showToast('Copied'); }catch(e){ showToast('Copy failed','warn'); } ta.remove(); }); }
+
+/* ══════════════════════════ HOME HUB + MOLBIO CALCULATORS (MBC) ══════════════════════════ */
+(function(){
+  // ---------- styles ----------
+  var css = `
+  #homeView,#calcView{color:var(--text);}
+  .home-hero{text-align:center;padding:20px 12px 24px;}
+  .home-hero h1{font-family:var(--serif,Georgia,serif);font-size:clamp(1.55rem,4vw,2.25rem);margin:0 0 8px;color:var(--text);}
+  .home-hero p{color:var(--text3);max-width:62ch;margin:0 auto;font-size:14px;line-height:1.5;}
+  .home-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:14px;margin-bottom:26px;}
+  .home-card{display:flex;gap:14px;align-items:flex-start;text-align:left;padding:18px;border:1px solid var(--border);border-radius:14px;background:var(--surface);cursor:pointer;transition:transform .1s,box-shadow .1s,border-color .1s;}
+  .home-card:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,0.12);border-color:var(--accent2);}
+  .home-ico{font-size:29px;line-height:1;flex:none;}
+  .home-ctitle{font-weight:700;font-size:15px;color:var(--text);margin-bottom:3px;}
+  .home-cdesc{font-size:12.5px;color:var(--text3);line-height:1.45;}
+  .home-sub{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin:0 0 10px;}
+  .home-chips{display:flex;flex-wrap:wrap;gap:7px;}
+  .home-chip{font-size:12px;padding:6px 11px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--text2);cursor:pointer;}
+  .home-chip:hover{background:var(--accent2);color:#fff;border-color:var(--accent2);}
+  .mbc-grid{display:grid;grid-template-columns:250px 1fr;gap:18px;align-items:start;}
+  @media(max-width:800px){.mbc-grid{grid-template-columns:1fr;}}
+  .mbc-nav{position:sticky;top:12px;display:flex;flex-direction:column;gap:8px;}
+  #mbcSearch{width:100%;font-family:var(--mono);font-size:12px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);box-sizing:border-box;}
+  .mbc-list{max-height:66vh;overflow:auto;border:1px solid var(--border);border-radius:10px;background:var(--surface);}
+  .mbc-group{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);padding:9px 11px 3px;}
+  .mbc-item{display:block;width:100%;text-align:left;padding:7px 11px;border:0;background:transparent;color:var(--text2);cursor:pointer;font-size:12.5px;border-left:2px solid transparent;}
+  .mbc-item:hover{background:var(--surface2);}
+  .mbc-item.active{background:var(--surface2);color:var(--text);border-left-color:var(--accent2);font-weight:600;}
+  .mbc-main{border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:18px 20px;min-height:220px;}
+  .mbc-head h2{font-family:var(--serif,Georgia,serif);font-size:1.3rem;margin:0 0 3px;color:var(--text);}
+  .mbc-head p{color:var(--text3);font-size:12.5px;margin:0 0 14px;line-height:1.45;}
+  .mbc-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:12px;}
+  .mbc-f{display:flex;flex-direction:column;gap:4px;}
+  .mbc-f.mbc-wide{grid-column:1/-1;}
+  .mbc-f label{font-size:11px;font-weight:600;color:var(--text3);}
+  .mbc-f input,.mbc-f select,.mbc-f textarea{font-family:var(--mono);font-size:13px;padding:8px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;}
+  .mbc-f textarea{resize:vertical;font-size:12px;line-height:1.4;}
+  .mbc-f input:focus-visible,.mbc-f select:focus-visible,.mbc-f textarea:focus-visible,#mbcSearch:focus-visible{outline:2px solid var(--accent2);outline-offset:1px;}
+  .mbc-cu{display:grid;grid-template-columns:1fr 82px;gap:5px;}
+  .mbc-hint{font-size:10px;color:var(--text3);}
+  .mbc-actions{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;}
+  .mbc-result{margin-top:14px;}
+  .mbc-rows{border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+  .mbc-row{display:flex;justify-content:space-between;gap:12px;padding:9px 13px;border-bottom:1px solid var(--border);align-items:baseline;}
+  .mbc-row:last-child{border-bottom:0;}
+  .mbc-rl{color:var(--text3);font-size:12.5px;}
+  .mbc-rv{font-family:var(--mono);font-weight:700;color:var(--text);font-size:13.5px;text-align:right;font-variant-numeric:tabular-nums;}
+  .mbc-rv.ok{color:var(--accent,#2f7d5b);} .mbc-rv.warn{color:#b7791f;} .mbc-rv.bad{color:#c0392b;}
+  .mbc-subrow{padding:5px 13px;font-size:11px;color:var(--text3);font-family:var(--mono);background:var(--surface2);}
+  .mbc-note{margin-top:10px;font-size:11px;color:var(--text3);font-style:italic;line-height:1.45;}
+  .mbc-warn{margin-top:8px;padding:9px 12px;border-radius:8px;font-size:12px;background:rgba(191,140,0,.10);border:1px solid rgba(191,140,0,.4);color:var(--text2);line-height:1.45;}
+  .mbc-empty{color:var(--text3);font-style:italic;padding:18px 0;}
+  .mbc-tblwrap{overflow-x:auto;margin-top:6px;}
+  .mbc-tbl{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .mbc-tbl th{text-align:left;font-family:var(--mono);font-size:10px;letter-spacing:.03em;text-transform:uppercase;color:var(--text3);border-bottom:2px solid var(--border);padding:7px 8px;}
+  .mbc-tbl td{padding:7px 8px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;color:var(--text);}
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  // ---------- helpers ----------
+  function num(x){ x=parseFloat(x); return isFinite(x)?x:NaN; }
+  function fmt(n,p){ p=p||4; if(n==null||isNaN(n)||!isFinite(n))return '—'; if(n===0)return '0'; var a=Math.abs(n); if(a<1e-4||a>=1e6) return n.toExponential(3); var d=Math.max(0,p-1-Math.floor(Math.log10(a))); return String(Number(n.toFixed(Math.min(d,12)))); }
+  function intc(n){ if(!isFinite(n))return '—'; if(Math.abs(n)>=1e7) return n.toExponential(3); return Math.round(n).toLocaleString('en-US'); }
+  function vol(L){ if(!isFinite(L)||L<0)return '—'; var u=L*1e6; if(u<1)return fmt(u*1000)+' nL'; if(u<1000)return fmt(u)+' µL'; if(u<1e6)return fmt(u/1000)+' mL'; return fmt(u/1e6)+' L'; }
+  function mass(g){ if(!isFinite(g)||g<0)return '—'; if(g>=1)return fmt(g)+' g'; if(g>=1e-3)return fmt(g*1e3)+' mg'; if(g>=1e-6)return fmt(g*1e6)+' µg'; return fmt(g*1e9)+' ng'; }
+  function mole(m){ if(!isFinite(m)||m<0)return '—'; if(m>=1)return fmt(m)+' mol'; if(m>=1e-3)return fmt(m*1e3)+' mmol'; if(m>=1e-6)return fmt(m*1e6)+' µmol'; if(m>=1e-9)return fmt(m*1e9)+' nmol'; if(m>=1e-12)return fmt(m*1e12)+' pmol'; return fmt(m*1e15)+' fmol'; }
+  function conc(M){ if(!isFinite(M)||M<0)return '—'; if(M>=1)return fmt(M)+' M'; if(M>=1e-3)return fmt(M*1e3)+' mM'; if(M>=1e-6)return fmt(M*1e6)+' µM'; if(M>=1e-9)return fmt(M*1e9)+' nM'; return fmt(M*1e12)+' pM'; }
+  var VF={'L':1,'mL':1e-3,'µL':1e-6,'nL':1e-9};
+  function vL(v,u){ return v*(VF[u]||1); }               // → litres
+  function cleanSeq(s){ return (s||'').toUpperCase().replace(/[^ACGTUN]/g,''); }
+
+  // ---------- calculator registry ----------
+  var G_NA='Nucleic acids & PCR', G_CELL='Cells & phage', G_CONC='Concentrations & general';
+  var CALCS=[
+    { id:'namass', name:'DNA/RNA: ng ↔ pmol ↔ molecules', group:G_NA, tags:'mass moles molarity molecules length bp copy number',
+      blurb:'Convert between mass, moles, molecules and molarity for a nucleic acid of known length.',
+      fields:[
+        {k:'type',label:'Molecule',kind:'select',def:'dsDNA',opts:[{v:'dsDNA',label:'dsDNA'},{v:'ssDNA',label:'ssDNA / oligo'},{v:'ssRNA',label:'ssRNA'},{v:'custom',label:'custom MW'}]},
+        {k:'length',label:'Length (bp or nt)',kind:'num',def:1000,min:1},
+        {k:'customMW',label:'Custom MW (g/mol)',kind:'num',def:'',hint:'only for custom'},
+        {k:'amount',label:'Amount you have',kind:'num',def:100},
+        {k:'amountU',label:'Unit',kind:'select',def:'ng',opts:['ng','µg','pmol','fmol']},
+        {k:'vol',label:'In volume (optional → molarity)',kind:'num',def:'',units:['µL','mL','L'],defU:'µL'}
+      ],
+      compute:function(v){
+        if(!(v.amount>0)) return null;
+        var per={dsDNA:617.96,ssDNA:303.7,ssRNA:320.5}, add={dsDNA:36.04,ssDNA:79.0,ssRNA:159.0};
+        var MW = v.type==='custom'? v.customMW : (v.length>0? v.length*per[v.type]+add[v.type] : NaN);
+        if(!(MW>0)) return {warn:['Enter a length (and a custom MW if using custom).']};
+        var mol; if(v.amountU==='ng') mol=v.amount*1e-9/MW; else if(v.amountU==='µg') mol=v.amount*1e-6/MW; else if(v.amountU==='pmol') mol=v.amount*1e-12; else mol=v.amount*1e-15;
+        var rows=[{label:'Molecular weight',value:fmt(MW)+' g/mol'},{label:'Mass',value:mass(mol*MW),flag:'ok'},{label:'Moles',value:mole(mol),flag:'ok'},{label:'Molecules',value:intc(mol*6.022e23)}];
+        if(v.vol>0){ rows.push({label:'Concentration',value:conc(mol/vL(v.vol,v.volU)),flag:'ok'}); }
+        rows.push({label:'',value:'1 pmol ≈ '+fmt(MW/1000)+' ng · 1 ng ≈ '+fmt(1000/MW)+' pmol',sub:true});
+        return {rows:rows, note:'MW '+(v.type==='custom'?'= custom':'≈ length×'+per[v.type]+' + '+add[v.type]+' g/mol')};
+      } },
+    { id:'a260', name:'Nanodrop / A260 quantification', group:G_NA, tags:'a260 a280 a230 purity concentration nanodrop dilute ng/µL',
+      blurb:'Concentration from A260, purity ratios, and the exact recipe to dilute to a target ng/µL.',
+      fields:[
+        {k:'a260',label:'A260 (absorbance)',kind:'num',def:1.0,hint:'or paste a Nanodrop reading below'},
+        {k:'factor',label:'Sample type',kind:'select',def:'50',opts:[{v:'50',label:'dsDNA (50)'},{v:'33',label:'ssDNA / oligo (33)'},{v:'40',label:'RNA (40)'},{v:'custom',label:'custom factor'}]},
+        {k:'cf',label:'Custom factor',kind:'num',def:50,hint:'only for custom'},
+        {k:'dil',label:'Reading dilution',kind:'num',def:1,min:0},
+        {k:'path',label:'Path length (cm)',kind:'num',def:1,min:0},
+        {k:'a280',label:'A280 (optional)',kind:'num',def:''},
+        {k:'a230',label:'A230 (optional)',kind:'num',def:''},
+        {k:'target',label:'Dilute to (ng/µL, optional)',kind:'num',def:''},
+        {k:'fvol',label:'Final volume (µL)',kind:'num',def:50}
+      ],
+      compute:function(v){
+        if(!(v.a260>0)) return null;
+        var f = v.factor==='custom'? v.cf : parseFloat(v.factor);
+        var c = v.a260*f*(v.dil||1)/(v.path||1);   // ng/µL
+        var rows=[{label:'Concentration',value:fmt(c)+' ng/µL',flag:'ok'},{label:'',value:fmt(c)+' µg/mL = '+fmt(c/1000)+' mg/mL',sub:true}];
+        if(v.a280>0){ var r=v.a260/v.a280; var ok=(v.factor==='40')?(r>=1.9&&r<=2.1):(r>=1.7&&r<=2.0); rows.push({label:'260/280',value:fmt(r,3),flag:ok?'ok':'warn'}); }
+        if(v.a230>0){ var r2=v.a260/v.a230; rows.push({label:'260/230',value:fmt(r2,3),flag:(r2>=2.0&&r2<=2.2)?'ok':'warn'}); }
+        var warn=[], proto='';
+        if(v.target>0&&v.fvol>0){
+          if(v.target>c){ warn.push('Target '+fmt(v.target)+' ng/µL is higher than your sample ('+fmt(c)+' ng/µL) — you can’t concentrate by dilution.'); }
+          else { var vs=v.target*v.fvol/c, w=v.fvol-vs; rows.push({label:'Take sample',value:fmt(vs)+' µL',flag:'ok'}); rows.push({label:'Add diluent',value:fmt(w)+' µL',flag:'ok'}); proto='Dilute to '+fmt(v.target)+' ng/µL: '+fmt(vs)+' µL sample + '+fmt(w)+' µL diluent → '+fmt(v.fvol)+' µL.'; if(vs<1) warn.push(fmt(vs)+' µL is below reliable pipetting — dilute the sample first or use a larger final volume.'); }
+        }
+        return {rows:rows, warn:warn, protocol:proto, note:'conc = A260 × factor × dilution ÷ path'};
+      } },
+    { id:'ligation', name:'Ligation insert : vector ratio', group:G_NA, tags:'ligation insert vector molar ratio cloning ng',
+      blurb:'Insert mass and volume needed for target insert:vector molar ratios.',
+      fields:[
+        {k:'vng',label:'Vector mass (ng)',kind:'num',def:50},
+        {k:'vbp',label:'Vector length (bp)',kind:'num',def:5000},
+        {k:'ibp',label:'Insert length (bp)',kind:'num',def:1000},
+        {k:'iconc',label:'Insert stock (ng/µL, optional)',kind:'num',def:''},
+        {k:'ratios',label:'Molar ratios (insert:vector)',kind:'text',def:'1, 3, 5'}
+      ],
+      compute:function(v){
+        if(!(v.vng>0&&v.vbp>0&&v.ibp>0)) return null;
+        var rs=(v.ratios||'1,3,5').split(/[,\s]+/).map(parseFloat).filter(function(x){return x>0;}); if(!rs.length) rs=[1,3,5];
+        var rows=rs.map(function(r){ var ng=v.vng*(v.ibp/v.vbp)*r; var ul=v.iconc>0? ng/v.iconc:null; return [r+' : 1', fmt(ng)+' ng', ul!=null?fmt(ul)+' µL':'—']; });
+        return {rows:[{label:'Vector',value:fmt(v.vng)+' ng · '+intc(v.vbp)+' bp'}], table:{cols:['Ratio (I:V)','Insert needed','Insert volume'],rows:rows}, note:'insert ng = vector ng × (insert bp ÷ vector bp) × ratio' };
+      } },
+    { id:'primer', name:'Primer resuspension & working dilution', group:G_NA, tags:'primer oligo resuspend 100 µM stock 10 µM working nmol',
+      blurb:'µL of buffer to hit a stock concentration, and the working-aliquot recipe.',
+      fields:[
+        {k:'nmol',label:'Delivered (nmol)',kind:'num',def:25,hint:'from the synthesis spec sheet'},
+        {k:'stock',label:'Target stock (µM)',kind:'num',def:100},
+        {k:'work',label:'Working conc (µM)',kind:'num',def:10},
+        {k:'wvol',label:'Working volume (µL)',kind:'num',def:100}
+      ],
+      compute:function(v){
+        if(!(v.nmol>0&&v.stock>0)) return null;
+        var resus=v.nmol*1000/v.stock;   // µL
+        var rows=[{label:'Resuspend in',value:fmt(resus)+' µL buffer',flag:'ok'},{label:'',value:'→ '+fmt(v.stock)+' µM stock ('+fmt(v.nmol)+' nmol)',sub:true}];
+        var warn=[], proto='Resuspend '+fmt(v.nmol)+' nmol in '+fmt(resus)+' µL TE/water → '+fmt(v.stock)+' µM.';
+        if(v.work>0&&v.wvol>0){ if(v.work>=v.stock){ warn.push('Working conc must be below the stock conc.'); } else { var vs=v.work*v.wvol/v.stock, d=v.wvol-vs; rows.push({label:'Working aliquot',value:fmt(vs)+' µL stock + '+fmt(d)+' µL water',flag:'ok'}); proto+=' Working: '+fmt(vs)+' µL stock + '+fmt(d)+' µL → '+fmt(v.wvol)+' µL at '+fmt(v.work)+' µM.'; if(vs<1) warn.push(fmt(vs)+' µL stock is hard to pipette — make a larger working volume.'); } }
+        return {rows:rows, warn:warn, protocol:proto, note:'µL buffer = nmol × 1000 ÷ target µM'};
+      } },
+    { id:'tm', name:'Primer Tm, GC% & stats', group:G_NA, tags:'tm melting temperature gc content annealing primer oligo',
+      blurb:'Melting temperature (Wallace + salt-adjusted), GC%, and a suggested annealing temp.',
+      fields:[
+        {k:'seq',label:'Primer sequence',kind:'seq',ph:'e.g. GCTAGCATGGATCCGGATCC'},
+        {k:'na',label:'[Na⁺/K⁺] (mM)',kind:'num',def:50}
+      ],
+      compute:function(v){
+        var s=cleanSeq(v.seq); if(s.length<2) return null;
+        var A=(s.match(/A/g)||[]).length, T=(s.match(/[TU]/g)||[]).length, G=(s.match(/G/g)||[]).length, C=(s.match(/C/g)||[]).length, N=s.length;
+        var gc=(G+C)/N*100;
+        var wallace=2*(A+T)+4*(G+C);
+        var na=(v.na>0?v.na:50)/1000;
+        var salt=81.5+0.41*gc-675/N+16.6*Math.log10(na);
+        var pick = N<14? wallace : salt;
+        var rows=[
+          {label:'Length',value:N+' nt'},
+          {label:'GC content',value:fmt(gc,3)+' %',flag:(gc>=40&&gc<=60)?'ok':'warn'},
+          {label:(N<14?'Tm (Wallace)':'Tm (salt-adjusted)'),value:fmt(pick,3)+' °C',flag:'ok'},
+          {label:'Suggested Ta',value:fmt(pick-5,3)+' °C'},
+          {label:'',value:'Wallace '+fmt(wallace,3)+' °C · salt-adj '+fmt(salt,3)+' °C · A'+A+' T'+T+' G'+G+' C'+C,sub:true}
+        ];
+        var warn=[]; if(gc<40||gc>60) warn.push('GC '+fmt(gc,3)+'% is outside the ideal 40–60% window.');
+        return {rows:rows, warn:warn, note:N<14?'Wallace rule (N<14): 2(A+T)+4(G+C)':'Salt-adjusted: 81.5 + 0.41·GC% − 675/N + 16.6·log₁₀[Na⁺]'};
+      } },
+    { id:'seqtool', name:'Sequence toolkit', group:G_NA, tags:'reverse complement gc translate sequence dna rna revcomp',
+      blurb:'Reverse complement, complement, GC%, and length for a DNA/RNA sequence.',
+      fields:[ {k:'seq',label:'Sequence',kind:'seq',ph:'paste DNA/RNA (A C G T/U)'} ],
+      compute:function(v){
+        var s=cleanSeq(v.seq); if(s.length<1) return null;
+        var comp={A:'T',T:'A',U:'A',G:'C',C:'G',N:'N'};
+        var c=s.split('').map(function(b){return comp[b]||'N';}).join('');
+        var rc=c.split('').reverse().join('');
+        var G=(s.match(/G/g)||[]).length, C=(s.match(/C/g)||[]).length;
+        return {rows:[
+          {label:'Length',value:s.length+' nt'},
+          {label:'GC content',value:fmt((G+C)/s.length*100,3)+' %'}
+        ], note:'Reverse complement (5′→3′):', protocol:rc, table:{cols:['','Sequence (5′→3′)'],rows:[['Reverse complement',rc],['Complement',c]]} };
+      } },
+    // ---- Cells & phage ----
+    { id:'od600', name:'OD₆₀₀ → cells/mL + back-dilution', group:G_CELL, tags:'od600 cells cfu density back dilution log phase culture',
+      blurb:'Cell density from OD₆₀₀ and the recipe to back-dilute to a target OD.',
+      fields:[
+        {k:'od',label:'Measured OD₆₀₀',kind:'num',def:0.6},
+        {k:'factor',label:'Conversion (cells/mL per OD)',kind:'num',def:8e8,hint:'E. coli ≈ 8×10⁸; edit for your strain'},
+        {k:'dil',label:'Reading dilution',kind:'num',def:1},
+        {k:'cvol',label:'Culture volume (mL, optional)',kind:'num',def:''},
+        {k:'targetOD',label:'Target OD (optional)',kind:'num',def:0.1},
+        {k:'fvol',label:'Final volume (mL)',kind:'num',def:10}
+      ],
+      compute:function(v){
+        if(!(v.od>0&&v.factor>0)) return null;
+        var cells=v.od*v.factor*(v.dil||1);
+        var rows=[{label:'Density',value:intc(cells)+' cells/mL',flag:'ok'}];
+        if(v.cvol>0) rows.push({label:'Total cells',value:intc(cells*v.cvol)+' in '+fmt(v.cvol)+' mL'});
+        var warn=[], proto='';
+        if(v.targetOD>0&&v.fvol>0){
+          if(v.targetOD>v.od){ warn.push('Target OD '+fmt(v.targetOD)+' is above the current OD '+fmt(v.od)+' — grow up instead of diluting.'); }
+          else { var vc=v.targetOD*v.fvol/v.od, media=v.fvol-vc; rows.push({label:'Take culture',value:fmt(vc)+' mL',flag:'ok'}); rows.push({label:'Add media',value:fmt(media)+' mL',flag:'ok'}); proto='Back-dilute to OD '+fmt(v.targetOD)+': '+fmt(vc)+' mL culture + '+fmt(media)+' mL media → '+fmt(v.fvol)+' mL.'; }
+        }
+        return {rows:rows, warn:warn, protocol:proto, note:'cells/mL = OD × factor × dilution'};
+      } },
+    { id:'titer', name:'Phage titer (PFU/mL)', group:G_CELL, tags:'phage titer pfu plaque count plaque assay',
+      blurb:'Titer from a plaque count, with the 30–300 countable-window check.',
+      fields:[
+        {k:'plaques',label:'Plaques counted',kind:'num',def:120,min:0},
+        {k:'dil',label:'Total dilution at that plate',kind:'num',def:1e6,hint:'e.g. 1e6 for a 10⁻⁶ dilution'},
+        {k:'plated',label:'Volume plated (mL)',kind:'num',def:0.1},
+        {k:'stockvol',label:'Stock volume (mL, optional)',kind:'num',def:''}
+      ],
+      compute:function(v){
+        if(!(v.plaques>0&&v.dil>0&&v.plated>0)) return null;
+        var titer=v.plaques/(v.dil*v.plated);
+        var rows=[{label:'Titer',value:intc(titer)+' PFU/mL',flag:'ok'}];
+        if(v.stockvol>0) rows.push({label:'Total in stock',value:intc(titer*v.stockvol)+' PFU'});
+        var warn=[]; if(v.plaques<30||v.plaques>300) warn.push('Count '+v.plaques+' is outside the 30–300 statistically-reliable window — use a plate with 30–300 plaques.');
+        return {rows:rows, warn:warn, note:'PFU/mL = plaques ÷ (dilution × mL plated)'};
+      } },
+    { id:'moivol', name:'MOI → volume of phage', group:G_CELL, tags:'moi multiplicity infection phage volume poisson infected',
+      blurb:'Volume of phage stock for a target MOI, and the Poisson % of cells infected.',
+      fields:[
+        {k:'titer',label:'Phage titer (PFU/mL)',kind:'num',def:1e10},
+        {k:'cells',label:'Host cells (cells/mL)',kind:'num',def:5e8},
+        {k:'infvol',label:'Infection volume (mL)',kind:'num',def:1},
+        {k:'moi',label:'Target MOI',kind:'num',def:0.1}
+      ],
+      compute:function(v){
+        if(!(v.titer>0&&v.cells>0&&v.infvol>0&&v.moi>0)) return null;
+        var totalCells=v.cells*v.infvol;
+        var pfu=v.moi*totalCells;
+        var vmL=pfu/v.titer;
+        var rows=[
+          {label:'Host cells',value:intc(totalCells)+' cells'},
+          {label:'Phage needed',value:intc(pfu)+' PFU'},
+          {label:'Add phage stock',value:vol(vmL/1000),flag:'ok'},
+          {label:'% cells infected',value:fmt((1-Math.exp(-v.moi))*100,3)+' % (Poisson)'}
+        ];
+        var warn=[]; if(vmL/1000>vL(v.infvol,'mL')) warn.push('Required phage volume exceeds the infection volume — use a higher-titer stock or a lower MOI.');
+        return {rows:rows, warn:warn, note:'PFU = MOI × cells; volume = PFU ÷ titer; %infected = 1 − e^(−MOI)'};
+      } },
+    { id:'doubling', name:'Growth rate / doubling time', group:G_CELL, tags:'doubling generation time growth rate log phase od cfu',
+      blurb:'Doubling time and rate from two readings, plus time to reach a target.',
+      fields:[
+        {k:'n0',label:'Start reading (OD or CFU/mL)',kind:'num',def:0.05},
+        {k:'n',label:'Later reading',kind:'num',def:0.4},
+        {k:'t',label:'Elapsed time',kind:'num',def:120,units:['min','h'],defU:'min'},
+        {k:'target',label:'Target reading (optional)',kind:'num',def:''}
+      ],
+      compute:function(v){
+        if(!(v.n0>0&&v.n>v.n0&&v.t>0)) return null;
+        var tmin=v.tU==='h'?v.t*60:v.t;
+        var gens=Math.log2(v.n/v.n0);
+        var g=tmin/gens;
+        var rows=[
+          {label:'Generations',value:fmt(gens,3)},
+          {label:'Doubling time',value:fmt(g,3)+' min ('+fmt(g/60,3)+' h)',flag:'ok'},
+          {label:'Growth rate k',value:fmt(gens/tmin*60,3)+' /h'}
+        ];
+        if(v.target>v.n0){ var gt=Math.log2(v.target/v.n0)*g; rows.push({label:'Time to target',value:fmt(gt,3)+' min ('+fmt(gt/60,3)+' h) from start',flag:'ok'}); }
+        return {rows:rows, note:'generations = log₂(N/N₀); doubling = time ÷ generations'};
+      } },
+    { id:'cfu', name:'CFU/mL from plate count', group:G_CELL, tags:'cfu colony forming units plating viable count dilution',
+      blurb:'Viable count from colonies, dilution and volume plated.',
+      fields:[
+        {k:'col',label:'Colonies counted',kind:'num',def:150,min:0},
+        {k:'dil',label:'Total dilution at that plate',kind:'num',def:1e6},
+        {k:'plated',label:'Volume plated (mL)',kind:'num',def:0.1}
+      ],
+      compute:function(v){
+        if(!(v.col>0&&v.dil>0&&v.plated>0)) return null;
+        var cfu=v.col/(v.dil*v.plated);
+        var warn=[]; if(v.col<30||v.col>300) warn.push('Count '+v.col+' is outside the 30–300 reliable window.');
+        return {rows:[{label:'Viable count',value:intc(cfu)+' CFU/mL',flag:'ok'}], warn:warn, note:'CFU/mL = colonies ÷ (dilution × mL plated)'};
+      } },
+    // ---- Concentrations & general ----
+    { id:'pctmolar', name:'% ↔ molarity ↔ mg/mL + weigh-out', group:G_CONC, tags:'percent w/v molarity mg/ml weigh out hydrate purity convert',
+      blurb:'Interconvert %(w/v), molarity and mg/mL for a known MW — and how much to weigh.',
+      fields:[
+        {k:'mw',label:'Molecular weight (g/mol)',kind:'num',def:58.44},
+        {k:'hydrate',label:'Waters of hydration (n)',kind:'num',def:0,hint:'adds n×18.015 to MW'},
+        {k:'purity',label:'Purity (%)',kind:'num',def:100},
+        {k:'mode',label:'I know the…',kind:'select',def:'molarity',opts:[{v:'molarity',label:'molarity (M)'},{v:'pct',label:'% (w/v)'},{v:'mgml',label:'mg/mL'}]},
+        {k:'value',label:'Value',kind:'num',def:1},
+        {k:'vol',label:'Volume to make (mL)',kind:'num',def:100}
+      ],
+      compute:function(v){
+        if(!(v.mw>0&&v.value>0)) return null;
+        var MW=v.mw+(v.hydrate>0?v.hydrate*18.015:0);
+        var M; if(v.mode==='pct') M=(10*v.value)/MW; else if(v.mode==='mgml') M=v.value/MW; else M=v.value;
+        var pur=(v.purity>0?v.purity:100)/100;
+        var rows=[
+          {label:'Molarity',value:conc(M),flag:'ok'},
+          {label:'% (w/v)',value:fmt(M*MW/10,3)+' %'},
+          {label:'mg/mL',value:fmt(M*MW,4)},
+          {label:'Effective MW',value:fmt(MW)+' g/mol'+(v.hydrate>0?' (hydrate)':'')}
+        ];
+        var warn=[], proto='';
+        if(v.vol>0){ var g=M*MW*vL(v.vol,'mL')/pur; rows.push({label:'Weigh out',value:mass(g),flag:'ok'}); proto='For '+fmt(v.vol)+' mL: weigh '+mass(g)+', dissolve and bring to '+fmt(v.vol)+' mL.'; if(g<1e-3) warn.push(mass(g)+' is below a typical balance — make a concentrated stock and dilute.'); }
+        return {rows:rows, warn:warn, protocol:proto, note:'M = 10·%w/v ÷ MW; mg/mL = M·MW; grams = M·MW·V·(100/purity)'};
+      } },
+    { id:'rcf', name:'Centrifuge RCF ↔ RPM', group:G_CONC, tags:'centrifuge rcf rpm g-force rotor radius spin',
+      blurb:'Convert between relative centrifugal force (×g) and rotor speed.',
+      fields:[
+        {k:'r',label:'Rotor radius (mm)',kind:'num',def:85},
+        {k:'mode',label:'Convert',kind:'select',def:'rpm2rcf',opts:[{v:'rpm2rcf',label:'RPM → RCF (×g)'},{v:'rcf2rpm',label:'RCF (×g) → RPM'}]},
+        {k:'value',label:'Value',kind:'num',def:13000}
+      ],
+      compute:function(v){
+        if(!(v.r>0&&v.value>0)) return null;
+        if(v.mode==='rpm2rcf'){ var rcf=1.118e-5*v.r*v.value*v.value; return {rows:[{label:'RCF',value:intc(rcf)+' × g',flag:'ok'}], note:'RCF = 1.118×10⁻⁵ × r(mm) × RPM²'}; }
+        var rpm=Math.sqrt(v.value/(1.118e-5*v.r)); return {rows:[{label:'RPM',value:intc(rpm)+' rpm',flag:'ok'}], note:'RPM = √(RCF ÷ (1.118×10⁻⁵ × r))'};
+      } }
+  ];
+  var byId={}; CALCS.forEach(function(c){ byId[c.id]=c; });
+
+  // ---------- field rendering ----------
+  function hint(f){ return f.hint?'<div class="mbc-hint">'+escapeHtml(f.hint)+'</div>':''; }
+  function fieldHtml(f){
+    var id='mbc_'+f.k;
+    if(f.kind==='select'){ var opts=(f.opts||[]).map(function(o){var val=o.v!=null?o.v:o, lab=o.label!=null?o.label:o; return '<option value="'+escapeHtml(String(val))+'"'+(String(val)===String(f.def)?' selected':'')+'>'+escapeHtml(String(lab))+'</option>';}).join('');
+      return '<div class="mbc-f"><label for="'+id+'">'+escapeHtml(f.label)+'</label><select id="'+id+'" oninput="MBC.recompute()">'+opts+'</select>'+hint(f)+'</div>'; }
+    if(f.kind==='seq'){ return '<div class="mbc-f mbc-wide"><label for="'+id+'">'+escapeHtml(f.label)+'</label><textarea id="'+id+'" rows="3" spellcheck="false" oninput="MBC.recompute()" placeholder="'+escapeHtml(f.ph||'')+'"></textarea>'+hint(f)+'</div>'; }
+    if(f.kind==='text'){ return '<div class="mbc-f"><label for="'+id+'">'+escapeHtml(f.label)+'</label><input id="'+id+'" type="text" value="'+escapeHtml(f.def!=null?String(f.def):'')+'" oninput="MBC.recompute()" placeholder="'+escapeHtml(f.ph||'')+'">'+hint(f)+'</div>'; }
+    var inp='<input id="'+id+'" type="number" inputmode="decimal" step="'+(f.step||'any')+'"'+(f.min!=null?' min="'+f.min+'"':'')+' value="'+(f.def!=null?f.def:'')+'" oninput="MBC.recompute()" placeholder="'+escapeHtml(f.ph||'')+'">';
+    if(f.units){ var us=f.units.map(function(u){return '<option'+(u===(f.defU||f.units[0])?' selected':'')+'>'+escapeHtml(u)+'</option>';}).join(''); inp='<div class="mbc-cu">'+inp+'<select id="'+id+'_u" oninput="MBC.recompute()">'+us+'</select></div>'; }
+    return '<div class="mbc-f"><label for="'+id+'">'+escapeHtml(f.label)+'</label>'+inp+hint(f)+'</div>';
+  }
+  function gather(calc){ var v={}; (calc.fields||[]).forEach(function(f){ var el=document.getElementById('mbc_'+f.k); if(!el)return; if(f.kind==='select'||f.kind==='seq'||f.kind==='text') v[f.k]=el.value; else v[f.k]=num(el.value); if(f.units){ var u=document.getElementById('mbc_'+f.k+'_u'); if(u) v[f.k+'U']=u.value; } }); return v; }
+
+  function renderResult(calc,res){
+    var el=document.getElementById('mbcResult'); if(!el)return; MBC._txt='';
+    if(!res){ el.innerHTML='<div class="mbc-empty">Enter values above to see the result.</div>'; return; }
+    var html='', txt=[calc.name];
+    if(res.rows&&res.rows.length){ html+='<div class="mbc-rows">'+res.rows.map(function(r){ if(r.sub) return '<div class="mbc-subrow">'+escapeHtml((r.label?r.label+': ':'')+r.value)+'</div>'; var fc=r.flag?(' '+r.flag):''; txt.push((r.label?r.label+': ':'')+r.value); return '<div class="mbc-row"><span class="mbc-rl">'+escapeHtml(r.label||'')+'</span><span class="mbc-rv'+fc+'">'+escapeHtml(r.value)+'</span></div>'; }).join('')+'</div>'; }
+    if(res.table){ html+='<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr>'+res.table.cols.map(function(c){return '<th>'+escapeHtml(c)+'</th>';}).join('')+'</tr></thead><tbody>'+res.table.rows.map(function(row){return '<tr>'+row.map(function(c){return '<td>'+escapeHtml(String(c))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div>'; res.table.rows.forEach(function(r){txt.push(r.join(' · '));}); }
+    if(res.warn&&res.warn.length){ html+=res.warn.map(function(w){return '<div class="mbc-warn">⚠ '+escapeHtml(w)+'</div>';}).join(''); res.warn.forEach(function(w){txt.push('! '+w);}); }
+    if(res.note){ html+='<div class="mbc-note">'+escapeHtml(res.note)+'</div>'; }
+    if(res.protocol){ txt.push('',res.protocol); }
+    el.innerHTML=html; MBC._txt=txt.join('\n');
+  }
+  function recompute(){ var calc=byId[MBC._cur]; if(!calc||calc.custom)return; var res; try{ res=calc.compute(gather(calc)); }catch(e){ res={warn:['Check your inputs.']}; } renderResult(calc,res); }
+  function openCalc(id){ var calc=byId[id]; if(!calc)return; MBC._cur=id; try{localStorage.setItem('mbc_last',id);}catch(e){} renderNav();
+    var m=document.getElementById('mbcMain'); if(!m)return;
+    m.innerHTML='<div class="mbc-head"><h2>'+escapeHtml(calc.name)+'</h2><p>'+escapeHtml(calc.blurb||'')+'</p></div>'+
+      '<div class="mbc-form">'+(calc.fields||[]).map(fieldHtml).join('')+'</div>'+
+      '<div class="mbc-actions"><button class="btn" onclick="MBC.copy()">Copy result</button></div>'+
+      '<div id="mbcResult" class="mbc-result"></div>';
+    recompute();
+  }
+  function renderNav(){
+    var el=document.getElementById('mbcList'); if(!el)return;
+    var q=((document.getElementById('mbcSearch')||{}).value||'').toLowerCase().trim();
+    var groups={}, order=[];
+    CALCS.forEach(function(c){ if(q && (c.name+' '+(c.tags||'')+' '+(c.blurb||'')).toLowerCase().indexOf(q)<0) return; if(!groups[c.group]){groups[c.group]=[];order.push(c.group);} groups[c.group].push(c); });
+    el.innerHTML=order.map(function(g){ return '<div class="mbc-group">'+escapeHtml(g)+'</div>'+groups[g].map(function(c){ return '<button class="mbc-item'+(c.id===MBC._cur?' active':'')+'" role="option" onclick="MBC.open(\''+c.id+'\')">'+escapeHtml(c.name)+'</button>'; }).join(''); }).join('')||'<div class="mbc-empty" style="padding:12px">No matches.</div>';
+  }
+  function initCalc(){ var last=(MBC._cur&&byId[MBC._cur])?MBC._cur:null; if(!last){ try{last=localStorage.getItem('mbc_last');}catch(e){} } if(!byId[last]) last=CALCS[0].id; renderNav(); openCalc(last); }
+
+  window.MBC={ open:openCalc, init:initCalc, recompute:recompute, filter:renderNav, copy:function(){ dcCopyText(MBC._txt); }, calcs:CALCS };
+
+  // ---------- home hub ----------
+  window.renderHome=function(){
+    var el=document.getElementById('homeWrap'); if(!el)return;
+    var mods=[
+      {m:'plasmid',icon:'🧫',title:'Plate Planner',desc:'Design 96 / 384 & multi-plate layouts — plasmid/induction & phage/MOI, master mix, randomization, bench checks.'},
+      {m:'dilcalc',icon:'💧',title:'Dilution & Molarity',desc:'C1V1 across every unit, serial dilutions, molarity↔mass, and weigh-outs.'},
+      {m:'reagent',icon:'⚗️',title:'Reagent Prep',desc:'150+ verified buffer / media / stock recipes scaled to any volume, with printable prep sheets.'},
+      {m:'calc',icon:'🧬',title:'Molbio Calculators',desc:CALCS.length+' bench calculators: ng↔pmol, A260, ligation, primer Tm, OD→cells, phage titer/MOI, %↔molarity & more.'}
+    ];
+    var featured=['namass','a260','pctmolar','tm','od600','titer','ligation','moivol','doubling','rcf'];
+    el.innerHTML='<div class="home-hero"><h1>Molecular Biology Bench Toolkit</h1><p>One place for dilutions, reagents, plate layouts, and the everyday molecular-biology math — all in your browser, works offline.</p></div>'+
+      '<div class="home-cards">'+mods.map(function(x){return '<button class="home-card" onclick="setMode(\''+x.m+'\')"><div class="home-ico">'+x.icon+'</div><div class="home-ct"><div class="home-ctitle">'+escapeHtml(x.title)+'</div><div class="home-cdesc">'+escapeHtml(x.desc)+'</div></div></button>';}).join('')+'</div>'+
+      '<div class="home-sub">Jump to a calculator</div><div class="home-chips">'+featured.filter(function(id){return byId[id];}).map(function(id){return '<button class="home-chip" onclick="MBC._cur=\''+id+'\';setMode(\'calc\')">'+escapeHtml(byId[id].name)+'</button>';}).join('')+'</div>';
+  };
+})();
 </script>
 </body>
 </html>
