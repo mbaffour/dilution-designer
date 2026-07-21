@@ -2161,8 +2161,10 @@ function dcConvert(){
   else { out.innerHTML='<span class="dc-note">'+escapeHtml(u)+' is a ratio/activity unit — no molar or mass conversion applies.</span>'; return; }
   out.innerHTML=lines.join('<br>');
 }
-function dcMolarLine(M){ return '<b>Molar:</b> '+rpNum(M)+' M = '+rpNum(M*1e3)+' mM = '+rpNum(M*1e6)+' µM = '+rpNum(M*1e9)+' nM'; }
-function dcMassLine(gL){ return '<b>Mass:</b> '+rpNum(gL)+' g/L = '+rpNum(gL)+' mg/mL = '+rpNum(gL*1e3)+' µg/mL = '+rpNum(gL*1e6)+' ng/mL'; }
+// ~4 significant figures, but never coarser than 3 decimals (keeps small molar values honest, e.g. 0.05551 not 0.056)
+function dcSig(n){ if(n==null||isNaN(n)) return '—'; if(n===0) return '0'; var a=Math.abs(n); if(a<1e-3||a>=1e5) return Number(n).toExponential(2); var dec=Math.max(3, 3-Math.floor(Math.log10(a))); return Number(n.toFixed(Math.min(dec,12))).toString(); }
+function dcMolarLine(M){ return '<b>Molar:</b> '+dcSig(M)+' M = '+dcSig(M*1e3)+' mM = '+dcSig(M*1e6)+' µM = '+dcSig(M*1e9)+' nM'; }
+function dcMassLine(gL){ return '<b>Mass:</b> '+dcSig(gL)+' g/L = '+dcSig(gL)+' mg/mL = '+dcSig(gL*1e3)+' µg/mL = '+dcSig(gL*1e6)+' ng/mL'; }
 
 function dcWeigh(){
   var out=document.getElementById('dwOut'); if(!out) return;
