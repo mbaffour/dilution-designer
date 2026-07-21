@@ -2174,6 +2174,8 @@ if(_restored){
   document.getElementById('expDate').valueAsDate=new Date();
   setTool('paint');
   renderPalette();
+  window._ddFresh=true;   // first-time visitor → land on the Home hub (handled after modules load)
+  try{ if(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) setTheme('night'); }catch(e){}
 }
 renderExclBar();
 renderPlateTabs();
@@ -2476,6 +2478,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
 
 /* ══════════════════════════ HOME HUB + MOLBIO CALCULATORS (MBC) ══════════════════════════ */
 (function(){
+  var MB_VERSION='v0.9 (2026-07)';
   // ---------- styles ----------
   var css = `
   #homeView,#calcView{color:var(--text);}
@@ -2697,11 +2700,11 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       ],
       compute:function(v){
         if(!(v.plaques>0&&v.dil>0&&v.plated>0)) return null;
-        var titer=v.plaques/(v.dil*v.plated);
+        var titer=v.plaques*v.dil/v.plated;
         var rows=[{label:'Titer',value:intc(titer)+' PFU/mL',flag:'ok'}];
         if(v.stockvol>0) rows.push({label:'Total in stock',value:intc(titer*v.stockvol)+' PFU'});
         var warn=[]; if(v.plaques<30||v.plaques>300) warn.push('Count '+v.plaques+' is outside the 30–300 statistically-reliable window — use a plate with 30–300 plaques.');
-        return {rows:rows, warn:warn, note:'PFU/mL = plaques ÷ (dilution × mL plated)'};
+        return {rows:rows, warn:warn, note:'PFU/mL = plaques × dilution factor ÷ mL plated'};
       } },
     { id:'moivol', name:'MOI → volume of phage', group:G_CELL, tags:'moi multiplicity infection phage volume poisson infected',
       blurb:'Volume of phage stock for a target MOI, and the Poisson % of cells infected.',
@@ -2755,9 +2758,9 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       ],
       compute:function(v){
         if(!(v.col>0&&v.dil>0&&v.plated>0)) return null;
-        var cfu=v.col/(v.dil*v.plated);
+        var cfu=v.col*v.dil/v.plated;
         var warn=[]; if(v.col<30||v.col>300) warn.push('Count '+v.col+' is outside the 30–300 reliable window.');
-        return {rows:[{label:'Viable count',value:intc(cfu)+' CFU/mL',flag:'ok'}], warn:warn, note:'CFU/mL = colonies ÷ (dilution × mL plated)'};
+        return {rows:[{label:'Viable count',value:intc(cfu)+' CFU/mL',flag:'ok'}], warn:warn, note:'CFU/mL = colonies × dilution factor ÷ mL plated'};
       } },
     // ---- Concentrations & general ----
     { id:'pctmolar', name:'% ↔ molarity ↔ mg/mL + weigh-out', group:G_CONC, tags:'percent w/v molarity mg/ml weigh out hydrate purity convert',
@@ -2934,7 +2937,34 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   }
   function initCalc(){ var last=(MBC._cur&&byId[MBC._cur])?MBC._cur:null; if(!last){ try{last=localStorage.getItem('mbc_last');}catch(e){} } if(!byId[last]) last=CALCS[0].id; renderNav(); openCalc(last); }
 
-  window.MBC={ open:openCalc, init:initCalc, recompute:recompute, filter:renderNav, copy:function(){ dcCopyText(MBC._txt); }, calcs:CALCS,
+  // ---------- self-test harness (?selftest=1) ----------
+  function _pnum(s){ if(typeof s==='number')return s; s=String(s).replace(/,/g,''); var m=s.match(/-?[\d.]+(?:e[-+]?\d+)?/i); return m?parseFloat(m[0]):NaN; }
+  function _rowVal(res,label){ if(!res||!res.rows)return null; for(var i=0;i<res.rows.length;i++){ if(res.rows[i].label===label) return res.rows[i].value; } return null; }
+  function _near(a,b,tol){ if(!isFinite(a)||!isFinite(b))return false; return Math.abs(a-b)<=(tol!=null?tol:Math.abs(b)*0.005+1e-9); }
+  function selftest(){
+    var cases=[
+      ['namass',{type:'dsDNA',length:1000,amount:100,amountU:'ng'},[['Molecular weight',617996,1],['Moles',161.8,0.5]]],
+      ['a260',{a260:2,factor:'50',cf:50,dil:10,path:1},[['Concentration',1000,1]]],
+      ['a260',{a260:1,factor:'50',cf:50,dil:1,path:1,target:20,fvol:50},[['Take sample',20,0.1],['Add diluent',30,0.1]]],
+      ['pctmolar',{mw:58.44,hydrate:0,purity:100,mode:'molarity',value:5,vol:1000},[['% (w/v)',29.22,0.05],['mg/mL',292.2,0.5],['Weigh out',292.2,0.5]]],
+      ['pctmolar',{mw:58.44,hydrate:0,purity:100,mode:'pct',value:0.9,vol:100},[['mg/mL',9,0.05]]],
+      ['rcf',{r:85,mode:'rpm2rcf',value:13000},[['RCF',160601,50]]],
+      ['od600',{od:0.6,factor:8e8,dil:1,targetOD:0.1,fvol:10},[['Density',4.8e8,1e6],['Take culture',1.667,0.01],['Add media',8.333,0.01]]],
+      ['moivol',{titer:1e10,cells:5e8,infvol:1,moi:0.1},[['Add phage stock',5,0.05],['% cells infected',9.516,0.1]]],
+      ['primer',{nmol:25,stock:100,work:10,wvol:100},[['Resuspend in',250,0.5]]],
+      ['doubling',{n0:0.05,n:0.4,t:120,tU:'min'},[['Generations',3,0.01],['Doubling time',40,0.1]]],
+      ['tm',{seq:'ATGCATGCATGCATGCATGC',na:50},[['GC content',50,0.1],['Tm (salt-adjusted)',46.65,0.2]]],
+      ['titer',{plaques:120,dil:1e6,plated:0.1},[['Titer',1.2e9,1e6]]],
+      ['cfu',{col:150,dil:1e6,plated:0.1},[['Viable count',1.5e9,1e6]]]
+    ];
+    var fails=[], n=0;
+    cases.forEach(function(t){ var calc=byId[t[0]]; if(!calc||!calc.compute){ fails.push(t[0]+': no compute'); return; } var res; try{ res=calc.compute(t[1]); }catch(e){ fails.push(t[0]+': threw '+e.message); return; } t[2].forEach(function(chk){ n++; var got=_pnum(_rowVal(res,chk[0])); if(!_near(got,chk[1],chk[2])) fails.push(t[0]+' / '+chk[0]+': got '+got+' want '+chk[1]); }); });
+    n++; try{ var lg=byId['ligation'].compute({vng:50,vbp:5000,ibp:1000,iconc:0,ratios:'3'}); if(!_near(_pnum(lg.table.rows[0][1]),30,0.5)) fails.push('ligation 3:1 got '+lg.table.rows[0][1]+' want 30'); }catch(e){ fails.push('ligation threw '+e.message); }
+    n++; if(!_near(pcrPer({mode:'cf',stock:5,final:1},25),5,0.01)) fails.push('pcr cf per-rxn wrong');
+    return {total:n, passed:n-fails.length, failures:fails};
+  }
+
+  window.MBC={ open:openCalc, init:initCalc, recompute:recompute, filter:renderNav, copy:function(){ dcCopyText(MBC._txt); }, calcs:CALCS, selftest:selftest,
     pcrCfg:function(k,val){ pcrState[k]=(k==='n')?Math.max(1,Math.round(num(val)||1)):(num(val)||0); pcrResults(); },
     pcrVal:function(i,k,val){ var r=pcrState.rows[i]; if(!r)return; if(k==='name') r.name=val; else if(k==='perTube') r.perTube=val; else r[k]=num(val); pcrResults(); },
     pcrMode:function(i,m){ if(pcrState.rows[i]){ pcrState.rows[i].mode=m; } pcrRender(pcrHost); },
@@ -2954,8 +2984,20 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     var featured=['namass','a260','pctmolar','tm','od600','titer','ligation','moivol','doubling','rcf'];
     el.innerHTML='<div class="home-hero"><h1>Molecular Biology Bench Toolkit</h1><p>One place for dilutions, reagents, plate layouts, and the everyday molecular-biology math — all in your browser, works offline.</p></div>'+
       '<div class="home-cards">'+mods.map(function(x){return '<button class="home-card" onclick="setMode(\''+x.m+'\')"><div class="home-ico">'+x.icon+'</div><div class="home-ct"><div class="home-ctitle">'+escapeHtml(x.title)+'</div><div class="home-cdesc">'+escapeHtml(x.desc)+'</div></div></button>';}).join('')+'</div>'+
-      '<div class="home-sub">Jump to a calculator</div><div class="home-chips">'+featured.filter(function(id){return byId[id];}).map(function(id){return '<button class="home-chip" onclick="MBC._cur=\''+id+'\';setMode(\'calc\')">'+escapeHtml(byId[id].name)+'</button>';}).join('')+'</div>';
+      '<div class="home-sub">Jump to a calculator</div><div class="home-chips">'+featured.filter(function(id){return byId[id];}).map(function(id){return '<button class="home-chip" onclick="MBC._cur=\''+id+'\';setMode(\'calc\')">'+escapeHtml(byId[id].name)+'</button>';}).join('')+'</div>'+
+      '<div style="text-align:center;margin-top:26px;font:11px var(--mono);color:var(--text3);">Dilution Designer · '+MB_VERSION+' · runs entirely in your browser</div>';
   };
+
+  // Self-test on ?selftest=1 (numeric assertions on every formula)
+  if(/[?&]selftest\b/.test(location.search)){
+    try{ var _r=selftest(); var _ok=_r.failures.length===0;
+      (window.console&&console[_ok?'log':'error'])('MBC self-test: '+_r.passed+'/'+_r.total+(_ok?' PASS':' FAIL — '+_r.failures.join(' | ')));
+      var _b=document.createElement('div'); _b.style.cssText='position:fixed;bottom:12px;right:12px;z-index:99999;max-width:340px;padding:10px 14px;border-radius:8px;font:12px/1.4 monospace;color:#fff;background:'+(_ok?'#2f7d5b':'#c0392b');
+      _b.textContent='Self-test '+_r.passed+'/'+_r.total+(_ok?' ✓ all pass':' ✗ '+_r.failures.length+' fail'); if(!_ok)_b.title=_r.failures.join('\n'); document.body.appendChild(_b);
+    }catch(e){ if(window.console)console.error('self-test crashed',e); }
+  }
+  // First-time visitors land on the Home hub (returning users restore their last view).
+  if(window._ddFresh && (location.hash||'').indexOf('#s=')!==0){ try{ setMode('home'); }catch(e){} }
 })();
 </script>
 </body>
