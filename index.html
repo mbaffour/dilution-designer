@@ -126,6 +126,34 @@ header{background:var(--text);color:var(--bg);padding:10px 22px;display:flex;ali
 .exbtn:hover{background:var(--border);}
 .exbtn.excl-active{background:var(--text);color:var(--bg);border-color:var(--text);}
 .excl-hint{font-family:var(--mono);font-size:9px;color:var(--text3);}
+#rowExBtns,#colExBtns{display:contents;}
+/* ── MULTI-PLATE TABS ── */
+.plate-tabs{display:flex;align-items:center;flex-wrap:wrap;gap:5px;padding:8px 12px 0;}
+.ptab{font-family:var(--mono);font-size:10.5px;padding:4px 9px;border:1px solid var(--border);border-radius:6px 6px 0 0;background:var(--surface);color:var(--text2);cursor:pointer;display:inline-flex;align-items:center;gap:5px;}
+.ptab.active{background:var(--accent2);color:#fff;border-color:var(--accent2);}
+.ptab small{opacity:.72;font-size:9px;}
+.ptab .ptab-x{opacity:.6;font-weight:700;padding:0 3px;border-radius:3px;}
+.ptab .ptab-x:hover{opacity:1;background:rgba(0,0,0,0.18);}
+.ptab-add{font-family:var(--mono);font-size:10.5px;padding:4px 9px;border:1px dashed var(--border);border-radius:6px;background:transparent;color:var(--text2);cursor:pointer;}
+.ptab-add:hover{background:var(--surface);}
+.ptab-fmt{font-family:var(--mono);font-size:10px;color:var(--text3);margin-left:auto;display:inline-flex;align-items:center;gap:5px;}
+.ptab-fmt select{font-family:var(--mono);font-size:10px;padding:3px 5px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text2);}
+/* ── 384-well compact cells ── */
+.plate.p384 .well{width:23px;height:23px;border-radius:4px;border-width:1px;}
+.plate.p384 .well:hover{transform:scale(1.45);}
+.plate.p384 .well-label,.plate.p384 .well-val,.plate.p384 .well-id{display:none;}
+.plate.p384 .pcl,.plate.p384 .prl{font-size:8px;}
+/* ── BENCH REALITY CHECK ── */
+.bench-empty{color:var(--text3);font-style:italic;font-size:12px;}
+.bench-chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:10px;}
+.bchip{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 11px;}
+.bchip .bv{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;}
+.bchip .bl{font-family:var(--mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--text3);margin-top:3px;}
+.bench-warn{border-radius:8px;padding:9px 12px;font-size:12px;margin-top:8px;border:1px solid;display:flex;gap:8px;align-items:flex-start;line-height:1.45;color:var(--text2);}
+.bench-warn.edge{background:rgba(191,140,0,0.10);border-color:rgba(191,140,0,0.42);}
+.bench-warn.short{background:rgba(192,57,43,0.10);border-color:rgba(192,57,43,0.45);}
+.bench-warn.ok{background:rgba(47,125,91,0.10);border-color:rgba(47,125,91,0.42);}
+.bench-warn b{color:var(--text);}
 
 /* ── PLATE (Gen5 style) ── */
 .platewrap{padding:14px;overflow-x:auto;background:var(--plate-bg);border-radius:8px;user-select:none;-webkit-user-select:none;}
@@ -289,6 +317,8 @@ body.print-plate-mode .excl-bar{display:none!important;}
   <div class="hactions">
     <button class="btn" onclick="saveJSON()" title="Save experiment to file">💾 Save</button>
     <label class="btn" style="cursor:pointer;" title="Load experiment from file">📂 Load<input type="file" accept=".json" id="loadJSONInput" style="display:none;" onchange="loadJSON(event)"></label>
+    <label class="btn" style="cursor:pointer;" title="Import a plate layout from a CSV file">⬆ Import CSV<input type="file" accept=".csv,text/csv" id="importCSVInput" style="display:none;" onchange="importCSV(event)"></label>
+    <button class="btn" onclick="shareLink()" title="Copy a shareable link containing the whole experiment">🔗 Share link</button>
     <span class="btn" style="cursor:default;padding:0;border:none;background:none;display:inline-flex;gap:4px;align-items:center;">
       <select id="layoutSelect" title="Saved layouts in this browser" style="max-width:150px;font-family:var(--mono);font-size:11px;padding:4px 6px;"><option value="">Saved layouts…</option></select>
       <button class="btn" onclick="loadNamedLayout()" title="Load selected saved layout">Open</button>
@@ -601,6 +631,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <button class="tool-btn" onclick="undo()" title="Undo (Ctrl+Z)">↩ Undo</button>
       <button class="tool-btn" onclick="redo()" title="Redo (Ctrl+Y)">↪ Redo</button>
       <button class="tool-btn" onclick="toggleShowReps()" id="repLabelBtn">Labels: on</button>
+      <button class="tool-btn" onclick="randomizeLayout()" title="Shuffle condition positions to remove spatial/edge bias (Ctrl+Z to undo)">🎲 Randomize</button>
       <button class="tool-btn" onclick="clearAllWells()">Clear plate</button>
     </div>
   </div>
@@ -608,39 +639,15 @@ body.print-plate-mode .excl-bar{display:none!important;}
   <!-- PLATE PANEL -->
   <div class="panel" id="platePanelEl">
     <div class="ph">
-      <span class="ptitle">96-well plate map</span>
+      <span class="ptitle" id="plateTitle">96-well plate map</span>
       <span class="psub" id="plateUsed"></span>
     </div>
+    <div class="plate-tabs" id="plateTabs"></div>
     <div id="plateOnlyHeader"></div>
     <!-- ROW / COLUMN EXCLUSION BAR -->
     <div class="excl-bar" id="exclBar">
-      <div class="excl-row">
-        <span class="exlabel">ROWS</span>
-        <button class="exbtn" id="rowbtn-0" onclick="toggleRowExclusion(0)">A</button>
-        <button class="exbtn" id="rowbtn-1" onclick="toggleRowExclusion(1)">B</button>
-        <button class="exbtn" id="rowbtn-2" onclick="toggleRowExclusion(2)">C</button>
-        <button class="exbtn" id="rowbtn-3" onclick="toggleRowExclusion(3)">D</button>
-        <button class="exbtn" id="rowbtn-4" onclick="toggleRowExclusion(4)">E</button>
-        <button class="exbtn" id="rowbtn-5" onclick="toggleRowExclusion(5)">F</button>
-        <button class="exbtn" id="rowbtn-6" onclick="toggleRowExclusion(6)">G</button>
-        <button class="exbtn" id="rowbtn-7" onclick="toggleRowExclusion(7)">H</button>
-      </div>
-      <div class="excl-row">
-        <span class="exlabel">COLS</span>
-        <button class="exbtn" id="colbtn-0"  onclick="toggleColExclusion(0)">1</button>
-        <button class="exbtn" id="colbtn-1"  onclick="toggleColExclusion(1)">2</button>
-        <button class="exbtn" id="colbtn-2"  onclick="toggleColExclusion(2)">3</button>
-        <button class="exbtn" id="colbtn-3"  onclick="toggleColExclusion(3)">4</button>
-        <button class="exbtn" id="colbtn-4"  onclick="toggleColExclusion(4)">5</button>
-        <button class="exbtn" id="colbtn-5"  onclick="toggleColExclusion(5)">6</button>
-        <button class="exbtn" id="colbtn-6"  onclick="toggleColExclusion(6)">7</button>
-        <button class="exbtn" id="colbtn-7"  onclick="toggleColExclusion(7)">8</button>
-        <button class="exbtn" id="colbtn-8"  onclick="toggleColExclusion(8)">9</button>
-        <button class="exbtn" id="colbtn-9"  onclick="toggleColExclusion(9)">10</button>
-        <button class="exbtn" id="colbtn-10" onclick="toggleColExclusion(10)">11</button>
-        <button class="exbtn" id="colbtn-11" onclick="toggleColExclusion(11)">12</button>
-        <button class="addbtn" onclick="clearExclusions()" style="font-size:9.5px;padding:3px 9px;margin-left:6px;">Clear excl.</button>
-      </div>
+      <div class="excl-row"><span class="exlabel">ROWS</span><span id="rowExBtns"></span></div>
+      <div class="excl-row"><span class="exlabel">COLS</span><span id="colExBtns"></span><button class="addbtn" onclick="clearExclusions()" style="font-size:9.5px;padding:3px 9px;margin-left:6px;">Clear excl.</button></div>
       <div class="excl-hint">Click row/col buttons to exclude. Use the 🚫 Exclude tool to click/drag individual wells. Row/col buttons toggle all wells in that row or column.</div>
     </div>
     <div class="platewrap"><div id="plate" class="plate"></div></div>
@@ -661,6 +668,12 @@ body.print-plate-mode .excl-bar{display:none!important;}
 
   <!-- METRICS -->
   <div class="mets" id="mets"></div>
+
+  <!-- BENCH REALITY CHECK -->
+  <div class="panel" id="benchPanel">
+    <div class="ph"><span class="ptitle">Bench reality check</span><span class="psub" id="benchSub"></span></div>
+    <div id="benchBody" style="padding:12px 14px;"></div>
+  </div>
 
   <!-- PER-WELL TABLE (each well independent) -->
   <div class="panel">
@@ -770,13 +783,20 @@ body.print-plate-mode .excl-bar{display:none!important;}
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-const ROWS = ['A','B','C','D','E','F','G','H'];
+// Plate geometry — generalised for 96- and 384-well, and for multiple plates.
+const PLATE_FMT = { '96':{nr:8,nc:12}, '384':{nr:16,nc:24} };
+const ALL_ROWS = 'ABCDEFGHIJKLMNOP'.split('');
+let ROWS = ALL_ROWS.slice(0,8);   // active plate's row labels (dynamic)
+let NR = 8, NC = 12;              // active plate's dimensions (dynamic)
 const OV = 1.1; // 10% overage
 
 let appMode = 'plasmid';
 let appTheme = 'day';
-let wellAssignments = Array.from({length:8},()=>Array(12).fill(null));
-let excludedWells = new Set();
+let wellAssignments = Array.from({length:8},()=>Array(12).fill(null)); // live grid of the ACTIVE plate
+let excludedWells = new Set();                                         // live exclusions of the ACTIVE plate
+// Multi-plate: each plate owns its own assignments, exclusions, format and name.
+let plates = [{fmt:'96', name:'Plate 1', assign:wellAssignments, excluded:excludedWells}];
+let activePlate = 0;
 let showReps = true;
 let activeTool = 'paint';
 let activeCondId = null;
@@ -976,7 +996,7 @@ function applyReplicate(r,c) {
     if(nr>=0&&nr<8&&nc>=0&&nc<12&&!excludedWells.has(`${nr},${nc}`)) wellAssignments[nr][nc]=activeCondId;
   }
 }
-function clearAllWells(){snapshotForUndo();wellAssignments=Array.from({length:8},()=>Array(12).fill(null));renderPlate();update();}
+function clearAllWells(){snapshotForUndo();wellAssignments=Array.from({length:NR},()=>Array(NC).fill(null));flushActive();renderPlate();update();}
 function autoFillPlate() {
   snapshotForUndo();
   const condOnly = palette.filter(c=>c.type==='cond');
@@ -1041,9 +1061,216 @@ function generateSerialConditions(){
 }
 
 // ── EXCLUSION ──
-function toggleRowExclusion(r){snapshotForUndo();const a=Array.from({length:12},(_,c)=>excludedWells.has(`${r},${c}`)).every(Boolean);for(let c=0;c<12;c++){if(a)excludedWells.delete(`${r},${c}`);else excludedWells.add(`${r},${c}`);}renderPlate();update();}
-function toggleColExclusion(c){snapshotForUndo();const a=Array.from({length:8},(_,r)=>excludedWells.has(`${r},${c}`)).every(Boolean);for(let r=0;r<8;r++){if(a)excludedWells.delete(`${r},${c}`);else excludedWells.add(`${r},${c}`);}renderPlate();update();}
+function toggleRowExclusion(r){snapshotForUndo();const a=Array.from({length:NC},(_,c)=>excludedWells.has(`${r},${c}`)).every(Boolean);for(let c=0;c<NC;c++){if(a)excludedWells.delete(`${r},${c}`);else excludedWells.add(`${r},${c}`);}renderPlate();update();}
+function toggleColExclusion(c){snapshotForUndo();const a=Array.from({length:NR},(_,r)=>excludedWells.has(`${r},${c}`)).every(Boolean);for(let r=0;r<NR;r++){if(a)excludedWells.delete(`${r},${c}`);else excludedWells.add(`${r},${c}`);}renderPlate();update();}
 function clearExclusions(){snapshotForUndo();excludedWells.clear();renderPlate();update();}
+
+// ══════════════════════════════════════════════════════════════════
+// PLATE FORMAT & MULTI-PLATE
+// ══════════════════════════════════════════════════════════════════
+function _fmtKey(){ return NC===24?'384':'96'; }
+function setPlateDims(fmt){ const f=PLATE_FMT[fmt]||PLATE_FMT['96']; NR=f.nr; NC=f.nc; ROWS=ALL_ROWS.slice(0,NR); }
+// Write the live grid back into the active plate slot (call before switching/serialising).
+function flushActive(){ plates[activePlate].assign=wellAssignments; plates[activePlate].excluded=excludedWells; plates[activePlate].fmt=_fmtKey(); }
+// Point the live grid at plate i (no flush — caller flushes first if needed).
+function loadPlate(i){ activePlate=i; const pl=plates[i]; setPlateDims(pl.fmt); wellAssignments=pl.assign; excludedWells=pl.excluded; }
+function renderExclBar(){
+  const rb=document.getElementById('rowExBtns'), cb=document.getElementById('colExBtns');
+  if(rb) rb.innerHTML=ROWS.map((l,r)=>`<button class="exbtn" id="rowbtn-${r}" onclick="toggleRowExclusion(${r})">${l}</button>`).join('');
+  if(cb){ let s=''; for(let c=0;c<NC;c++) s+=`<button class="exbtn" id="colbtn-${c}" onclick="toggleColExclusion(${c})">${c+1}</button>`; cb.innerHTML=s; }
+}
+function renderPlateTabs(){
+  const el=document.getElementById('plateTabs'); if(!el) return;
+  const tabs=plates.map((pl,i)=>{
+    const fmt=(i===activePlate)?_fmtKey():pl.fmt;
+    const used=(i===activePlate?wellAssignments:pl.assign).flat().filter(Boolean).length;
+    const x=plates.length>1?`<span class="ptab-x" onclick="event.stopPropagation();removePlate(${i})" title="Remove">×</span>`:'';
+    return `<button class="ptab${i===activePlate?' active':''}" onclick="switchPlate(${i})" ondblclick="renamePlate(${i})" title="Double-click to rename">${escapeHtml(pl.name)} <small>${fmt}·${used}</small>${x}</button>`;
+  }).join('');
+  el.innerHTML=tabs+
+    `<button class="ptab-add" onclick="addPlate()" title="Add a plate">＋ Plate</button>`+
+    `<span class="ptab-fmt">Format <select id="plateFmtSel" onchange="setPlateFormat(this.value)"><option value="96"${_fmtKey()==='96'?' selected':''}>96-well</option><option value="384"${_fmtKey()==='384'?' selected':''}>384-well</option></select></span>`;
+  const t=document.getElementById('plateTitle'); if(t) t.textContent=`${_fmtKey()}-well plate map`;
+}
+function switchPlate(i){ if(i===activePlate||i<0||i>=plates.length) return; flushActive(); loadPlate(i); _undoStack=[]; _redoStack=[]; renderExclBar(); renderPlateTabs(); renderPlate(); update(); }
+function addPlate(){ flushActive(); const fmt=_fmtKey(), f=PLATE_FMT[fmt]; plates.push({fmt, name:'Plate '+(plates.length+1), assign:Array.from({length:f.nr},()=>Array(f.nc).fill(null)), excluded:new Set()}); switchPlate(plates.length-1); showToast('✓ Added '+plates[plates.length-1].name,'green'); }
+function removePlate(i){ if(plates.length<=1) return; if(!confirm('Remove '+plates[i].name+'? Its layout will be lost.')) return; flushActive(); plates.splice(i,1); if(activePlate>i) activePlate--; else if(activePlate>=plates.length) activePlate=plates.length-1; loadPlate(activePlate); _undoStack=[];_redoStack=[]; renderExclBar();renderPlateTabs();renderPlate();update(); }
+function renamePlate(i){ const n=prompt('Plate name:',plates[i].name); if(n!=null){ plates[i].name=(n.trim()||plates[i].name); renderPlateTabs(); } }
+function setPlateFormat(fmt){
+  if(_fmtKey()===fmt){ return; }
+  const f=PLATE_FMT[fmt]; const na=Array.from({length:f.nr},()=>Array(f.nc).fill(null)); let dropped=0;
+  for(let r=0;r<NR;r++) for(let c=0;c<NC;c++){ if(wellAssignments[r][c]){ if(r<f.nr&&c<f.nc) na[r][c]=wellAssignments[r][c]; else dropped++; } }
+  const nx=new Set(); excludedWells.forEach(k=>{ const [r,c]=k.split(',').map(Number); if(r<f.nr&&c<f.nc) nx.add(k); });
+  if(dropped && !confirm(dropped+' assigned well(s) fall outside a '+fmt+'-well plate and will be dropped. Continue?')){ renderPlateTabs(); return; }
+  wellAssignments=na; excludedWells=nx; setPlateDims(fmt); plates[activePlate].fmt=fmt; flushActive();
+  _undoStack=[];_redoStack=[]; renderExclBar(); renderPlateTabs(); renderPlate(); update();
+}
+// Serialise / restore every plate (for JSON, localStorage, share links).
+function _serializePlates(){ flushActive(); return plates.map(pl=>({fmt:pl.fmt, name:pl.name, assign:pl.assign, excluded:[...pl.excluded]})); }
+function _loadPlates(arr){
+  if(!Array.isArray(arr)||!arr.length) return false;
+  plates=arr.map(pl=>({fmt:pl.fmt||'96', name:pl.name||'Plate', assign:(pl.assign||[]).map(r=>[...r]), excluded:new Set(pl.excluded||[])}));
+  activePlate=0; loadPlate(0); return true;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EXPERIMENTAL RIGOR — RANDOMISE WELL POSITIONS
+// ══════════════════════════════════════════════════════════════════
+// Fisher–Yates shuffle of the condition IDs across the currently-filled
+// positions: same wells stay occupied, but which condition sits where is
+// scrambled — removing row/column/edge bias while preserving counts.
+function randomizeLayout(){
+  const pos=[], ids=[];
+  for(let r=0;r<NR;r++)for(let c=0;c<NC;c++){ if(wellAssignments[r][c]){ pos.push([r,c]); ids.push(wellAssignments[r][c]); } }
+  if(pos.length<2){ showToast('Fill at least 2 wells before randomising','warn'); return; }
+  snapshotForUndo();
+  for(let i=ids.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=ids[i]; ids[i]=ids[j]; ids[j]=t; }
+  pos.forEach(([r,c],i)=>{ wellAssignments[r][c]=ids[i]; });
+  flushActive(); renderPlate(); update();
+  showToast('🎲 Randomised '+pos.length+' wells (Ctrl+Z to undo)','green');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BENCH REALITY CHECK — reagent totals, tips, stock sufficiency, edge effects
+// ══════════════════════════════════════════════════════════════════
+function renderBenchCheck(p,wells){
+  const body=document.getElementById('benchBody'), sub=document.getElementById('benchSub'); if(!body) return;
+  if(!wells.length){ body.innerHTML='<div class="bench-empty">Paint conditions onto the plate to see reagent totals, tip counts, and layout warnings.</div>'; if(sub)sub.textContent=''; return; }
+  const isPhage=appMode==='phage';
+  const compoundTot=wells.reduce((s,w)=>s+((isPhage?w.phageVol:w.indVol)||0),0)*OV;
+  const cultureTot=wells.filter(w=>w.cultVol>0).reduce((s,w)=>s+w.cultVol,0)*OV;
+  const mediaTot=wells.reduce((s,w)=>s+(w.mediaVol||0),0)*OV;
+  const compoundTips=wells.filter(w=>((isPhage?w.phageVol:w.indVol)||0)>0).length;
+  const aliquotTips=wells.filter(w=>(w.cultVol||0)>0||(w.mediaVol||0)>0).length;
+  const tips=compoundTips+aliquotTips;
+  // edge-effect scan on the active plate
+  let edgeSamples=0, freeEdge=0;
+  for(let r=0;r<NR;r++)for(let c=0;c<NC;c++){
+    const edge=(r===0||r===NR-1||c===0||c===NC-1); if(!edge) continue;
+    const id=wellAssignments[r][c];
+    if(id){ const cond=palette.find(x=>x.id===id); if(cond){ const isSample=isPhage?((cond.moi||0)>0):(cond.type==='cond'||cond.type==='pos'); if(isSample) edgeSamples++; } }
+    else if(!excludedWells.has(r+','+c)) freeEdge++;
+  }
+  const chips=[];
+  chips.push(['≈ '+tips,'Pipette tips']);
+  chips.push([compoundTot.toFixed(1)+' µL', isPhage?'Phage to dispense':((p.inducerName||'Compound')+' needed')]);
+  chips.push([(cultureTot/1000).toFixed(2)+' mL', (isPhage?'Culture':(p.cultureName||'Culture'))+' needed']);
+  if(mediaTot>0) chips.push([(mediaTot/1000).toFixed(2)+' mL','Media (blanks)']);
+  chips.push([wells.length+'','Wells filled']);
+  if(plates.length>1) chips.push([(activePlate+1)+' / '+plates.length,'Active plate']);
+  let html='<div class="bench-chips">'+chips.map(c=>`<div class="bchip"><div class="bv">${escapeHtml(c[0])}</div><div class="bl">${escapeHtml(c[1])}</div></div>`).join('')+'</div>';
+  if(!isPhage && compoundTot>0){
+    const avail=p.stockVol||0;
+    if(avail>0){
+      if(compoundTot>avail) html+=`<div class="bench-warn short">⚠ <span><b>Stock short:</b> you need ${compoundTot.toFixed(1)} µL of ${escapeHtml(p.inducerName||'compound')} (incl. 10% overage) but only ${avail} µL is on hand — prepare more, or trim wells/volume.</span></div>`;
+      else html+=`<div class="bench-warn ok">✓ <span><b>Stock OK:</b> need ${compoundTot.toFixed(1)} µL of ${escapeHtml(p.inducerName||'compound')}; ${avail} µL available.</span></div>`;
+    }
+  }
+  if(edgeSamples>0){
+    html+=`<div class="bench-warn edge">⬚ <span><b>${edgeSamples} sample well${edgeSamples>1?'s':''} on the plate edge.</b> Outer wells evaporate faster and can bias readouts. Consider moving samples inward and ringing the plate with buffer/blank${freeEdge>0?` (${freeEdge} free edge well${freeEdge>1?'s':''} available)`:''}. 🎲 Randomise also spreads edge risk across conditions.</span></div>`;
+  } else {
+    html+=`<div class="bench-warn ok">✓ <span><b>No samples on the plate edge</b> — good protection against evaporation/edge effects.</span></div>`;
+  }
+  body.innerHTML=html;
+  if(sub) sub.textContent=`≈${tips} tips · ${(cultureTot/1000).toFixed(2)} mL culture · ${compoundTot.toFixed(0)} µL ${isPhage?'phage':'compound'}`;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CSV IMPORT (round-trips the Minimal CSV export)
+// ══════════════════════════════════════════════════════════════════
+function _parseCSVLine(line){
+  const out=[]; let cur='', q=false;
+  for(let i=0;i<line.length;i++){ const ch=line[i];
+    if(q){ if(ch==='"'){ if(line[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=ch; }
+    else { if(ch===','){out.push(cur);cur='';} else if(ch==='"'){q=true;} else cur+=ch; }
+  }
+  out.push(cur); return out;
+}
+function _rowIndex(letters){ let n=0; for(let i=0;i<letters.length;i++) n=n*26+(letters.charCodeAt(i)-64); return n-1; }
+function importCSV(ev){
+  const f=ev.target.files&&ev.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=function(){
+    try{
+      const lines=rd.result.split(/\r?\n/).filter(l=>l.trim()&&!l.trim().startsWith('#'));
+      const hi=lines.findIndex(l=>/(^|,)\s*"?well"?\s*,/i.test(l)&&/condition/i.test(l));
+      if(hi<0) throw new Error('no "Well,…,Condition" header row found');
+      const header=_parseCSVLine(lines[hi]).map(h=>h.replace(/"/g,'').trim().toLowerCase());
+      const iWell=header.indexOf('well'), iCond=header.indexOf('condition');
+      const iTarget=header.findIndex(h=>h.indexOf('target')===0);
+      if(iWell<0||iCond<0) throw new Error('CSV needs Well and Condition columns');
+      let maxR=0,maxC=0; const parsed=[];
+      lines.slice(hi+1).map(_parseCSVLine).forEach(fl=>{
+        const well=(fl[iWell]||'').replace(/"/g,'').trim(); if(!well) return;
+        const m=well.match(/^([A-Pa-p]{1,2})(\d{1,2})$/); if(!m) return;
+        const r=_rowIndex(m[1].toUpperCase()), c=parseInt(m[2],10)-1; if(r<0||c<0||r>15||c>23) return;
+        const cond=(fl[iCond]||'').replace(/"/g,'').trim();
+        const target=iTarget>=0?(parseFloat((fl[iTarget]||'').replace(/"/g,''))||0):0;
+        parsed.push({r,c,cond,target}); maxR=Math.max(maxR,r); maxC=Math.max(maxC,c);
+      });
+      if(!parsed.length) throw new Error('no valid well rows found');
+      const fmt=(maxR>7||maxC>11)?'384':'96'; const fd=PLATE_FMT[fmt];
+      const byName={}; palette.forEach(pp=>byName[pp.name.toLowerCase()]=pp);
+      const assign=Array.from({length:fd.nr},()=>Array(fd.nc).fill(null)); const excl=new Set();
+      let placed=0, created=0;
+      parsed.forEach(({r,c,cond,target})=>{
+        if(!cond) return;
+        if(cond.toUpperCase()==='[EXCLUDED]'){ excl.add(r+','+c); return; }
+        let entry=byName[cond.toLowerCase()];
+        if(!entry){ const color=CC[(palette.filter(pp=>!pp.builtin).length)%CC.length]||'#74b480'; entry={id:'c'+(++_condIdCounter),name:cond,conc:appMode==='phage'?0:target,moi:appMode==='phage'?target:0,color,type:'cond'}; palette.push(entry); byName[cond.toLowerCase()]=entry; created++; }
+        else if(target && entry.type==='cond'){ if(appMode==='phage') entry.moi=target; else entry.conc=target; }
+        assign[r][c]=entry.id; placed++;
+      });
+      snapshotForUndo();
+      setPlateDims(fmt); wellAssignments=assign; excludedWells=excl; plates[activePlate].fmt=fmt; flushActive();
+      renderPalette(); renderExclBar(); renderPlateTabs(); renderPlate(); update();
+      showToast(`✓ Imported ${placed} wells${created?`, ${created} new condition${created>1?'s':''}`:''}`,'green');
+    }catch(e){ showToast('CSV import failed: '+e.message,'warn'); }
+    ev.target.value='';
+  };
+  rd.readAsText(f);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SHAREABLE LINK (compact state in the URL hash)
+// ══════════════════════════════════════════════════════════════════
+function _b64e(str){ return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function _b64d(b){ b=b.replace(/-/g,'+').replace(/_/g,'/'); return decodeURIComponent(escape(atob(b))); }
+function _compactState(){
+  flushActive();
+  const fields=_FIELDS.reduce((a,id)=>{const el=document.getElementById(id);if(el)a[id]=el.value;return a;},{});
+  const pl=plates.map(p=>{ const cells=[]; p.assign.forEach((row,r)=>row.forEach((id,c)=>{ if(id) cells.push([r,c,id]); })); return {f:p.fmt,n:p.name,c:cells,x:[...p.excluded]}; });
+  return {v:2,m:appMode,t:appTheme,im:intmMode,tl:activeTool,rt:repToolN,rd:repToolDir,ar:autoReps,sr:showReps,pal:palette,pl,ap:activePlate,fl:fields,ci:_condIdCounter};
+}
+function _applyCompact(s){
+  if(s.m)appMode=s.m; if(s.t)appTheme=s.t; if(s.im)intmMode=s.im;
+  if(s.tl)activeTool=s.tl; if(s.rt)repToolN=s.rt; if(s.rd)repToolDir=s.rd; if(s.ar)autoReps=s.ar; if(s.sr!=null)showReps=s.sr;
+  palette=s.pal||palette; _condIdCounter=s.ci||0;
+  plates=(s.pl||[]).map(p=>{ const fmt=PLATE_FMT[p.f]?p.f:'96', fd=PLATE_FMT[fmt]; const assign=Array.from({length:fd.nr},()=>Array(fd.nc).fill(null)); (p.c||[]).forEach(cell=>{ const r=cell[0],c=cell[1],id=cell[2]; if(r<fd.nr&&c<fd.nc) assign[r][c]=id; }); return {fmt,name:p.n||'Plate',assign,excluded:new Set(p.x||[])}; });
+  if(!plates.length) plates=[{fmt:'96',name:'Plate 1',assign:Array.from({length:8},()=>Array(12).fill(null)),excluded:new Set()}];
+  activePlate=Math.min(s.ap||0,plates.length-1); loadPlate(activePlate);
+  if(s.fl)Object.entries(s.fl).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
+  setMode(appMode);setTheme(appTheme);setTool(activeTool);setIntm(intmMode);
+  const rn=document.getElementById('repNDisplay'); if(rn)rn.textContent=repToolN;
+  const ar=document.getElementById('autoRepsDisplay'); if(ar)ar.textContent=autoReps;
+  const rl=document.getElementById('repLabelBtn'); if(rl)rl.textContent='Labels: '+(showReps?'on':'off');
+  renderPalette();renderExclBar();renderPlateTabs();renderPlate();update();
+}
+function shareLink(){
+  try{
+    const enc=_b64e(JSON.stringify(_compactState()));
+    const url=location.origin+location.pathname+'#s='+enc;
+    if(url.length>60000){ showToast('Layout too large for a link — use 💾 Save instead','warn'); return; }
+    history.replaceState(null,'',url);
+    (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject())
+      .then(()=>showToast('🔗 Share link copied to clipboard','green'))
+      .catch(()=>window.prompt('Copy this share link:',url));
+  }catch(e){ showToast('Could not build share link','warn'); }
+}
+function _loadFromHash(){
+  const h=location.hash||''; if(h.indexOf('#s=')!==0) return false;
+  const s=JSON.parse(_b64d(h.slice(3))); _applyCompact(s); return true;
+}
 
 // ══════════════════════════════════════════════════════════════════
 // PLATE DRAG INTERACTION (event delegation)
@@ -1166,7 +1393,7 @@ function calcWellData(r,c,p){
 
 function getAllWells(p){
   const wells=[];
-  for(let r=0;r<8;r++) for(let c=0;c<12;c++){const d=calcWellData(r,c,p);if(d)wells.push(d);}
+  for(let r=0;r<NR;r++) for(let c=0;c<NC;c++){const d=calcWellData(r,c,p);if(d)wells.push(d);}
   return wells;
 }
 
@@ -1199,13 +1426,13 @@ function renderPlate(){
   const previewSet=new Set();
   if(activeTool==='replicate'&&_hoverPreview&&activeCondId){
     const[hr,hc]=_hoverPreview;
-    for(let i=0;i<repToolN;i++){const nr=repToolDir==='v'?hr+i:hr,nc=repToolDir==='h'?hc+i:hc;if(nr<8&&nc<12)previewSet.add(`${nr},${nc}`);}
+    for(let i=0;i<repToolN;i++){const nr=repToolDir==='v'?hr+i:hr,nc=repToolDir==='h'?hc+i:hc;if(nr<NR&&nc<NC)previewSet.add(`${nr},${nc}`);}
   }
   let html='<div></div>';
-  for(let c=0;c<12;c++)html+=`<div class="pcl">${c+1}</div>`;
+  for(let c=0;c<NC;c++)html+=`<div class="pcl">${c+1}</div>`;
   ROWS.forEach((row,ri)=>{
     html+=`<div class="prl">${row}</div>`;
-    for(let ci=0;ci<12;ci++){
+    for(let ci=0;ci<NC;ci++){
       const key=`${ri},${ci}`;
       const wellId=`${row}${ci+1}`;
       const isExcl=excludedWells.has(key);
@@ -1232,13 +1459,19 @@ function renderPlate(){
       }
     }
   });
-  document.getElementById('plate').innerHTML=html;
+  const plateEl=document.getElementById('plate');
+  const big=NC>=24;                     // 384-well → smaller cells
+  const wsz=big?23:46, lw=big?15:22, lh=big?12:18;
+  plateEl.style.gridTemplateColumns=`${lw}px repeat(${NC},${wsz}px)`;
+  plateEl.style.gridTemplateRows=`${lh}px repeat(${NR},${wsz}px)`;
+  plateEl.classList.toggle('p384',big);
+  plateEl.innerHTML=html;
   const placed=Object.values(wellAssignments).flat().filter(Boolean).length;
-  document.getElementById('plateUsed').textContent=`${placed} wells assigned / ${96-excludedWells.size} available`;
+  document.getElementById('plateUsed').textContent=`${placed} wells assigned / ${NR*NC-excludedWells.size} available`;
   // Legend
   const seen=new Set();
   const legendItems=[];
-  for(let r=0;r<8;r++)for(let c=0;c<12;c++){const id=wellAssignments[r][c];if(id&&!seen.has(id)){seen.add(id);const cond=palette.find(x=>x.id===id);if(cond)legendItems.push(cond);}}
+  for(let r=0;r<NR;r++)for(let c=0;c<NC;c++){const id=wellAssignments[r][c];if(id&&!seen.has(id)){seen.add(id);const cond=palette.find(x=>x.id===id);if(cond)legendItems.push(cond);}}
   const p2=P();
   document.getElementById('legend').innerHTML=
     (legendItems.length?`<div class="li" style="font-weight:700;color:var(--text3);font-size:10px;width:100%;margin-bottom:2px;">${escapeHtml(p2.inducerName||'Compound')}</div>`:'')+
@@ -1246,8 +1479,8 @@ function renderPlate(){
     `<div class="li"><span class="ld" style="background:var(--well-empty);border:1px solid var(--border);"></span>empty</div>`+
     (excludedWells.size?`<div class="li"><span class="ld" style="background:repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,#f5f5f5 2px,#f5f5f5 6px);border:1px solid #ccc;"></span>excluded (${excludedWells.size})</div>`:'');
   // Update excl buttons
-  for(let r=0;r<8;r++){const a=Array.from({length:12},(_,c)=>excludedWells.has(`${r},${c}`)).every(Boolean);document.getElementById(`rowbtn-${r}`)?.classList.toggle('excl-active',a);}
-  for(let c=0;c<12;c++){const a=Array.from({length:8},(_,r)=>excludedWells.has(`${r},${c}`)).every(Boolean);document.getElementById(`colbtn-${c}`)?.classList.toggle('excl-active',a);}
+  for(let r=0;r<NR;r++){const a=Array.from({length:NC},(_,c)=>excludedWells.has(`${r},${c}`)).every(Boolean);document.getElementById(`rowbtn-${r}`)?.classList.toggle('excl-active',a);}
+  for(let c=0;c<NC;c++){const a=Array.from({length:NR},(_,r)=>excludedWells.has(`${r},${c}`)).every(Boolean);document.getElementById(`colbtn-${c}`)?.classList.toggle('excl-active',a);}
 }
 
 function renderMetrics(p,wells){
@@ -1258,7 +1491,7 @@ function renderMetrics(p,wells){
   const vols=condWells.map(w=>appMode==='plasmid'?w.indVol:w.phageVol).filter(v=>v>0);
   const fold=vols.length>=2?Math.max(...vols)/Math.min(...vols):1;
   document.getElementById('mets').innerHTML=`
-    <div class="mc ${tot<=(96-excludedWells.size)?'g':'b'}"><div class="mv">${tot}/${96-excludedWells.size}</div><div class="ml">WELLS USED</div></div>
+    <div class="mc ${tot<=(NR*NC-excludedWells.size)?'g':'b'}"><div class="mv">${tot}/${NR*NC-excludedWells.size}</div><div class="ml">WELLS USED</div></div>
     <div class="mc ${condWells.length===0||allOk?'g':'b'}"><div class="mv">${condWells.length===0?'—':allOk?'✓ OK':'⚠ Check'}</div><div class="ml">PIPETTABILITY</div></div>
     <div class="mc"><div class="mv">${appMode==='plasmid'?(totCult/1000).toFixed(2)+' mL':fmtSciStr(p.phageTiter)+' PFU'}</div><div class="ml">${appMode==='plasmid'?'CULTURE NEEDED':'PHAGE STOCK'}</div></div>
     <div class="mc ${fold<=4?'g':fold<=16?'w':'b'}"><div class="mv">${condWells.length>=2?fold.toFixed(1)+'×':'—'}</div><div class="ml">VOL SPREAD</div></div>
@@ -1421,6 +1654,7 @@ function update(){
   document.getElementById('directNoteCompound').textContent=p.inducerName||'Compound';
   renderPlate();
   renderMetrics(p,wells);
+  renderBenchCheck(p,wells);
   renderWTable(p,wells);
   renderMasterMix(p,wells);
   renderBenchSteps(p,wells);
@@ -1482,8 +1716,8 @@ function downloadMinimalCSV(){
   const p=P(); const wells=getAllWells(p);
   let csv=`# Dilution Designer — Minimal Export\n# ${p.expName||'Experiment'} | ${p.expDate||new Date().toLocaleDateString()} | ${p.inducerName}\n`;
   csv+=`Well,Row,Col,Condition,Target (${p.units}),Culture (µL),Compound (µL),Final vol (µL)\n`;
-  // Also include all 96 wells (empty = blank line)
-  for(let r=0;r<8;r++)for(let c=0;c<12;c++){
+  // Also include every well on the active plate (empty = blank line)
+  for(let r=0;r<NR;r++)for(let c=0;c<NC;c++){
     const wellId=`${ROWS[r]}${c+1}`;
     const d=calcWellData(r,c,p);
     const condId=wellAssignments[r][c];
@@ -1566,7 +1800,7 @@ function saveToStorage(){
   if(!_ready)return;
   try{
     const fields=_FIELDS.reduce((a,id)=>{const el=document.getElementById(id);if(el)a[id]=el.value;return a;},{});
-    localStorage.setItem('dd_state',JSON.stringify({v:2,appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,wellAssignments,excludedWells:[...excludedWells],palette,_condIdCounter,fields}));
+    localStorage.setItem('dd_state',JSON.stringify({v:2,appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,plates:_serializePlates(),activePlate,wellAssignments,excludedWells:[...excludedWells],palette,_condIdCounter,fields}));
   }catch(e){}
 }
 
@@ -1582,8 +1816,8 @@ function restoreFromStorage(){
     if(s.repToolDir)repToolDir=s.repToolDir;
     if(s.autoReps)autoReps=s.autoReps;
     if(s.showReps!=null)showReps=s.showReps;
-    if(s.wellAssignments)wellAssignments=s.wellAssignments.map(r=>[...r]);
-    if(s.excludedWells)excludedWells=new Set(s.excludedWells);
+    if(Array.isArray(s.plates)&&s.plates.length){ _loadPlates(s.plates); activePlate=Math.min(s.activePlate||0,plates.length-1); loadPlate(activePlate); }
+    else if(s.wellAssignments){ const wa=s.wellAssignments.map(r=>[...r]); plates=[{fmt:'96',name:'Plate 1',assign:wa,excluded:new Set(s.excludedWells||[])}]; activePlate=0; loadPlate(0); }
     if(s.palette)palette=s.palette;
     if(s._condIdCounter!=null)_condIdCounter=s._condIdCounter;
     if(s.fields)Object.entries(s.fields).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
@@ -1694,7 +1928,8 @@ function buildCalcBreakdown(ri,ci,p){
 // ══════════════════════════════════════════════════════════════════
 function _mkPayload(){
   const fields=_FIELDS.reduce((a,id)=>{const el=document.getElementById(id);if(el)a[id]=el.value;return a;},{});
-  return{version:1,savedAt:new Date().toISOString(),appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,wellAssignments,excludedWells:[...excludedWells],palette,_condIdCounter,fields};
+  const platesData=_serializePlates();
+  return{version:2,savedAt:new Date().toISOString(),appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,plates:platesData,activePlate,wellAssignments,excludedWells:[...excludedWells],palette,_condIdCounter,fields};
 }
 function saveJSON(){
   const p=P();
@@ -1705,7 +1940,7 @@ function saveJSON(){
 }
 // Apply a saved payload (from a file or a named layout) to the live app state.
 function _applyState(s){
-  if(!s.version||!s.wellAssignments)throw new Error('Invalid');
+  if(!s.version||(!s.wellAssignments&&!s.plates))throw new Error('Invalid');
   if(s.appMode)appMode=s.appMode;
   if(s.appTheme){appTheme=s.appTheme;document.body.dataset.theme=s.appTheme;}
   if(s.intmMode)intmMode=s.intmMode;
@@ -1714,8 +1949,8 @@ function _applyState(s){
   if(s.repToolDir)repToolDir=s.repToolDir;
   if(s.autoReps)autoReps=s.autoReps;
   if(s.showReps!=null)showReps=s.showReps;
-  wellAssignments=s.wellAssignments.map(r=>[...r]);
-  excludedWells=new Set(s.excludedWells||[]);
+  if(Array.isArray(s.plates)&&s.plates.length){ _loadPlates(s.plates); activePlate=Math.min(s.activePlate||0,plates.length-1); loadPlate(activePlate); }
+  else { const wa=(s.wellAssignments||[]).map(r=>[...r]); plates=[{fmt:'96',name:'Plate 1',assign:wa,excluded:new Set(s.excludedWells||[])}]; activePlate=0; loadPlate(0); }
   palette=s.palette;
   _condIdCounter=s._condIdCounter||0;
   if(s.fields)Object.entries(s.fields).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
@@ -1725,7 +1960,7 @@ function _applyState(s){
   document.getElementById('repLabelBtn').textContent=`Labels: ${showReps?'on':'off'}`;
   const ic=document.getElementById('intmConc');
   if(ic){const v=parseFloat(ic.value)||0;document.getElementById('intmSlider').value=Math.min(10000,v);document.getElementById('slv').textContent=v.toLocaleString();}
-  renderPalette();renderPlate();update();
+  renderPalette();renderExclBar();renderPlateTabs();renderPlate();update();
 }
 function loadJSON(event){
   const file=event.target.files[0];if(!file)return;
@@ -1794,9 +2029,10 @@ function deleteNamedLayout(){
 // ══════════════════════════════════════════════════════════════════
 function exportPlatePNG(){
   const p=P();
-  const WS=46,GAP=3,RLW=24,CLH=22,PAD=16;
-  const W=PAD*2+RLW+12*(WS+GAP)-GAP;
-  const H=PAD*2+CLH+8*(WS+GAP)-GAP+28;
+  const big=NC>=24;
+  const WS=big?18:46,GAP=big?2:3,RLW=big?16:24,CLH=big?14:22,PAD=16,RAD=big?3:8;
+  const W=PAD*2+RLW+NC*(WS+GAP)-GAP;
+  const H=PAD*2+CLH+NR*(WS+GAP)-GAP+28;
   const DPR=2;
   const canvas=document.createElement('canvas');
   canvas.width=W*DPR;canvas.height=H*DPR;
@@ -1809,34 +2045,38 @@ function exportPlatePNG(){
   ctx.font='600 10px monospace';
   ctx.textAlign='center';ctx.textBaseline='middle';
   ROWS.forEach((row,ri)=>{ctx.fillText(row,PAD+RLW/2,PAD+CLH+ri*(WS+GAP)+WS/2);});
-  for(let ci=0;ci<12;ci++){ctx.fillText(ci+1,PAD+RLW+ci*(WS+GAP)+WS/2,PAD+CLH/2);}
+  for(let ci=0;ci<NC;ci++){ctx.fillText(ci+1,PAD+RLW+ci*(WS+GAP)+WS/2,PAD+CLH/2);}
   const rr=(x,y,w,h,r)=>{ctx.beginPath();if(ctx.roundRect){ctx.roundRect(x,y,w,h,r);}else{ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.arcTo(x+w,y,x+w,y+r,r);ctx.lineTo(x+w,y+h-r);ctx.arcTo(x+w,y+h,x+w-r,y+h,r);ctx.lineTo(x+r,y+h);ctx.arcTo(x,y+h,x,y+h-r,r);ctx.lineTo(x,y+r);ctx.arcTo(x,y,x+r,y,r);ctx.closePath();}};
-  for(let ri=0;ri<8;ri++){
-    for(let ci=0;ci<12;ci++){
+  for(let ri=0;ri<NR;ri++){
+    for(let ci=0;ci<NC;ci++){
       const x=PAD+RLW+ci*(WS+GAP),y=PAD+CLH+ri*(WS+GAP);
       const key=`${ri},${ci}`;
       const condId=wellAssignments[ri][ci];
       const cond=condId?palette.find(x=>x.id===condId):null;
       const isExcl=excludedWells.has(key);
       if(isExcl){
-        ctx.fillStyle=dark?'#252535':'#e2dfd8';rr(x,y,WS,WS,8);ctx.fill();
+        ctx.fillStyle=dark?'#252535':'#e2dfd8';rr(x,y,WS,WS,RAD);ctx.fill();
         ctx.save();ctx.clip();ctx.strokeStyle=dark?'rgba(255,255,255,0.07)':'rgba(0,0,0,0.1)';ctx.lineWidth=1.5;
         for(let i=-WS;i<WS*2;i+=8){ctx.beginPath();ctx.moveTo(x+i,y);ctx.lineTo(x+i+WS,y+WS);ctx.stroke();}
         ctx.restore();
       } else if(cond){
-        ctx.fillStyle=cond.color;rr(x,y,WS,WS,8);ctx.fill();
+        ctx.fillStyle=cond.color;rr(x,y,WS,WS,RAD);ctx.fill();
         const tc=lum(cond.color)>0.48?'#1a1814':'#fff';
-        ctx.globalAlpha=0.5;ctx.fillStyle=tc;ctx.font='600 7px monospace';ctx.textAlign='left';ctx.textBaseline='top';
-        ctx.fillText(`${ROWS[ri]}${ci+1}`,x+4,y+4);
-        ctx.globalAlpha=1;ctx.font='700 9px monospace';ctx.textAlign='center';ctx.textBaseline='middle';
-        const lbl=cond.name.length>9?cond.name.substring(0,8)+'…':cond.name;
-        ctx.fillText(lbl,x+WS/2,y+WS/2);
-        const val=appMode==='phage'?(cond.moi?`MOI ${cond.moi}`:''):(cond.conc&&cond.conc>0?`${cond.conc}`:'');
-        if(val){ctx.font='400 7px monospace';ctx.globalAlpha=0.8;ctx.fillText(val,x+WS/2,y+WS-7);ctx.globalAlpha=1;}
+        if(!big){
+          ctx.globalAlpha=0.5;ctx.fillStyle=tc;ctx.font='600 7px monospace';ctx.textAlign='left';ctx.textBaseline='top';
+          ctx.fillText(`${ROWS[ri]}${ci+1}`,x+4,y+4);
+          ctx.globalAlpha=1;ctx.font='700 9px monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+          const lbl=cond.name.length>9?cond.name.substring(0,8)+'…':cond.name;
+          ctx.fillText(lbl,x+WS/2,y+WS/2);
+          const val=appMode==='phage'?(cond.moi?`MOI ${cond.moi}`:''):(cond.conc&&cond.conc>0?`${cond.conc}`:'');
+          if(val){ctx.font='400 7px monospace';ctx.globalAlpha=0.8;ctx.fillText(val,x+WS/2,y+WS-7);ctx.globalAlpha=1;}
+        }
       } else {
-        ctx.fillStyle=dark?'#252535':'#e2dfd8';rr(x,y,WS,WS,8);ctx.fill();
-        ctx.globalAlpha=0.4;ctx.fillStyle=dark?'#e6e4f0':'#1a1814';ctx.font='600 7px monospace';ctx.textAlign='left';ctx.textBaseline='top';
-        ctx.fillText(`${ROWS[ri]}${ci+1}`,x+4,y+4);ctx.globalAlpha=1;
+        ctx.fillStyle=dark?'#252535':'#e2dfd8';rr(x,y,WS,WS,RAD);ctx.fill();
+        if(!big){
+          ctx.globalAlpha=0.4;ctx.fillStyle=dark?'#e6e4f0':'#1a1814';ctx.font='600 7px monospace';ctx.textAlign='left';ctx.textBaseline='top';
+          ctx.fillText(`${ROWS[ri]}${ci+1}`,x+4,y+4);ctx.globalAlpha=1;
+        }
       }
     }
   }
@@ -1865,7 +2105,8 @@ document.addEventListener('keydown',e=>{
 });
 
 // Init — restore or fresh start
-const _restored=restoreFromStorage();
+let _shared=false; try{ _shared=_loadFromHash(); }catch(e){}
+const _restored=_shared||restoreFromStorage();
 if(_restored){
   setMode(appMode);
   setTheme(appTheme);
@@ -1883,6 +2124,9 @@ if(_restored){
   setTool('paint');
   renderPalette();
 }
+renderExclBar();
+renderPlateTabs();
+renderPlate();
 _ready=true;
 refreshLayoutSelect();
 update();
