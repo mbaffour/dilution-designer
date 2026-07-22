@@ -351,6 +351,11 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <button class="theme-btn" data-theme="night" onclick="setTheme('night')">Night</button>
     <button class="theme-btn" data-theme="ambient" onclick="setTheme('ambient')">Ambient</button>
   </div>
+  <div class="theme-group" role="group" aria-label="Number notation">
+    <button class="theme-btn active" id="sci_auto" onclick="SCI.setMode('auto')" title="Auto — scientific only for very large or very small numbers">Auto</button>
+    <button class="theme-btn" id="sci_sci" onclick="SCI.setMode('sci')" title="Always use scientific notation, e.g. 1.2 × 10⁹">10ⁿ</button>
+    <button class="theme-btn" id="sci_plain" onclick="SCI.setMode('plain')" title="Always use plain digits, e.g. 1,200,000,000">123</button>
+  </div>
   <span class="btn" id="expBadge" style="cursor:default;border:none;opacity:0.6;"></span>
   <div class="hactions">
     <button class="btn" onclick="saveJSON()" title="Save experiment to file">💾 Save</button>
@@ -850,6 +855,64 @@ body.print-plate-mode .excl-bar{display:none!important;}
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   SCIENTIFIC NOTATION — one parser + formatter for the whole app.
+   Accepts 2e8, 2E8, 2x10^8, 2*10^8, 2×10⁸, 10^8, 1,200 …
+   Renders true superscripts (1.2 × 10⁹), and the user picks the mode.
+   ══════════════════════════════════════════════════════════════════ */
+var SCI=(function(){
+  var SUP={'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','-':'⁻'};
+  var UNSUP={'⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','⁻':'-'};
+  var mode='auto';
+  try{ var m=localStorage.getItem('dd_sci'); if(m==='sci'||m==='plain'||m==='auto') mode=m; }catch(e){}
+  function sup(n){ return String(n).split('').map(function(c){return SUP[c]!=null?SUP[c]:c;}).join(''); }
+  function unsup(s){ return String(s).replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]/g,function(c){return UNSUP[c];}); }
+  function parse(v){
+    if(typeof v==='number') return v;
+    var s=String(v==null?'':v).trim(); if(!s) return NaN;
+    s=s.replace(/,/g,'').replace(/\s+/g,'');
+    s=s.replace(/([×xX*])?10([⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)/g,function(_m,_op,d){ return 'e'+unsup(d); });  // 1.2×10⁹
+    s=s.replace(/([×xX*])10\^?([-+]?\d+)/g,'e$2');                                            // 1.2x10^9
+    s=s.replace(/^10\^([-+]?\d+)$/,'1e$1');   // 10^9 — caret REQUIRED, else "1000" would read as 10^00
+    s=s.replace(/\^/,'e');
+    if(/^[eE]/.test(s)) s='1'+s;
+    var n=parseFloat(s);
+    return isFinite(n)?n:NaN;
+  }
+  function parts(n,sig){ var e=Math.floor(Math.log10(Math.abs(n))); var m=n/Math.pow(10,e);
+    var mm=Number(m.toFixed(Math.max(0,(sig||4)-1))); if(Math.abs(mm)>=10){mm/=10;e++;} return {m:mm,e:e}; }
+  function sci(n,sig){ if(!isFinite(n))return '—'; if(n===0)return '0';
+    var p=parts(n,sig); if(p.e===0) return String(p.m);
+    return (p.m===1?'':(p.m===-1?'−':p.m+' × '))+'10'+sup(p.e); }
+  function plain(n,sig){ if(!isFinite(n))return '—'; if(n===0)return '0';
+    var dec=Math.max(0,(sig||4)-1-Math.floor(Math.log10(Math.abs(n)))); dec=Math.min(dec,12);
+    return Number(n.toFixed(dec)).toLocaleString('en-US',{maximumFractionDigits:12}); }
+  function fmt(n,sig){ sig=sig||4;
+    if(n==null||isNaN(n)||!isFinite(n)) return '—';
+    if(n===0) return '0';
+    var a=Math.abs(n);
+    if(mode==='sci')   return (a>=1000||a<1)? sci(n,sig) : plain(n,sig);
+    if(mode==='plain') return plain(n,sig);
+    return (a>=1e6||a<1e-4)? sci(n,sig) : plain(n,sig);          // auto
+  }
+  function syncBtns(){ ['auto','sci','plain'].forEach(function(k){ var b=document.getElementById('sci_'+k); if(b) b.classList.toggle('active',mode===k); }); }
+  function setMode(m){ mode=m; try{localStorage.setItem('dd_sci',m);}catch(e){} syncBtns(); refresh(); }
+  function refresh(){
+    try{
+      if(appMode==='calc'&&window.MBC) MBC.recompute();
+      else if(appMode==='proto'&&window.PROTO) PROTO.recompute();
+      else if(appMode==='reagent'&&typeof rpCompute==='function') rpCompute();
+      else if(appMode==='dilcalc'&&typeof dcInit==='function'){ dcCalc(); dcSerial(); dcConvert(); dcWeigh(); }
+      else if(appMode==='home'&&window.renderHome) renderHome();
+      else if(typeof update==='function') update();
+    }catch(e){}
+  }
+  // Run fn with a temporary notation, without re-rendering (used by the self-test).
+  function withMode(m,fn){ var prev=mode; mode=m; try{ return fn(); } finally { mode=prev; } }
+  return {parse:parse,fmt:fmt,sci:sci,plain:plain,sup:sup,unsup:unsup,setMode:setMode,syncBtns:syncBtns,
+          withMode:withMode,getMode:function(){return mode;}};
+})();
 // Plate geometry — generalised for 96- and 384-well, and for multiple plates.
 const PLATE_FMT = { '96':{nr:8,nc:12}, '384':{nr:16,nc:24} };
 const ALL_ROWS = 'ABCDEFGHIJKLMNOP'.split('');
@@ -2231,6 +2294,7 @@ if(_restored){
 renderExclBar();
 renderPlateTabs();
 renderPlate();
+SCI.syncBtns();
 _ready=true;
 refreshLayoutSelect();
 update();
@@ -2312,7 +2376,7 @@ function rpRenderList(){ var q=(document.getElementById('rpSearch').value||'').t
 function rpSelect(id){ rpSelectedId=id; rpRenderList(); rpCompute(); }
 function rpVolumeMl(){ var v=parseFloat(document.getElementById('rpVolume').value)||0; var u=document.getElementById('rpVolUnit').value; return u==='L'?v*1000:u==='uL'?v/1000:v; }
 function rpConcCanon(value,unit){ var u=(unit||'').trim().toLowerCase().replace(/µ/g,'u'); var mv={'mg/ml':1,'ug/ml':0.001,'g/ml':1000,'ng/ml':1e-6,'g/l':1,'mg/l':0.001,'ug/l':1e-6,'ug/ul':1,'mg/ul':1000,'ng/ul':0.001}; var mo={'m':1000,'mm':1,'um':0.001,'nm':1e-6,'pm':1e-9}; if(mv[u]!=null) return {fam:'massvol',val:value*mv[u]}; if(mo[u]!=null) return {fam:'molar',val:value*mo[u]}; if(u==='x'||u==='fold') return {fam:'fold',val:value}; if(u.indexOf('%')>=0) return {fam:'pct',val:value}; if(u==='u/ml'||u==='units/ml') return {fam:'act',val:value}; return null; }
-function rpNum(n){ if(n==null||isNaN(n)) return '—'; if(n!==0&&(Math.abs(n)<0.001||Math.abs(n)>=1e5)) return Number(n).toExponential(2); return (Math.round(n*1000)/1000).toString(); }
+function rpNum(n){ if(n==null||isNaN(n)) return '—'; return SCI.fmt(n,4); }
 function rpMass(g){ if(g>=1) return rpNum(g)+' g'; if(g>=0.001) return rpNum(g*1000)+' mg'; return rpNum(g*1e6)+' µg'; }
 function rpVol(mL){ if(mL>=1000) return rpNum(mL/1000)+' L'; if(mL>=1) return rpNum(mL)+' mL'; return rpNum(mL*1000)+' µL'; }
 function rpComponentAmount(c,volMl){ var volL=volMl/1000; if(c.gramsPerLiter!=null) return {kind:'mass',grams:c.gramsPerLiter*volL,detail:c.gramsPerLiter+' g/L'}; if(c.molarity_M!=null&&c.mw_gmol!=null) return {kind:'mass',grams:c.molarity_M*c.mw_gmol*volL,detail:rpNum(c.molarity_M)+' M · MW '+rpNum(c.mw_gmol)+(c.form?' · '+c.form:'')}; if(c.percent){ if((c.percent.type||'w/v').toLowerCase()==='v/v') return {kind:'vol',mL:(c.percent.value/100)*volMl,detail:c.percent.value+'% v/v'}; return {kind:'mass',grams:(c.percent.value/100)*volMl,detail:c.percent.value+'% w/v'}; } if(c.volumeFraction) return {kind:'vol',mL:(c.volumeFraction.value/100)*volMl,detail:c.volumeFraction.value+'% v/v'}; if(c.fromStock){ var s=c.fromStock; var sc=rpConcCanon(s.stockConc,s.stockUnit), fc=rpConcCanon(s.finalConc,s.finalUnit); if(sc&&fc&&sc.fam===fc.fam&&sc.val>0){ return {kind:'vol',mL:(fc.val*volMl)/sc.val,detail:'from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock → '+rpNum(s.finalConc)+' '+s.finalUnit}; } return {kind:'note',text:'to '+rpNum(s.finalConc)+' '+s.finalUnit+' from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock'}; } return {kind:'note',text:c.note||'(see notes)'}; }
@@ -2573,6 +2637,9 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   .mbc-f input:focus-visible,.mbc-f select:focus-visible,.mbc-f textarea:focus-visible,#mbcSearch:focus-visible{outline:2px solid var(--accent2);outline-offset:1px;}
   .mbc-cu{display:grid;grid-template-columns:1fr 82px;gap:5px;}
   .mbc-hint{font-size:10px;color:var(--text3);}
+  .mbc-echo{font:10.5px var(--mono);color:var(--accent);letter-spacing:.01em;}
+  .mbc-echo.bad{color:var(--danger);font-weight:700;}
+  #calcView input[aria-invalid="true"]{border-color:var(--danger);}
   .mbc-actions{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;}
   .mbc-result{margin-top:14px;}
   .mbc-rows{border:1px solid var(--border);border-radius:10px;overflow:hidden;}
@@ -2593,9 +2660,9 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
 
   // ---------- helpers ----------
-  function num(x){ x=parseFloat(x); return isFinite(x)?x:NaN; }
-  function fmt(n,p){ p=p||4; if(n==null||isNaN(n)||!isFinite(n))return '—'; if(n===0)return '0'; var a=Math.abs(n); if(a<1e-4||a>=1e6) return n.toExponential(3); var d=Math.max(0,p-1-Math.floor(Math.log10(a))); return String(Number(n.toFixed(Math.min(d,12)))); }
-  function intc(n){ if(!isFinite(n))return '—'; if(Math.abs(n)>=1e7) return n.toExponential(3); return Math.round(n).toLocaleString('en-US'); }
+  function num(x){ return SCI.parse(x); }                 // accepts 2e8, 2×10⁸, 2x10^8, 1,200 …
+  function fmt(n,p){ return SCI.fmt(n,p||4); }
+  function intc(n){ if(!isFinite(n))return '—'; return SCI.fmt(n,4); }
   function vol(L){ if(!isFinite(L)||L<0)return '—'; var u=L*1e6; if(u<1)return fmt(u*1000)+' nL'; if(u<1000)return fmt(u)+' µL'; if(u<1e6)return fmt(u/1000)+' mL'; return fmt(u/1e6)+' L'; }
   function mass(g){ if(!isFinite(g)||g<0)return '—'; if(g>=1)return fmt(g)+' g'; if(g>=1e-3)return fmt(g*1e3)+' mg'; if(g>=1e-6)return fmt(g*1e6)+' µg'; return fmt(g*1e9)+' ng'; }
   function mole(m){ if(!isFinite(m)||m<0)return '—'; if(m>=1)return fmt(m)+' mol'; if(m>=1e-3)return fmt(m*1e3)+' mmol'; if(m>=1e-6)return fmt(m*1e6)+' µmol'; if(m>=1e-9)return fmt(m*1e9)+' nmol'; if(m>=1e-12)return fmt(m*1e12)+' pmol'; return fmt(m*1e15)+' fmol'; }
@@ -2961,9 +3028,11 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       return '<div class="mbc-f"><label for="'+id+'">'+escapeHtml(f.label)+'</label><select id="'+id+'" oninput="MBC.recompute()">'+opts+'</select>'+hint(f)+'</div>'; }
     if(f.kind==='seq'){ return '<div class="mbc-f mbc-wide"><label for="'+id+'">'+escapeHtml(f.label)+'</label><textarea id="'+id+'" rows="3" spellcheck="false" oninput="MBC.recompute()" placeholder="'+escapeHtml(f.ph||'')+'"></textarea>'+hint(f)+'</div>'; }
     if(f.kind==='text'){ return '<div class="mbc-f"><label for="'+id+'">'+escapeHtml(f.label)+'</label><input id="'+id+'" type="text" value="'+escapeHtml(f.def!=null?String(f.def):'')+'" oninput="MBC.recompute()" placeholder="'+escapeHtml(f.ph||'')+'">'+hint(f)+'</div>'; }
-    var inp='<input id="'+id+'" type="number" inputmode="decimal" step="'+(f.step||'any')+'"'+(f.min!=null?' min="'+f.min+'"':'')+' value="'+(f.def!=null?f.def:'')+'" oninput="MBC.recompute()" placeholder="'+escapeHtml(f.ph||'')+'">';
+    // text (not number) so scientific forms like 2e8, 2×10⁸ and 2x10^8 can be typed;
+    // SCI.parse normalises them and the echo below shows what was understood.
+    var inp='<input id="'+id+'" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" value="'+(f.def!=null?f.def:'')+'" oninput="MBC.recompute()" placeholder="'+escapeHtml(f.ph||'')+'">';
     if(f.units){ var us=f.units.map(function(u){return '<option'+(u===(f.defU||f.units[0])?' selected':'')+'>'+escapeHtml(u)+'</option>';}).join(''); inp='<div class="mbc-cu">'+inp+'<select id="'+id+'_u" oninput="MBC.recompute()">'+us+'</select></div>'; }
-    return '<div class="mbc-f"><label for="'+id+'">'+escapeHtml(f.label)+'</label>'+inp+hint(f)+'</div>';
+    return '<div class="mbc-f"><label for="'+id+'">'+escapeHtml(f.label)+'</label>'+inp+'<div class="mbc-echo" id="'+id+'_echo"></div>'+hint(f)+'</div>';
   }
   function gather(calc){ var v={}; (calc.fields||[]).forEach(function(f){ var el=document.getElementById('mbc_'+f.k); if(!el)return; if(f.kind==='select'||f.kind==='seq'||f.kind==='text') v[f.k]=el.value; else v[f.k]=num(el.value); if(f.units){ var u=document.getElementById('mbc_'+f.k+'_u'); if(u) v[f.k+'U']=u.value; } }); return v; }
 
@@ -2978,7 +3047,21 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     if(res.protocol){ txt.push('',res.protocol); }
     el.innerHTML=html; MBC._txt=txt.join('\n');
   }
-  function recompute(){ var calc=byId[MBC._cur]; if(!calc||calc.custom)return; var res; try{ res=calc.compute(gather(calc)); }catch(e){ res={warn:['Check your inputs.']}; } renderResult(calc,res); }
+  // Show what a scientific-notation entry was understood as, so 2e8 vs 2e-8 is caught at entry.
+  function updateEchoes(calc,v){
+    (calc.fields||[]).forEach(function(f){
+      if(f.kind==='select'||f.kind==='seq'||f.kind==='text') return;
+      var el=document.getElementById('mbc_'+f.k), e=document.getElementById('mbc_'+f.k+'_echo');
+      if(!el||!e) return;
+      var raw=(el.value||'').trim(), n=v[f.k];
+      if(!raw){ e.textContent=''; e.className='mbc-echo'; el.removeAttribute('aria-invalid'); return; }
+      if(!isFinite(n)){ e.textContent='not a number'; e.className='mbc-echo bad'; el.setAttribute('aria-invalid','true'); return; }
+      el.removeAttribute('aria-invalid'); e.className='mbc-echo';
+      var typedSci=/[eE^×xX]/.test(raw), extreme=Math.abs(n)>=1e5||(Math.abs(n)>0&&Math.abs(n)<1e-3);
+      e.textContent=(typedSci||extreme) ? ('= '+SCI.sci(n,4)+'   ('+SCI.plain(n,6)+')') : '';
+    });
+  }
+  function recompute(){ var calc=byId[MBC._cur]; if(!calc||calc.custom)return; var v=gather(calc); updateEchoes(calc,v); var res; try{ res=calc.compute(v); }catch(e){ res={warn:['Check your inputs.']}; } renderResult(calc,res); }
   function openCalc(id){ var calc=byId[id]; if(!calc)return; MBC._cur=id; try{localStorage.setItem('mbc_last',id);}catch(e){} renderNav();
     var m=document.getElementById('mbcMain'); if(!m)return;
     if(calc.custom){ m.innerHTML='<div class="mbc-head"><h2>'+escapeHtml(calc.name)+'</h2><p>'+escapeHtml(calc.blurb||'')+'</p></div><div id="mbcCustom"></div>'; calc.custom(document.getElementById('mbcCustom')); return; }
@@ -2998,10 +3081,18 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   function initCalc(){ var last=(MBC._cur&&byId[MBC._cur])?MBC._cur:null; if(!last){ try{last=localStorage.getItem('mbc_last');}catch(e){} } if(!byId[last]) last=CALCS[0].id; renderNav(); openCalc(last); }
 
   // ---------- self-test harness (?selftest=1) ----------
-  function _pnum(s){ if(typeof s==='number')return s; s=String(s).replace(/,/g,''); var m=s.match(/-?[\d.]+(?:e[-+]?\d+)?/i); return m?parseFloat(m[0]):NaN; }
+  // Understands plain, e-notation and superscript forms (1.2 × 10⁹) so the tests
+  // stay valid whichever notation mode the app is displaying in.
+  function _pnum(s){ if(typeof s==='number')return s; s=String(s);
+    var m=s.match(/-?[\d.,]+\s*×\s*10[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+|10[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+|-?[\d.,]+(?:e[-+]?\d+)?/i);
+    return m?SCI.parse(m[0]):NaN; }
   function _rowVal(res,label){ if(!res||!res.rows)return null; for(var i=0;i<res.rows.length;i++){ if(res.rows[i].label===label) return res.rows[i].value; } return null; }
   function _near(a,b,tol){ if(!isFinite(a)||!isFinite(b))return false; return Math.abs(a-b)<=(tol!=null?tol:Math.abs(b)*0.005+1e-9); }
   function selftest(){
+    // Pin the notation while asserting so we test the MATH, not the display rounding.
+    return SCI.withMode('plain',_selftestRun);
+  }
+  function _selftestRun(){
     var cases=[
       ['namass',{type:'dsDNA',length:1000,amount:100,amountU:'ng'},[['Molecular weight',617996,1],['Moles',161.8,0.5]]],
       ['a260',{a260:2,factor:'50',cf:50,dil:10,path:1},[['Concentration',1000,1]]],
