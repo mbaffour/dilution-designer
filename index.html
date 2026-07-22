@@ -4560,6 +4560,157 @@ function PROTOBLK(sel){
 }
 function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
 
+/* ══════════ WORD (.docx) EXPORT — hand-rolled, no library ══════════
+   A .docx is a ZIP of XML parts. The CSP blocks CDNs, so this implements
+   CRC-32 and a stored (uncompressed) ZIP writer; Word opens stored archives.
+   Headings use direct run formatting rather than named styles so we don't
+   have to ship a styles.xml for them to render. ════════════════════════ */
+(function(){
+  var CRC=(function(){ var t=new Uint32Array(256);
+    for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; }
+    return t; })();
+  function crc32(u8){ var c=0xFFFFFFFF; for(var i=0;i<u8.length;i++) c=CRC[(c^u8[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+  function enc(s){ return new TextEncoder().encode(s); }
+  function b64bytes(b64){ var bin=atob(b64), u=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return u; }
+  function pngSize(u8){ // IHDR width/height, big-endian at byte 16
+    if(u8.length<24) return {w:600,h:400};
+    var dv=new DataView(u8.buffer,u8.byteOffset);
+    return {w:dv.getUint32(16), h:dv.getUint32(20)};
+  }
+  function zip(files){
+    var chunks=[], central=[], off=0;
+    function push(u8){ chunks.push(u8); off+=u8.length; }
+    files.forEach(function(f){
+      var name=enc(f.name), crc=crc32(f.data), sz=f.data.length, start=off;
+      var lh=new Uint8Array(30+name.length), dv=new DataView(lh.buffer);
+      dv.setUint32(0,0x04034b50,true); dv.setUint16(4,20,true); dv.setUint16(6,0,true);
+      dv.setUint16(8,0,true); dv.setUint16(10,0,true); dv.setUint16(12,0,true);
+      dv.setUint32(14,crc,true); dv.setUint32(18,sz,true); dv.setUint32(22,sz,true);
+      dv.setUint16(26,name.length,true); dv.setUint16(28,0,true);
+      lh.set(name,30); push(lh); push(f.data);
+      var cd=new Uint8Array(46+name.length), cv=new DataView(cd.buffer);
+      cv.setUint32(0,0x02014b50,true); cv.setUint16(4,20,true); cv.setUint16(6,20,true);
+      cv.setUint16(8,0,true); cv.setUint16(10,0,true); cv.setUint16(12,0,true); cv.setUint16(14,0,true);
+      cv.setUint32(16,crc,true); cv.setUint32(20,sz,true); cv.setUint32(24,sz,true);
+      cv.setUint16(28,name.length,true); cv.setUint16(30,0,true); cv.setUint16(32,0,true);
+      cv.setUint16(34,0,true); cv.setUint16(36,0,true); cv.setUint32(38,0,true);
+      cv.setUint32(42,start,true); cd.set(name,46); central.push(cd);
+    });
+    var cdStart=off, cdSize=0;
+    central.forEach(function(c){ push(c); cdSize+=c.length; });
+    var eo=new Uint8Array(22), ev=new DataView(eo.buffer);
+    ev.setUint32(0,0x06054b50,true); ev.setUint16(4,0,true); ev.setUint16(6,0,true);
+    ev.setUint16(8,files.length,true); ev.setUint16(10,files.length,true);
+    ev.setUint32(12,cdSize,true); ev.setUint32(16,cdStart,true); ev.setUint16(20,0,true);
+    push(eo);
+    var out=new Uint8Array(off), p=0; chunks.forEach(function(c){ out.set(c,p); p+=c.length; });
+    return out;
+  }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function para(text,opt){
+    opt=opt||{}; var rpr='';
+    if(opt.b) rpr+='<w:b/>';
+    if(opt.i) rpr+='<w:i/>';
+    if(opt.sz) rpr+='<w:sz w:val="'+opt.sz+'"/><w:szCs w:val="'+opt.sz+'"/>';
+    if(opt.color) rpr+='<w:color w:val="'+opt.color+'"/>';
+    var rp=rpr?'<w:rPr>'+rpr+'</w:rPr>':'';
+    var pp=opt.space?'<w:pPr><w:spacing w:before="'+opt.space+'"/></w:pPr>':'';
+    return '<w:p>'+pp+'<w:r>'+rp+'<w:t xml:space="preserve">'+esc(text)+'</w:t></w:r></w:p>';
+  }
+  function table(cols,rows){
+    var b='<w:tblBorders>'+['top','left','bottom','right','insideH','insideV'].map(function(s){
+      return '<w:'+s+' w:val="single" w:sz="4" w:space="0" w:color="999999"/>';}).join('')+'</w:tblBorders>';
+    function cell(t,bold){ return '<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr>'+
+      '<w:p><w:r>'+(bold?'<w:rPr><w:b/></w:rPr>':'')+'<w:t xml:space="preserve">'+esc(t)+'</w:t></w:r></w:p></w:tc>'; }
+    var x='<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/>'+b+'</w:tblPr>';
+    if(cols&&cols.length) x+='<w:tr>'+cols.map(function(c){return cell(c,true);}).join('')+'</w:tr>';
+    (rows||[]).forEach(function(r){ x+='<w:tr>'+r.map(function(c){return cell(String(c),false);}).join('')+'</w:tr>'; });
+    return x+'</w:tbl>'+para('');
+  }
+  function drawing(rid,idx,wpx,hpx){
+    var maxW=600, sc=Math.min(1,maxW/wpx), W=Math.round(wpx*sc*9525), H=Math.round(hpx*sc*9525);
+    return '<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">'+
+      '<wp:extent cx="'+W+'" cy="'+H+'"/><wp:docPr id="'+idx+'" name="Picture '+idx+'"/>'+
+      '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'+
+      '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'+
+      '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'+
+      '<pic:nvPicPr><pic:cNvPr id="'+idx+'" name="image'+idx+'.png"/><pic:cNvPicPr/></pic:nvPicPr>'+
+      '<pic:blipFill><a:blip r:embed="'+rid+'"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'+
+      '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="'+W+'" cy="'+H+'"/></a:xfrm>'+
+      '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'+
+      '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
+  }
+  function mdLines(md){ // flatten light markdown into docx paragraphs
+    var out='';
+    String(md||'').split(/\n/).forEach(function(l){
+      var h=l.match(/^(#{1,3})\s+(.*)$/);
+      if(h){ out+=para(h[2],{b:true,sz:h[1].length===1?30:(h[1].length===2?26:24),space:160}); return; }
+      var li=l.match(/^\s*(?:[-*]|\d+[.)])\s+(.*)$/);
+      var t=(li?'• '+li[1]:l).replace(/\*\*(.+?)\*\*/g,'$1').replace(/\*(.+?)\*/g,'$1').replace(/`(.+?)`/g,'$1');
+      if(t.trim()) out+=para(t);
+    });
+    return out;
+  }
+
+  function buildDocx(entry){
+      var media=[], rels=[], body='';
+      body+=para(entry.title||'Untitled',{b:true,sz:40});
+      var sub=[entry.date,entry.author,(entry.tags||[]).join(', ')].filter(Boolean).join('  ·  ');
+      if(sub) body+=para(sub,{i:true,color:'666666'});
+      (entry.blocks||[]).forEach(function(b){
+        if(b.title&&b.type!=='text') body+=para(b.title,{b:true,sz:26,space:200});
+        if(b.type==='text') body+=mdLines(b.md);
+        else if(b.type==='table') body+=table(b.cols||[],b.rows||[]);
+        else if(b.type==='kv') body+=table(['Item','Value'],(b.pairs||[]).map(function(p){return [p[0],String(p[1])];}));
+        else if(b.type==='steps') body+=(b.items||[]).map(function(s,i){
+          return para((i+1)+'. '+(s.done?'[x] ':'[ ] ')+s.t+' — '+String(s.d).replace(/<[^>]+>/g,'')); }).join('');
+        else if(b.type==='image'&&/^data:image\/png;base64,/.test(b.dataUrl||'')){
+          var bytes=b64bytes(b.dataUrl.split(',')[1]); var d=pngSize(bytes);
+          var n=media.length+1, rid='rId'+(100+n);
+          media.push({name:'word/media/image'+n+'.png', data:bytes});
+          rels.push('<Relationship Id="'+rid+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image'+n+'.png"/>');
+          body+=drawing(rid,n,d.w,d.h);
+        }
+      });
+      body+='<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr>';
+      var doc='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'+
+        ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'+
+        ' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">'+
+        '<w:body>'+body+'</w:body></w:document>';
+      var ct='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+        '<Default Extension="xml" ContentType="application/xml"/>'+
+        '<Default Extension="png" ContentType="image/png"/>'+
+        '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'+
+        '</Types>';
+      var root='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'+
+        '</Relationships>';
+      var drels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+rels.join('')+'</Relationships>';
+      var files=[{name:'[Content_Types].xml',data:enc(ct)},{name:'_rels/.rels',data:enc(root)},
+                 {name:'word/document.xml',data:enc(doc)},{name:'word/_rels/document.xml.rels',data:enc(drels)}]
+                 .concat(media);
+      return {bytes:zip(files), files:files, images:media.length};
+  }
+  window.NBDOCX=function(entry,base){
+    try{
+      var r=buildDocx(entry);
+      var a=document.createElement('a');
+      a.href=URL.createObjectURL(new Blob([r.bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}));
+      a.download=(base||'notebook')+'.docx'; a.click();
+      setTimeout(function(){URL.revokeObjectURL(a.href);},1500);
+      showToast('✓ Word document exported ('+r.images+' image'+(r.images===1?'':'s')+')','green');
+    }catch(e){ showToast('Word export failed: '+e.message,'warn'); if(window.console)console.error(e); }
+  };
+  // exposed so the archive can be verified structurally without downloading it
+  window.NBDOCX.build=buildDocx;
+  window.NBDOCX._zip={zip:zip,crc32:crc32,enc:enc};
+})();
+
 /* ══════════════════════════ PWA / OFFLINE ══════════════════════════ */
 (function(){
   var css=`
