@@ -21,6 +21,11 @@
   --border:#d5d0c8;--border2:#c2bdb2;
   --text:#1a1814;--text2:#5a564f;--text3:#6d675e;
   --accent:#2d5a3d;--accent2:#2c6e4f;--accent-bg:#e4f0e8;
+  /* --accent is tuned to be readable AS TEXT on the page background. That makes it the
+     wrong colour to put BEHIND text — in night mode it is deliberately light, so white on
+     it is only 2.9:1. Filled/selected chips use these instead, which are picked per theme
+     so the ink on them always clears 4.5:1. */
+  --accent-fill:#2d5a3d;--accent-fill-fg:#fff;          /* white on #2d5a3d = 7.9:1 */
   /* Header is a fixed dark bar in every theme (does not invert). */
   --head-bg:#1a1814;--head-fg:#f4f2ed;--head-fg-dim:rgba(255,255,255,0.74);--head-line:rgba(255,255,255,0.30);
   /* Primary/action button — fixed green with white text, >=4.5:1 in all contexts. */
@@ -41,8 +46,12 @@
   --border:#2c2c3e;--border2:#38384e;
   --text:#e6e4f0;--text2:#b6b4c6;--text3:#9a97af;
   --accent:#5aa875;--accent2:#5aa875;--accent-bg:#162018;
+  /* Dark mode flips the relationship: keep the bright green fill and put dark ink on it. */
+  --accent-fill:#5aa875;--accent-fill-fg:#12121a;       /* #12121a on #5aa875 = 6.6:1 */
   --warn:#d47a3c;--warn-bg:#2a1a0e;
-  --danger:#d44a4a;--danger-bg:#2a0e0e;
+  /* Lightened from #d44a4a, which was only 3.9:1 on the dark surface. Hazard text is the
+     last thing that should be hard to read; --danger is text/border only, never a fill. */
+  --danger:#e06a6a;--danger-bg:#2a0e0e;                 /* 5.1:1 on --surface, 5.6:1 on --danger-bg */
   --purple:#a095d4;--purple-bg:#1e1a30;
   --blue:#6090d4;--blue-bg:#181e30;
   --plate-bg:#181820;--well-empty:#252535;--well-border:rgba(255,255,255,0.08);
@@ -53,6 +62,7 @@
   --border:#ccc4b4;--border2:#b8b0a0;
   --text:#2c2820;--text2:#615a4b;--text3:#5f5648;
   --accent:#4a6a3d;--accent2:#3f6a4d;--accent-bg:#dde8d4;
+  --accent-fill:#4a6a3d;--accent-fill-fg:#fff;          /* white on #4a6a3d = 6.1:1 */
   --warn:#8b5a30;--warn-bg:#f5e4cc;
   --danger:#8b3030;--danger-bg:#f5d8d8;
   --purple:#5a4a7a;--purple-bg:#ede8f5;
@@ -2347,13 +2357,13 @@ showWelcomeBanner();
   #rpSearch{width:100%;}
   .rp-cats{display:flex;flex-wrap:wrap;gap:5px;}
   .rp-cat{font:600 10px/1 var(--mono,monospace);letter-spacing:.02em;padding:5px 8px;border:1px solid var(--line,#d9d2c4);border-radius:999px;background:transparent;color:var(--text3,#8a8172);cursor:pointer;}
-  .rp-cat.active{background:var(--accent,#2f7d5b);color:#fff;border-color:var(--accent,#2f7d5b);}
+  .rp-cat.active{background:var(--accent-fill,#2f7d5b);color:var(--accent-fill-fg,#fff);border-color:var(--accent-fill,#2f7d5b);}
   .rp-catn{opacity:.7;}
   .rp-list{max-height:52vh;overflow:auto;border:1px solid var(--line,#d9d2c4);border-radius:10px;background:var(--card,#fff);}
   .rp-item{display:block;width:100%;text-align:left;padding:9px 11px;border:0;border-bottom:1px solid var(--line,#eee);background:transparent;cursor:pointer;}
   .rp-item:hover{background:var(--bg2,#f4f0e7);}
-  .rp-item.active{background:var(--accent,#2f7d5b);}
-  .rp-item.active .rp-item-name,.rp-item.active .rp-item-sum{color:#fff;}
+  .rp-item.active{background:var(--accent-fill,#2f7d5b);}
+  .rp-item.active .rp-item-name,.rp-item.active .rp-item-sum{color:var(--accent-fill-fg,#fff);}
   .rp-item-name{font-weight:700;font-size:12.5px;color:var(--text,#2a2519);}
   .rp-item-sum{font-size:10.5px;color:var(--text3,#8a8172);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .rp-libtools{display:flex;gap:6px;}
@@ -2404,7 +2414,10 @@ function rpInit(){
         : 'Could not load reagent-library.json ('+escapeHtml(e.message)+'). Make sure it sits next to index.html.')+'</span>';
     });
 }
-function rpFinishLoad(){ rpLoaded=true; rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes'; }
+function rpFinishLoad(){ rpLoaded=true; rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes';
+  // The library is fetched lazily, so the Home hub's recipe count starts as a literal.
+  // Once the real number is known, refresh the hub so the two can never disagree.
+  if(appMode==='home'&&window.renderHome) renderHome(); }
 function rpFlatten(){ rpAllRecipes=[]; (rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ rpAllRecipes.push(Object.assign({_cat:c.title,_catKey:c.key}, r)); }); }); }
 function rpCustom(){ try{ return JSON.parse(localStorage.getItem('dd_reagent_custom')||'[]'); }catch(e){ return []; } }
 function rpMergeCustom(){ var cust=rpCustom(); var cat=(rpLib.categories||[]).find(function(c){return c.key==='custom';}); if(cust.length){ if(!cat){ cat={key:'custom',title:'My recipes',recipes:[]}; rpLib.categories.push(cat);} cat.recipes=cust; } else if(cat){ cat.recipes=[]; } }
@@ -3152,6 +3165,35 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     n++; if(!_near(pcrPer({mode:'cf',stock:5,final:1},25),5,0.01)) fails.push('pcr cf per-rxn wrong');
     n++; try{ var sd=byId['seqtool'].compute({seq:'ATGC'}); if(sd.protocol!=='GCAT') fails.push('seqtool DNA revcomp got '+sd.protocol+' want GCAT'); }catch(e){ fails.push('seqtool DNA threw '+e.message); }
     n++; try{ var sr=byId['seqtool'].compute({seq:'AUGC'}); if(sr.protocol!=='GCAU') fails.push('seqtool RNA revcomp got '+sr.protocol+' want GCAU'); }catch(e){ fails.push('seqtool RNA threw '+e.message); }
+    // ── gel simulator model + ladder integrity
+    if(window.GEL&&GEL._model){
+      var M=GEL._model, rng=M.rangeFor({type:'dna',pct:'1'});
+      n++; if(!(M.rfOf(1000,rng).rf > M.rfOf(10000,rng).rf)) fails.push('gel: Rf must increase as fragments get smaller');
+      n++; if(M.rfOf(25000,rng).status!=='high') fails.push('gel: 25 kb on 1% should flag above range');
+      n++; if(M.rfOf(100,rng).status!=='low') fails.push('gel: 100 bp on 1% should flag below range');
+      n++; if(Math.abs(M.rfOf(4200,rng).rf-M.rfOf(4000,rng).rf)>=M.RESOLVE) fails.push('gel: 4.2 vs 4.0 kb should NOT resolve on 1%');
+      n++; if(Math.abs(M.rfOf(5000,rng).rf-M.rfOf(1000,rng).rf)<M.RESOLVE) fails.push('gel: 5 kb vs 1 kb SHOULD resolve on 1%');
+      n++; var prng=M.rangeFor({type:'protein',pct:'12'});
+      if(!(M.rfOf(15,prng).rf > M.rfOf(60,prng).rf)) fails.push('gel: protein Rf must increase as kDa gets smaller');
+      n++; var badL=M.ladders().filter(function(L){ if(!L.b||!L.b.length) return true;
+        for(var i=1;i<L.b.length;i++) if(L.b[i]>=L.b[i-1]) return true; return false; });
+      if(badL.length) fails.push('gel: ladder bands not strictly descending — '+badL.map(function(L){return L.n;}).join(', '));
+      n++; var neb=M.ladders().filter(function(L){return L.id==='neb-1kb';})[0];
+      if(!neb||neb.b.length!==10||neb.b[0]!==10000||neb.ref.indexOf(3000)<0) fails.push('gel: NEB 1 kb ladder spec wrong');
+      n++; var bp=M.ladders().filter(function(L){return L.id==='biorad-precision';})[0];
+      if(!bp||bp.b[0]!==250||bp.b[bp.b.length-1]!==10) fails.push('gel: Bio-Rad Precision Plus spec wrong');
+    }
+    // ── notebook markdown + serialisers
+    if(window.NB&&NB._md2html){
+      n++; if(!/<strong>hot<\/strong>/.test(NB._md2html('**hot**'))) fails.push('notebook: markdown bold failed');
+      n++; if(!/<li>a<\/li>/.test(NB._md2html('- a'))) fails.push('notebook: markdown list failed');
+      n++; if(!/<h2>Hi<\/h2>/.test(NB._md2html('# Hi'))) fails.push('notebook: markdown heading failed');
+      n++; var te={title:'T',date:'2026-01-01',blocks:[{type:'table',title:'X',cols:['A','B'],rows:[['1','2']]}]};
+      if(!/\|\s*A\s*\|\s*B\s*\|/.test(NB._toMd(te))) fails.push('notebook: markdown table failed');
+      n++; var csv=NB._toCsv(te);
+      if(csv.indexOf('"A","B"')<0) fails.push('notebook: CSV export failed');
+      n++; if(csv.charAt(0)==='\n') fails.push('notebook: CSV must not start with a blank row');
+    }
     return {total:n, passed:n-fails.length, failures:fails};
   }
 
@@ -3166,28 +3208,34 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   // ---------- home hub ----------
   window.renderHome=function(){
     var el=document.getElementById('homeWrap'); if(!el)return;
+    // Counts come from the live data where it has loaded, so the hub can never drift from reality.
+    var nRec=216; try{ if(window.rpLib&&rpLib.categories) nRec=rpLib.categories.reduce(function(a,c){return a+(c.recipes?c.recipes.length:0);},0); }catch(e){}
+    var nLad=16; try{ if(window.GEL&&GEL._model) nLad=GEL._model.ladders().length; }catch(e){}
     var mods=[
       {m:'plasmid',icon:'🧫',title:'Plate Planner',desc:'Design 96 / 384 & multi-plate layouts — plasmid/induction & phage/MOI, master mix, randomization, bench checks.'},
       {m:'dilcalc',icon:'💧',title:'Dilution & Molarity',desc:'C1V1 across every unit, serial dilutions, molarity↔mass, and weigh-outs.'},
-      {m:'reagent',icon:'⚗️',title:'Reagent Prep',desc:'160 verified buffer / media / stock recipes — including miniprep P1/P2/P3, Buffer PE, CTAB — scaled to any volume.'},
+      {m:'reagent',icon:'⚗️',title:'Reagent Prep',desc:nRec+' verified buffer / media / stock recipes — including miniprep P1/P2/P3, Buffer PE, CTAB — scaled to any volume.'},
       {m:'calc',icon:'🧬',title:'Molbio Calculators',desc:CALCS.length+' bench calculators: ng↔pmol, A260, ligation, primer Tm, OD→cells, phage titer/MOI, %↔molarity & more.'},
-      {m:'proto',icon:'📋',title:'Protocols',desc:(window.PROTO?PROTO.list.length:10)+' step-by-step protocols — miniprep, CTAB gDNA, gels, transformation, plaque assay — that rescale as you change the numbers.'}
+      {m:'proto',icon:'📋',title:'Protocols',desc:(window.PROTO?PROTO.list.length:10)+' step-by-step protocols — miniprep, CTAB gDNA, gels, transformation, plaque assay — that rescale as you change the numbers.'},
+      {m:'gel',icon:'🧪',title:'Gel Simulator',desc:'Predict an agarose or SDS-PAGE run before you pour it — '+nLad+' vendor ladders, band-resolution warnings and a best-% suggestion.'},
+      {m:'notebook',icon:'📓',title:'Lab Notebook',desc:'Pull results from any module into a dated entry, add your own notes, and export to Markdown, HTML, PDF, Word, CSV or JSON.'}
     ];
     var featured=['namass','a260','pctmolar','tm','od600','titer','ligation','moivol','doubling','rcf'];
     el.innerHTML='<div class="home-hero"><h1>Molecular Biology Bench Toolkit</h1><p>One place for dilutions, reagents, plate layouts, protocols and the everyday molecular-biology math. Everything is computed on your own machine — visit once and it keeps working with no network, so it is usable in a cold room or a BSL suite.</p></div>'+
-      '<div class="home-cards">'+mods.map(function(x){return '<button class="home-card" onclick="setMode(\''+x.m+'\')"><div class="home-ico">'+x.icon+'</div><div class="home-ct"><div class="home-ctitle">'+escapeHtml(x.title)+'</div><div class="home-cdesc">'+escapeHtml(x.desc)+'</div></div></button>';}).join('')+'</div>'+
+      '<div class="home-cards">'+mods.map(function(x){return '<button class="home-card" onclick="setMode(\''+x.m+'\')"><div class="home-ico" aria-hidden="true">'+x.icon+'</div><div class="home-ct"><div class="home-ctitle">'+escapeHtml(x.title)+'</div><div class="home-cdesc">'+escapeHtml(x.desc)+'</div></div></button>';}).join('')+'</div>'+
       '<div class="home-sub">Jump to a calculator</div><div class="home-chips">'+featured.filter(function(id){return byId[id];}).map(function(id){return '<button class="home-chip" onclick="MBC._cur=\''+id+'\';setMode(\'calc\')">'+escapeHtml(byId[id].name)+'</button>';}).join('')+'</div>'+
       '<div style="text-align:center;margin-top:26px;font:11px var(--mono);color:var(--text3);line-height:1.7;">Dilution Designer · '+MB_VERSION+'<br>Every calculation runs on your machine — nothing is uploaded.<br>Offline: '+escapeHtml(window.ddPwaStatus?ddPwaStatus():'—')+'</div>';
   };
 
-  // Self-test on ?selftest=1 (numeric assertions on every formula)
-  if(/[?&]selftest\b/.test(location.search)){
+  // Self-test on ?selftest=1 (numeric assertions on every formula).
+  // Deferred a tick so the gel/notebook modules defined further down exist by then.
+  if(/[?&]selftest\b/.test(location.search)) setTimeout(function(){
     try{ var _r=selftest(); var _ok=_r.failures.length===0;
       (window.console&&console[_ok?'log':'error'])('MBC self-test: '+_r.passed+'/'+_r.total+(_ok?' PASS':' FAIL — '+_r.failures.join(' | ')));
       var _b=document.createElement('div'); _b.style.cssText='position:fixed;bottom:12px;right:12px;z-index:99999;max-width:340px;padding:10px 14px;border-radius:8px;font:12px/1.4 monospace;color:#fff;background:'+(_ok?'#2f7d5b':'#c0392b');
       _b.textContent='Self-test '+_r.passed+'/'+_r.total+(_ok?' ✓ all pass':' ✗ '+_r.failures.length+' fail'); if(!_ok)_b.title=_r.failures.join('\n'); document.body.appendChild(_b);
     }catch(e){ if(window.console)console.error('self-test crashed',e); }
-  }
+  },0);
   // First-time visitors land on the Home hub (returning users restore their last view).
   if(window._ddFresh && (location.hash||'').indexOf('#s=')!==0){ try{ setMode('home'); }catch(e){} }
 })();
@@ -4072,6 +4120,11 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     var W=PADX*2+LEFT+lanes.length*(LW+GAP), H=TOP+GELH+BOT, DPR=2;
     var c=document.createElement('canvas'); c.width=W*DPR; c.height=H*DPR;
     c.style.width=W+'px'; c.style.height=H+'px';
+    // Canvas pixels are opaque to screen readers, so name the image and point at the
+    // band table below, which carries the same information as real text.
+    c.setAttribute('role','img');
+    c.setAttribute('aria-label','Simulated '+(S.type==='dna'?S.pct+'% agarose DNA gel':S.pct+'% SDS-PAGE protein gel')
+      +' with '+lanes.length+' lane'+(lanes.length===1?'':'s')+'. The band table below lists every lane, size and Rf as text.');
     var x=c.getContext('2d'); x.scale(DPR,DPR);
     x.fillStyle=dark?'#0b0e12':'#f2f0ea'; x.fillRect(0,0,W,H);
     var gx=PADX+LEFT, gy=TOP, gw=lanes.length*(LW+GAP)-GAP, gh=GELH;
@@ -4383,14 +4436,19 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       '</style></head><body>'+toHtmlBody(e)+'<hr><p style="font-size:11px;color:#888;">Generated by Dilution Designer — verify against your own records.</p></body></html>';
   }
   function toCsv(e){
-    var out=[];
+    // One CSV per entry: each table/kv block becomes a titled section, blank line BETWEEN
+    // sections only — a leading blank row reads as an empty record to most parsers.
+    var secs=[];
     (e.blocks||[]).forEach(function(b){
-      if(b.type==='table'){ out.push(['Table','Column','...'].slice(0,0)); out.push(['# '+(b.title||'table')]);
-        out.push(b.cols||[]); (b.rows||[]).forEach(function(r){ out.push(r); }); out.push([]); }
-      else if(b.type==='kv'){ out.push(['# '+(b.title||'values')]); out.push(['Key','Value']); (b.pairs||[]).forEach(function(p){ out.push(p); }); out.push([]); }
+      var rows=null;
+      if(b.type==='table'){ rows=[['# '+(b.title||'table')], (b.cols||[])].concat(b.rows||[]); }
+      else if(b.type==='kv'){ rows=[['# '+(b.title||'values')], ['Key','Value']].concat(b.pairs||[]); }
+      if(rows) secs.push(rows);
     });
-    if(!out.length) return 'No tabular blocks in this entry\n';
-    return out.map(function(r){ return r.map(function(c){ return '"'+String(c==null?'':c).replace(/"/g,'""')+'"'; }).join(','); }).join('\n');
+    if(!secs.length) return 'No tabular blocks in this entry\n';
+    var out=[];
+    secs.forEach(function(rows,i){ if(i) out.push([]); rows.forEach(function(r){ out.push(r); }); });
+    return out.map(function(r){ return r.map(function(c){ return '"'+String(c==null?'':c).replace(/"/g,'""')+'"'; }).join(','); }).join('\n')+'\n';
   }
 
   window.NB={
@@ -4466,7 +4524,9 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       setTimeout(function(){ window.print(); },80);
     },
     _md2html:md2html, _toMd:toMd, _toHtmlDoc:toHtmlDoc, _toCsv:toCsv,
-    _entries:entries, _cur:function(){return curEntry();}, _providers:PROVIDERS
+    _entries:entries, _cur:function(){return curEntry();}, _providers:PROVIDERS,
+    // test hooks — the serialisers, callable without touching storage
+    _md2html:md2html, _toMd:toMd, _toCsv:toCsv, _toHtmlDoc:toHtmlDoc
   };
 })();
 
