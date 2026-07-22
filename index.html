@@ -411,7 +411,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
           </div>
         </div>
         <div class="rp-actions">
-          <button class="btn" onclick="rpPrint()" title="Print this prep sheet">🖨 Print sheet</button>
+          <button class="btn" onclick="NB.capture('reagent')" title="Add these results to a notebook entry">📓 Notebook</button><button class="btn" onclick="rpPrint()" title="Print this prep sheet">🖨 Print sheet</button>
           <button class="btn" onclick="rpCopy()" title="Copy prep sheet as text">Copy</button>
         </div>
       </div>
@@ -461,7 +461,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div class="dc-f"><label>Diluent — optional</label><input id="dcDil" value="diluent" placeholder="e.g. water, TE, medium" oninput="dcCalc()"></div>
     </div>
     <div id="dcResult" class="dc-result"></div>
-    <div class="dc-actions"><button class="btn" onclick="dcCopy()">Copy recipe</button></div>
+    <div class="dc-actions"><button class="btn" onclick="NB.capture('dilcalc')" title="Add these results to a notebook entry">📓 Notebook</button><button class="btn" onclick="dcCopy()">Copy recipe</button></div>
   </section>
 
   <!-- ── SERIAL DILUTION ── -->
@@ -729,7 +729,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <button class="tool-btn" onclick="undo()" title="Undo (Ctrl+Z)">↩ Undo</button>
       <button class="tool-btn" onclick="redo()" title="Redo (Ctrl+Y)">↪ Redo</button>
       <button class="tool-btn" onclick="toggleShowReps()" id="repLabelBtn">Labels: on</button>
-      <button class="tool-btn" onclick="randomizeLayout()" title="Shuffle condition positions to remove spatial/edge bias (Ctrl+Z to undo)">🎲 Randomize</button>
+      <button class="tool-btn" onclick="NB.capture('plate')" title="Add these results to a notebook entry">📓 Notebook</button><button class="tool-btn" onclick="randomizeLayout()" title="Shuffle condition positions to remove spatial/edge bias (Ctrl+Z to undo)">🎲 Randomize</button>
       <button class="tool-btn" onclick="clearAllWells()">Clear plate</button>
     </div>
   </div>
@@ -2225,7 +2225,7 @@ function deleteNamedLayout(){
 // ══════════════════════════════════════════════════════════════════
 // PLATE PNG EXPORT
 // ══════════════════════════════════════════════════════════════════
-function exportPlatePNG(){
+function buildPlateCanvas(){
   const p=P();
   const big=NC>=24;
   const WS=big?18:46,GAP=big?2:3,RLW=big?16:24,CLH=big?14:22,PAD=16,RAD=big?3:8;
@@ -2280,6 +2280,11 @@ function exportPlatePNG(){
   }
   ctx.fillStyle=dark?'#55536a':'#9e9890';ctx.font='400 9px monospace';ctx.textAlign='left';ctx.textBaseline='bottom';
   ctx.fillText(`${p.expName||'Dilution Designer'} | ${p.expDate||new Date().toLocaleDateString()} | ${p.inducerName||''}`,PAD,H-6);
+  return canvas;
+}
+// Thin wrapper: build then download. Split out so the notebook can grab the canvas as a dataURL.
+function exportPlatePNG(){
+  const p=P(), canvas=buildPlateCanvas();
   canvas.toBlob(blob=>{
     const n=(p.expName||'plate').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
     const d=p.expDate||new Date().toISOString().slice(0,10);
@@ -3044,7 +3049,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       '</div>'+
       '<div class="pcr-presets">Presets: '+Object.keys(PCR_PRESETS).map(function(k){return '<button class="btn" onclick="MBC.pcrPreset(\''+k+'\')">'+escapeHtml(PCR_PRESETS[k].name)+'</button>';}).join(' ')+'</div>'+
       '<div class="pcr-rows">'+rowsHtml+'</div>'+
-      '<div class="mbc-actions"><button class="btn" onclick="MBC.pcrAdd()">＋ Component</button><button class="btn" onclick="MBC.copy()">Copy protocol</button></div>'+
+      '<div class="mbc-actions"><button class=\"btn\" onclick=\"MBC.pcrAdd()\">＋ Component</button><button class=\"btn\" onclick=\"NB.capture(\'calc\')\" title=\"Add these results to a notebook entry\">📓 Notebook</button><button class=\"btn\" onclick=\"MBC.copy()\">Copy protocol</button></div>'+
       '<div id="pcrOut" class="mbc-result"></div>';
     pcrResults();
   }
@@ -3100,7 +3105,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     if(calc.custom){ m.innerHTML='<div class="mbc-head"><h2>'+escapeHtml(calc.name)+'</h2><p>'+escapeHtml(calc.blurb||'')+'</p></div><div id="mbcCustom"></div>'; calc.custom(document.getElementById('mbcCustom')); return; }
     m.innerHTML='<div class="mbc-head"><h2>'+escapeHtml(calc.name)+'</h2><p>'+escapeHtml(calc.blurb||'')+'</p></div>'+
       '<div class="mbc-form">'+(calc.fields||[]).map(fieldHtml).join('')+'</div>'+
-      '<div class="mbc-actions"><button class="btn" onclick="MBC.copy()">Copy result</button></div>'+
+      '<div class="mbc-actions"><button class=\"btn\" onclick=\"NB.capture(\'calc\')\" title=\"Add these results to a notebook entry\">📓 Notebook</button><button class=\"btn\" onclick=\"MBC.copy()\">Copy result</button></div>'+
       '<div id="mbcResult" class="mbc-result"></div>';
     recompute();
   }
@@ -3905,7 +3910,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       '<div class="pr-meta">'+(pr.time?'<span class="pr-chip">⏱ '+escapeHtml(pr.time)+'</span>':'')+'<span class="pr-chip">'+escapeHtml(pr.group)+'</span></div>'+
       (pr.safety?'<div class="pr-safety"><b>Safety —</b> '+escapeHtml(pr.safety)+'</div>':'')+
       ((pr.params&&pr.params.length)?'<div class="pr-sec">Scale it</div><div class="mbc-form">'+pr.params.map(paramHtml).join('')+'</div>':'')+
-      '<div class="mbc-actions"><button class="btn" onclick="PROTO.copy()">Copy protocol</button><button class="btn" onclick="window.print()">🖨 Print</button><button class="btn" onclick="PROTO.reset()">Reset ticks</button></div>'+
+      '<div class="mbc-actions"><button class=\"btn\" onclick=\"NB.capture(\'proto\')\" title=\"Add these results to a notebook entry\">📓 Notebook</button><button class=\"btn\" onclick=\"PROTO.copy()\">Copy protocol</button><button class="btn" onclick="window.print()">🖨 Print</button><button class="btn" onclick="PROTO.reset()">Reset ticks</button></div>'+
       '<div id="prBody"></div>';
     renderBody();
   }
@@ -4206,6 +4211,354 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
              state:function(){return S||(S=load());}, warnings:function(){return warnings(computeLanes());} }
   };
 })();
+
+/* ══════════════════════════ LAB NOTEBOOK ══════════════════════════ */
+(function(){
+  var css=`
+  .nb-meta{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:12px;}
+  @media(max-width:640px){.nb-meta{grid-template-columns:1fr;}}
+  .nb-blk{border:1px solid var(--border);border-radius:10px;margin-bottom:10px;background:var(--surface);}
+  .nb-bhead{display:flex;align-items:center;gap:8px;padding:7px 11px;border-bottom:1px solid var(--border);background:var(--surface2);border-radius:10px 10px 0 0;}
+  .nb-btype{font:600 9.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text3);}
+  .nb-btitle{font-weight:700;font-size:12.5px;color:var(--text);flex:1;}
+  .nb-bctl{margin-left:auto;display:flex;gap:2px;}
+  .nb-bctl button{border:1px solid var(--border);background:var(--surface);color:var(--text2);border-radius:5px;cursor:pointer;font-size:11px;min-width:26px;min-height:26px;}
+  .nb-bctl button:hover{background:var(--surface2);}
+  .nb-bbody{padding:11px;}
+  .nb-bbody textarea{width:100%;min-height:110px;font-family:var(--mono);font-size:12.5px;line-height:1.5;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);box-sizing:border-box;resize:vertical;}
+  .nb-bbody textarea:focus-visible{outline:2px solid var(--accent2);outline-offset:1px;}
+  .nb-prev{margin-top:9px;padding-top:9px;border-top:1px dashed var(--border);font-size:13px;color:var(--text);line-height:1.6;}
+  .nb-prev h1,.nb-prev h2,.nb-prev h3{font-family:var(--serif);margin:.5em 0 .3em;}
+  .nb-prev code{font-family:var(--mono);background:var(--surface2);padding:1px 4px;border-radius:3px;font-size:.9em;}
+  .nb-prev ul,.nb-prev ol{padding-left:20px;margin:.4em 0;}
+  .nb-prev a{color:var(--accent2);}
+  .nb-img{max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px;}
+  .nb-empty{color:var(--text3);font-style:italic;padding:22px 0;}
+  .nb-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;}
+  .nb-modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:520px;width:100%;max-height:86vh;overflow:auto;padding:20px;}
+  .nb-pick{display:flex;align-items:center;gap:9px;padding:8px 4px;border-bottom:1px solid var(--border);font-size:13px;color:var(--text);}
+  .nb-pick input{width:17px;height:17px;cursor:pointer;}
+  .nb-steps li.done{opacity:.55;text-decoration:line-through;}
+  #nbPrintArea{display:none;}
+  @media print{
+    body.print-nb header,body.print-nb .mode-tabs,body.print-nb #notebookView,body.print-nb .app,
+    body.print-nb #gelView,body.print-nb #calcView,body.print-nb #protoView,body.print-nb #reagentView,
+    body.print-nb #dilcalcView,body.print-nb #homeView,body.print-nb .pwa-bar,body.print-nb .pwa-off{display:none!important;}
+    body.print-nb #nbPrintArea{display:block!important;padding:0;}
+  }
+  #nbPrintArea h1{font-family:var(--serif);font-size:1.6rem;margin:0 0 4px;}
+  #nbPrintArea .nb-sub{color:#666;font-size:12px;margin-bottom:16px;}
+  #nbPrintArea table{width:100%;border-collapse:collapse;font-size:12px;margin:8px 0;}
+  #nbPrintArea th,#nbPrintArea td{border:1px solid #bbb;padding:5px 7px;text-align:left;}
+  #nbPrintArea img{max-width:100%;height:auto;}
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  // ── light markdown (headings, bold, italic, code, lists, links) — no library needed
+  function md2html(src){
+    var s=escapeHtml(String(src||''));
+    s=s.replace(/`([^`\n]+)`/g,'<code>$1</code>');
+    s=s.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');
+    s=s.replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>');
+    s=s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+    var out=[], list=null;
+    s.split(/\n/).forEach(function(line){
+      var h=line.match(/^(#{1,3})\s+(.*)$/);
+      var ul=line.match(/^\s*[-*]\s+(.*)$/);
+      var ol=line.match(/^\s*\d+[.)]\s+(.*)$/);
+      function close(){ if(list){ out.push('</'+list+'>'); list=null; } }
+      if(h){ close(); out.push('<h'+(h[1].length+1)+'>'+h[2]+'</h'+(h[1].length+1)+'>'); }
+      else if(ul){ if(list!=='ul'){ close(); out.push('<ul>'); list='ul'; } out.push('<li>'+ul[1]+'</li>'); }
+      else if(ol){ if(list!=='ol'){ close(); out.push('<ol>'); list='ol'; } out.push('<li>'+ol[1]+'</li>'); }
+      else if(!line.trim()){ close(); }
+      else { close(); out.push('<p>'+line+'</p>'); }
+    });
+    if(list) out.push('</'+list+'>');
+    return out.join('');
+  }
+
+  // ── storage
+  function all(){ try{ return JSON.parse(localStorage.getItem('dd_notebook')||'[]'); }catch(e){ return []; } }
+  function persist(list){ if(window._sharedSession) return; try{ localStorage.setItem('dd_notebook',JSON.stringify(list)); }catch(e){ showToast('Notebook too large for local storage — export it','warn'); } }
+  var cur=null;
+  function entries(){ return all(); }
+  function curEntry(){ var l=all(); return l.filter(function(e){return e.id===cur;})[0]||l[0]||null; }
+  function saveEntry(e){ var l=all(); var i=l.map(function(x){return x.id;}).indexOf(e.id); if(i<0) l.unshift(e); else l[i]=e; persist(l); }
+  function today(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+  // ── capture sources (each module exposes blocks(sel))
+  var PROVIDERS={
+    plate:   {label:'Plate planner', mod:'PLATEBLK', items:[['image','Plate map (image)'],['wells','Per-well volumes table'],['mix','Master mix table'],['metrics','Metrics'],['bench','Bench reality check']]},
+    reagent: {label:'Reagent Prep',  mod:'RPBLK',    items:[['sheet','Scaled prep sheet'],['sources','Sources']]},
+    dilcalc: {label:'Dilution Calc', mod:'DCBLK',    items:[['result','Result + worked math']]},
+    calc:    {label:'Calculators',   mod:'MBCBLK',   items:[['result','Inputs + results'],['table','Result table']]},
+    proto:   {label:'Protocols',     mod:'PROTOBLK', items:[['reagents','Reagents needed'],['steps','Steps (with ticks)']]},
+    gel:     {label:'Gel Sim',       mod:'GELBLK',   items:[['image','Gel image'],['table','Band table'],['warn','Gel check notes']]}
+  };
+  function providerFn(src){
+    if(src==='gel'&&window.GEL&&GEL.blocks) return GEL.blocks;
+    var m=window[PROVIDERS[src]&&PROVIDERS[src].mod];
+    return (typeof m==='function')?m:null;
+  }
+
+  // ── rendering
+  function blockHtml(b,i){
+    var body='';
+    if(b.type==='text') body='<textarea oninput="NB.editText('+i+',this.value)" placeholder="Write your notes… supports **bold**, *italic*, `code`, # headings and - lists">'+escapeHtml(b.md||'')+'</textarea><div class="nb-prev">'+md2html(b.md)+'</div>';
+    else if(b.type==='table') body='<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr>'+(b.cols||[]).map(function(c){return '<th>'+escapeHtml(c)+'</th>';}).join('')+'</tr></thead><tbody>'+(b.rows||[]).map(function(r){return '<tr>'+r.map(function(c){return '<td>'+escapeHtml(String(c))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div>';
+    else if(b.type==='image') body='<img class="nb-img" src="'+b.dataUrl+'" alt="'+escapeHtml(b.title||'figure')+'">';
+    else if(b.type==='kv') body='<div class="mbc-rows">'+(b.pairs||[]).map(function(p){return '<div class="mbc-row"><span class="mbc-rl">'+escapeHtml(p[0])+'</span><span class="mbc-rv">'+escapeHtml(String(p[1]))+'</span></div>';}).join('')+'</div>';
+    else if(b.type==='steps') body='<ol class="nb-steps">'+(b.items||[]).map(function(s){return '<li class="'+(s.done?'done':'')+'"><b>'+escapeHtml(s.t)+'</b> — '+escapeHtml(String(s.d).replace(/<[^>]+>/g,''))+'</li>';}).join('')+'</ol>';
+    return '<div class="nb-blk"><div class="nb-bhead"><span class="nb-btype">'+b.type+'</span><span class="nb-btitle">'+escapeHtml(b.title||(b.type==='text'?'Note':''))+'</span>'+
+      '<span class="nb-bctl"><button onclick="NB.move('+i+',-1)" title="Move up" aria-label="Move block up">↑</button><button onclick="NB.move('+i+',1)" title="Move down" aria-label="Move block down">↓</button><button onclick="NB.delBlock('+i+')" title="Remove" aria-label="Remove block">✕</button></span></div>'+
+      '<div class="nb-bbody">'+body+'</div></div>';
+  }
+  function renderList(){
+    var el=document.getElementById('nbList'); if(!el) return;
+    var l=all();
+    el.innerHTML=l.length?l.map(function(e){ return '<button class="mbc-item'+(e.id===cur?' active':'')+'" role="option" onclick="NB.open(\''+e.id+'\')">'+escapeHtml(e.title||'Untitled')+'<br><span style="font:10px var(--mono);color:var(--text3)">'+escapeHtml(e.date||'')+' · '+(e.blocks||[]).length+' blocks</span></button>'; }).join('')
+      :'<div class="nb-empty" style="padding:12px">No entries yet.</div>';
+    var t=document.getElementById('nbTools');
+    if(t) t.innerHTML='<div class="gel-sec">Import</div><label class="btn" style="cursor:pointer;width:100%;justify-content:center;">⬆ Import JSON<input type="file" accept="application/json,.json" style="display:none" onchange="NB.importJSON(event)"></label>';
+  }
+  function render(){
+    renderList();
+    var main=document.getElementById('nbMain'); if(!main) return;
+    var e=curEntry();
+    if(!e){ main.innerHTML='<div class="mbc-head"><h2>Lab notebook</h2><p>Assemble plate layouts, calculations, prep sheets, protocol runs and simulated gels into one dated record — then export it.</p></div><div class="nb-empty">Create an entry to start.</div>'; return; }
+    cur=e.id;
+    main.innerHTML='<div class="mbc-head"><h2>Lab notebook</h2><p>Pull results in from any module, add your own notes, then export.</p></div>'+
+      '<div class="nb-meta">'+
+        '<div class="mbc-f"><label for="nbTitle">Title</label><input id="nbTitle" value="'+escapeHtml(e.title||'')+'" oninput="NB.field(\'title\',this.value)"></div>'+
+        '<div class="mbc-f"><label for="nbDate">Date</label><input id="nbDate" type="date" value="'+escapeHtml(e.date||'')+'" oninput="NB.field(\'date\',this.value)"></div>'+
+        '<div class="mbc-f"><label for="nbAuthor">Author</label><input id="nbAuthor" value="'+escapeHtml(e.author||'')+'" oninput="NB.field(\'author\',this.value)"></div>'+
+      '</div>'+
+      '<div class="mbc-f" style="margin-bottom:12px;"><label for="nbTags">Tags (comma separated)</label><input id="nbTags" value="'+escapeHtml((e.tags||[]).join(', '))+'" oninput="NB.field(\'tags\',this.value)"></div>'+
+      '<div class="mbc-actions"><button class="btn" onclick="NB.addText()">＋ Note</button>'+
+        '<button class="btn ac" onclick="NB.pick()">＋ Pull in results</button>'+
+        '<button class="btn" onclick="NB.exp(\'md\')">⬇ Markdown</button>'+
+        '<button class="btn" onclick="NB.exp(\'html\')">⬇ HTML</button>'+
+        '<button class="btn" onclick="NB.exp(\'json\')">⬇ JSON</button>'+
+        '<button class="btn" onclick="NB.exp(\'csv\')">⬇ CSV</button>'+
+        '<button class="btn" onclick="NB.exp(\'docx\')">⬇ Word</button>'+
+        '<button class="btn" onclick="NB.print()">🖨 PDF</button>'+
+        '<button class="btn" onclick="NB.del()">🗑 Delete entry</button></div>'+
+      '<div id="nbBlocks">'+((e.blocks||[]).length?e.blocks.map(blockHtml).join(''):'<div class="nb-empty">Nothing captured yet — add a note, or pull in results from another module.</div>')+'</div>';
+  }
+
+  // ── serialisers (one model, many renderers)
+  function toMd(e){
+    var L=['# '+(e.title||'Untitled'),''];
+    L.push('*'+[e.date,e.author,(e.tags||[]).join(', ')].filter(Boolean).join(' · ')+'*','');
+    (e.blocks||[]).forEach(function(b){
+      if(b.title&&b.type!=='text') L.push('## '+b.title,'');
+      if(b.type==='text') L.push(b.md||'','');
+      else if(b.type==='table'){ L.push('| '+(b.cols||[]).join(' | ')+' |'); L.push('|'+(b.cols||[]).map(function(){return '---';}).join('|')+'|');
+        (b.rows||[]).forEach(function(r){ L.push('| '+r.map(function(c){return String(c).replace(/\|/g,'\\|');}).join(' | ')+' |'); }); L.push(''); }
+      else if(b.type==='kv'){ (b.pairs||[]).forEach(function(p){ L.push('- **'+p[0]+':** '+p[1]); }); L.push(''); }
+      else if(b.type==='steps'){ (b.items||[]).forEach(function(s,i){ L.push((i+1)+'. ['+(s.done?'x':' ')+'] **'+s.t+'** — '+String(s.d).replace(/<[^>]+>/g,'')); }); L.push(''); }
+      else if(b.type==='image'){ L.push('!['+(b.title||'figure')+']('+b.dataUrl+')',''); }
+    });
+    return L.join('\n');
+  }
+  function toHtmlBody(e){
+    var h='<h1>'+escapeHtml(e.title||'Untitled')+'</h1><div class="nb-sub">'+escapeHtml([e.date,e.author,(e.tags||[]).join(', ')].filter(Boolean).join(' · '))+'</div>';
+    (e.blocks||[]).forEach(function(b){
+      if(b.title&&b.type!=='text') h+='<h2>'+escapeHtml(b.title)+'</h2>';
+      if(b.type==='text') h+=md2html(b.md);
+      else if(b.type==='table') h+='<table><thead><tr>'+(b.cols||[]).map(function(c){return '<th>'+escapeHtml(c)+'</th>';}).join('')+'</tr></thead><tbody>'+(b.rows||[]).map(function(r){return '<tr>'+r.map(function(c){return '<td>'+escapeHtml(String(c))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>';
+      else if(b.type==='kv') h+='<table><tbody>'+(b.pairs||[]).map(function(p){return '<tr><th>'+escapeHtml(p[0])+'</th><td>'+escapeHtml(String(p[1]))+'</td></tr>';}).join('')+'</tbody></table>';
+      else if(b.type==='steps') h+='<ol>'+(b.items||[]).map(function(s){return '<li'+(s.done?' style="opacity:.6;text-decoration:line-through"':'')+'><b>'+escapeHtml(s.t)+'</b> — '+escapeHtml(String(s.d).replace(/<[^>]+>/g,''))+'</li>';}).join('')+'</ol>';
+      else if(b.type==='image') h+='<img src="'+b.dataUrl+'" alt="'+escapeHtml(b.title||'figure')+'">';
+    });
+    return h;
+  }
+  function toHtmlDoc(e){
+    return '<!doctype html><html><head><meta charset="utf-8"><title>'+escapeHtml(e.title||'Notebook entry')+'</title><style>'+
+      'body{font-family:Georgia,serif;max-width:800px;margin:32px auto;padding:0 18px;color:#1a1a1a;line-height:1.6;}'+
+      'h1{font-size:1.7rem;margin:0 0 4px;} .nb-sub{color:#666;font-size:12px;margin-bottom:20px;}'+
+      'h2{font-size:1.15rem;margin:1.4em 0 .4em;border-bottom:1px solid #ddd;padding-bottom:3px;}'+
+      'table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0;} th,td{border:1px solid #bbb;padding:6px 8px;text-align:left;}'+
+      'th{background:#f2f2f2;} img{max-width:100%;height:auto;border:1px solid #ccc;border-radius:4px;} code{background:#f2f2f2;padding:1px 4px;border-radius:3px;}'+
+      '</style></head><body>'+toHtmlBody(e)+'<hr><p style="font-size:11px;color:#888;">Generated by Dilution Designer — verify against your own records.</p></body></html>';
+  }
+  function toCsv(e){
+    var out=[];
+    (e.blocks||[]).forEach(function(b){
+      if(b.type==='table'){ out.push(['Table','Column','...'].slice(0,0)); out.push(['# '+(b.title||'table')]);
+        out.push(b.cols||[]); (b.rows||[]).forEach(function(r){ out.push(r); }); out.push([]); }
+      else if(b.type==='kv'){ out.push(['# '+(b.title||'values')]); out.push(['Key','Value']); (b.pairs||[]).forEach(function(p){ out.push(p); }); out.push([]); }
+    });
+    if(!out.length) return 'No tabular blocks in this entry\n';
+    return out.map(function(r){ return r.map(function(c){ return '"'+String(c==null?'':c).replace(/"/g,'""')+'"'; }).join(','); }).join('\n');
+  }
+
+  window.NB={
+    init:function(){ var l=all(); if(!l.length){ } else if(!cur) cur=l[0].id; render(); },
+    newEntry:function(){ var e={id:'nb'+Date.now(), title:'Experiment '+today(), date:today(), author:'', tags:[], blocks:[]};
+      var l=all(); l.unshift(e); persist(l); cur=e.id; render(); showToast('✓ New entry','green'); },
+    open:function(id){ cur=id; render(); },
+    del:function(){ var e=curEntry(); if(!e) return; if(!confirm('Delete "'+(e.title||'Untitled')+'"? This cannot be undone.')) return;
+      var l=all().filter(function(x){return x.id!==e.id;}); persist(l); cur=l.length?l[0].id:null; render(); showToast('Entry deleted'); },
+    field:function(k,v){ var e=curEntry(); if(!e) return; e[k]=(k==='tags')?String(v).split(/\s*,\s*/).filter(Boolean):v; saveEntry(e); renderList(); },
+    addText:function(){ var e=curEntry(); if(!e){ NB.newEntry(); e=curEntry(); } e.blocks.push({type:'text',md:''}); saveEntry(e); render(); },
+    editText:function(i,v){ var e=curEntry(); if(!e||!e.blocks[i]) return; e.blocks[i].md=v; saveEntry(e);
+      var prev=document.querySelectorAll('#nbBlocks .nb-prev')[[].slice.call(document.querySelectorAll('#nbBlocks .nb-blk')).findIndex(function(n,idx){return idx===i;})];
+      var blk=document.querySelectorAll('#nbBlocks .nb-blk')[i]; if(blk){ var p=blk.querySelector('.nb-prev'); if(p) p.innerHTML=md2html(v); } },
+    move:function(i,d){ var e=curEntry(); if(!e) return; var j=i+d; if(j<0||j>=e.blocks.length) return;
+      var t=e.blocks[i]; e.blocks[i]=e.blocks[j]; e.blocks[j]=t; saveEntry(e); render(); },
+    delBlock:function(i){ var e=curEntry(); if(!e) return; e.blocks.splice(i,1); saveEntry(e); render(); },
+    addBlocks:function(blocks){ var e=curEntry(); if(!e){ NB.newEntry(); e=curEntry(); }
+      e.blocks=e.blocks.concat(blocks||[]); saveEntry(e);
+      if(appMode==='notebook') render(); showToast('✓ Added '+(blocks||[]).length+' block(s) to “'+(e.title||'entry')+'”','green'); },
+    // picker: choose what to pull in
+    pick:function(src){ NB._pickModal(src||null); },
+    capture:function(src){ NB._pickModal(src); },
+    _pickModal:function(src){
+      var srcs=src?[src]:Object.keys(PROVIDERS).filter(function(k){return !!providerFn(k);});
+      if(!srcs.length){ showToast('Nothing available to capture from this module yet','warn'); return; }
+      var bg=document.createElement('div'); bg.className='nb-modal-bg'; bg.onclick=function(ev){ if(ev.target===bg) bg.remove(); };
+      bg.innerHTML='<div class="nb-modal"><h2 style="font-family:var(--serif);margin:0 0 4px;">Pull in results</h2>'+
+        '<p style="font-size:12px;color:var(--text3);margin:0 0 12px;">Tick what you want copied into this notebook entry.</p>'+
+        srcs.map(function(k){ var P=PROVIDERS[k]; var avail=!!providerFn(k);
+          return '<div class="gel-sec">'+escapeHtml(P.label)+(avail?'':' — not available yet')+'</div>'+
+            P.items.map(function(it){ return '<label class="nb-pick"><input type="checkbox" data-src="'+k+'" data-k="'+it[0]+'"'+(avail?' checked':' disabled')+'> '+escapeHtml(it[1])+'</label>'; }).join(''); }).join('')+
+        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;"><button class="btn" onclick="this.closest(\'.nb-modal-bg\').remove()">Cancel</button>'+
+        '<button class="btn ac" onclick="NB._doPick(this)">Add to entry</button></div></div>';
+      document.body.appendChild(bg);
+    },
+    _doPick:function(btn){
+      var bg=btn.closest('.nb-modal-bg'), sel={};
+      bg.querySelectorAll('input[type=checkbox]').forEach(function(cb){ if(cb.checked){ (sel[cb.dataset.src]=sel[cb.dataset.src]||{})[cb.dataset.k]=true; } });
+      var blocks=[];
+      Object.keys(sel).forEach(function(k){ var fn=providerFn(k); if(fn){ try{ blocks=blocks.concat(fn(sel[k])||[]); }catch(e){} } });
+      bg.remove();
+      if(!blocks.length){ showToast('Nothing selected','warn'); return; }
+      NB.addBlocks(blocks);
+    },
+    exp:function(kind){
+      var e=curEntry(); if(!e){ showToast('No entry to export','warn'); return; }
+      var base=(e.title||'notebook').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'')+'-'+(e.date||today());
+      if(kind==='md')   _dl(toMd(e), base+'.md','text/markdown');
+      if(kind==='html') _dl(toHtmlDoc(e), base+'.html','text/html');
+      if(kind==='json') _dl(JSON.stringify({schema:'dd-notebook-1',entry:e},null,1), base+'.json','application/json');
+      if(kind==='csv')  _dl(toCsv(e), base+'.csv','text/csv');
+      if(kind==='docx'){ if(window.NBDOCX) NBDOCX(e,base); else showToast('Word export not available','warn'); return; }
+      showToast('✓ Exported '+kind.toUpperCase(),'green');
+    },
+    importJSON:function(ev){
+      var f=ev.target.files&&ev.target.files[0]; if(!f) return;
+      var r=new FileReader();
+      r.onload=function(){ try{ var j=JSON.parse(r.result); var e=j.entry||j;
+        if(!e||!e.blocks) throw new Error('not a notebook entry');
+        e.id='nb'+Date.now(); var l=all(); l.unshift(e); persist(l); cur=e.id; render();
+        showToast('✓ Imported “'+(e.title||'entry')+'”','green');
+      }catch(err){ showToast('Import failed: '+err.message,'warn'); } ev.target.value=''; };
+      r.readAsText(f);
+    },
+    print:function(){
+      var e=curEntry(); if(!e){ showToast('No entry to print','warn'); return; }
+      var a=document.getElementById('nbPrintArea');
+      if(!a){ a=document.createElement('div'); a.id='nbPrintArea'; document.body.appendChild(a); }
+      a.innerHTML=toHtmlBody(e);
+      document.body.classList.add('print-nb');
+      window.addEventListener('afterprint',function h(){ document.body.classList.remove('print-nb'); window.removeEventListener('afterprint',h); });
+      setTimeout(function(){ window.print(); },80);
+    },
+    _md2html:md2html, _toMd:toMd, _toHtmlDoc:toHtmlDoc, _toCsv:toCsv,
+    _entries:entries, _cur:function(){return curEntry();}, _providers:PROVIDERS
+  };
+})();
+
+/* ══════════ NOTEBOOK CAPTURE PROVIDERS (one per module) ══════════ */
+// Each returns an array of notebook blocks for the ticked items. Kept out of the
+// modules themselves so the notebook stays the only place that knows the block schema.
+function _tblFrom(sel,limit){
+  var t=document.querySelector(sel); if(!t) return null;
+  var cols=[].map.call(t.querySelectorAll('thead th'),function(x){return x.textContent.trim();});
+  var rows=[].map.call(t.querySelectorAll('tbody tr'),function(tr){
+    return [].map.call(tr.querySelectorAll('td'),function(td){return td.textContent.trim();});
+  }).filter(function(r){return r.length;});
+  if(limit) rows=rows.slice(0,limit);
+  if(!cols.length&&!rows.length) return null;
+  return {cols:cols,rows:rows};
+}
+function PLATEBLK(sel){
+  var out=[], p=P(), wells=getAllWells(p);
+  if(sel.image){ try{ out.push({type:'image', title:(p.expName||'Plate map')+' — '+_fmtKey()+'-well', dataUrl:buildPlateCanvas().toDataURL('image/png')}); }catch(e){} }
+  if(sel.metrics){
+    out.push({type:'kv', title:'Experiment', pairs:[
+      ['Experiment', p.expName||'—'], ['Date', p.expDate||'—'], ['Researcher', p.researcher||'—'],
+      ['Mode', appMode==='phage'?'Phage infection':'Plasmid / induction'],
+      ['Plate', _fmtKey()+'-well ('+plates.length+' plate'+(plates.length>1?'s':'')+')'],
+      ['Wells filled', String(wells.length)]
+    ]});
+  }
+  if(sel.wells){ var t=_tblFrom('#wbody'); if(!t){ t={cols:['Well','Condition','Target','Culture (µL)','Compound (µL)','Final (µL)'],
+      rows:wells.map(function(w){ return [w.wellId,w.cond.name,String(appMode==='phage'?w.moi:(w.conc||0)),w.cultVol.toFixed(2),(appMode==='phage'?w.phageVol:w.indVol).toFixed(3),w.finalVol.toFixed(2)]; })}; }
+    out.push({type:'table', title:'Per-well volumes', cols:t.cols, rows:t.rows}); }
+  if(sel.mix){ var m=_tblFrom('#mmbody'); if(m) out.push({type:'table', title:'Master mix (+10% overage)', cols:m.cols, rows:m.rows}); }
+  if(sel.bench){ var b=document.getElementById('benchBody');
+    if(b){ var chips=[].map.call(b.querySelectorAll('.bchip'),function(c){return [c.querySelector('.bl').textContent.trim(), c.querySelector('.bv').textContent.trim()];});
+      var warns=[].map.call(b.querySelectorAll('.bench-warn'),function(w,i){return ['Check '+(i+1), w.textContent.trim()];});
+      if(chips.length||warns.length) out.push({type:'kv', title:'Bench reality check', pairs:chips.concat(warns)}); } }
+  return out;
+}
+function RPBLK(sel){
+  var out=[], sheet=document.getElementById('rpSheet'); if(!sheet) return out;
+  var title=(sheet.querySelector('.rp-title')||{}).textContent||'Reagent';
+  if(sel.sheet){
+    var t=_tblFrom('#rpSheet .rp-tbl');
+    if(t) out.push({type:'table', title:title+' — '+((document.querySelector('#rpSheet .rp-vol-badge')||{}).textContent||''), cols:['Component','Amount'], rows:t.rows.length?t.rows:[]});
+    var meta=[].map.call(sheet.querySelectorAll('.rp-meta dt'),function(dt,i){ return [dt.textContent.trim(), (sheet.querySelectorAll('.rp-meta dd')[i]||{textContent:''}).textContent.trim()]; });
+    if(meta.length) out.push({type:'kv', title:title+' — conditions', pairs:meta});
+    var notes=[].map.call(sheet.querySelectorAll('.rp-notes li'),function(li){return li.textContent.trim();});
+    if(notes.length) out.push({type:'text', title:'Notes', md:notes.map(function(n){return '- '+n;}).join('\n')});
+  }
+  if(sel.sources){ var s=sheet.querySelector('.rp-src'); if(s) out.push({type:'text', title:'Sources', md:s.textContent.trim()}); }
+  return out;
+}
+function DCBLK(sel){
+  var out=[], r=document.getElementById('dcResult'); if(!r) return out;
+  if(sel.result){
+    var big=(r.querySelector('.dc-big')||{}).textContent||'';
+    var steps=[].map.call(r.querySelectorAll('.dc-steps li'),function(li){return li.textContent.trim();});
+    var warn=[].map.call(r.querySelectorAll('.dc-warn'),function(w){return w.textContent.trim();});
+    var md=(big?'**'+big.trim()+'**\n\n':'')+steps.map(function(s,i){return (i+1)+'. '+s;}).join('\n')+(warn.length?'\n\n'+warn.map(function(w){return '> '+w;}).join('\n\n'):'');
+    out.push({type:'text', title:'Dilution', md:md});
+  }
+  return out;
+}
+function MBCBLK(sel){
+  var out=[], res=document.getElementById('mbcResult')||document.getElementById('pcrOut'); if(!res) return out;
+  var name=(document.querySelector('#mbcMain .mbc-head h2')||{}).textContent||'Calculator';
+  if(sel.result){
+    var pairs=[].map.call(res.querySelectorAll('.mbc-row'),function(row){
+      return [row.querySelector('.mbc-rl').textContent.trim(), row.querySelector('.mbc-rv').textContent.trim()]; });
+    var inputs=[].map.call(document.querySelectorAll('#mbcMain .mbc-f'),function(f){
+      var l=f.querySelector('label'), i=f.querySelector('input,select,textarea');
+      return (l&&i&&i.value)?[l.textContent.trim(), i.value]:null; }).filter(Boolean);
+    if(inputs.length) out.push({type:'kv', title:name+' — inputs', pairs:inputs});
+    if(pairs.length) out.push({type:'kv', title:name+' — result', pairs:pairs});
+    var note=(res.querySelector('.mbc-note')||{}).textContent||'';
+    if(note) out.push({type:'text', title:'', md:'*'+note.trim()+'*'});
+  }
+  if(sel.table){ var t=_tblFrom('#mbcResult .mbc-tbl')||_tblFrom('#pcrOut .mbc-tbl');
+    if(t) out.push({type:'table', title:name+' — table', cols:t.cols, rows:t.rows}); }
+  return out;
+}
+function PROTOBLK(sel){
+  var out=[], body=document.getElementById('prBody'); if(!body) return out;
+  var name=(document.querySelector('#prMain .mbc-head h2')||{}).textContent||'Protocol';
+  if(sel.reagents){ var t=_tblFrom('#prBody .mbc-tbl'); if(t) out.push({type:'table', title:name+' — you will need', cols:t.cols, rows:t.rows}); }
+  if(sel.steps){
+    var items=[].map.call(body.querySelectorAll('.pr-step'),function(li){
+      return { t:(li.querySelector('.pr-st')||{}).textContent||'', d:(li.querySelector('.pr-sd')||{}).textContent||'', done:li.classList.contains('done') }; });
+    if(items.length) out.push({type:'steps', title:name+' — procedure', items:items});
+  }
+  return out;
+}
+function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
 
 /* ══════════════════════════ PWA / OFFLINE ══════════════════════════ */
 (function(){
