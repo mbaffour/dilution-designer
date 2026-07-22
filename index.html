@@ -891,6 +891,38 @@ body.print-plate-mode .excl-bar{display:none!important;}
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+/* escapeHtml is for TEXT context only. Three other contexts take untrusted values, and every
+   one of them is reachable without a click: a #s= share link, an imported layout .json, an
+   imported notebook .json, or an imported reagent library. Escaping is not enough for a CSS
+   colour or a URL — validate the shape instead, and fall back to something inert. */
+const _COLOR_RE=/^(#[0-9a-fA-F]{3,8}|rgba?\([\d\s.,%]+\)|[a-zA-Z]{3,20})$/;
+function safeColor(c,fb){ c=String(c==null?'':c).trim(); return _COLOR_RE.test(c)?c:(fb||'#8a8a8a'); }
+/* For a value placed inside an inline handler string literal: onclick="f('HERE')".
+   Escape the JS string first, then the HTML attribute, in that order. */
+function jsAttr(s){ return escapeHtml(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")); }
+/* Only inline raster image data URLs may reach src="". svg+xml is excluded on purpose. */
+function safeDataUrl(u){ u=String(u==null?'':u).trim();
+  return /^data:image\/(png|jpeg|jpg|gif|webp);base64,[A-Za-z0-9+/=\s]*$/.test(u)?u:''; }
+/* Safari private mode and hardened profiles make localStorage throw on ACCESS, not just on
+   write — even reading it. One unguarded read at the top level aborted the whole <script>,
+   taking Reagent Prep, all 14 calculators, the 21 protocols, the gel simulator and the
+   notebook down with it while the plate planner still looked fine. Route everything here. */
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); return true; }catch(e){ return false; } }
+function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+/* One CSV cell, RFC-4180 quoted AND neutralised against spreadsheet formula injection:
+   Excel/LibreOffice/Sheets execute a cell that begins with = + - @ tab or CR, so an exported
+   notebook could run a formula on whoever opens it. Negative numbers legitimately start with
+   '-', so only prefix when the value is not a plain number — otherwise "-5" would stop
+   parsing as numeric in the spreadsheet. */
+function csvCell(c){
+  var v=String(c==null?'':c);
+  if(/^[=+\-@\t\r]/.test(v) && !/^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(v)) v="'"+v;
+  return '"'+v.replace(/"/g,'""')+'"';
+}
+let _lsWarned=false;
+function lsWarnOnce(){ if(_lsWarned) return; _lsWarned=true;
+  try{ showToast('Couldn’t save to this browser’s storage (private mode or full). Export your work to keep it.','warn',6000); }catch(e){} }
 
 /* ══════════════════════════════════════════════════════════════════
    SCIENTIFIC NOTATION — one parser + formatter for the whole app.
@@ -901,13 +933,19 @@ var SCI=(function(){
   var SUP={'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','-':'⁻'};
   var UNSUP={'⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','⁻':'-'};
   var mode='auto';
-  try{ var m=localStorage.getItem('dd_sci'); if(m==='sci'||m==='plain'||m==='auto') mode=m; }catch(e){}
+  try{ var m=lsGet('dd_sci'); if(m==='sci'||m==='plain'||m==='auto') mode=m; }catch(e){}
   function sup(n){ return String(n).split('').map(function(c){return SUP[c]!=null?SUP[c]:c;}).join(''); }
   function unsup(s){ return String(s).replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]/g,function(c){return UNSUP[c];}); }
   function parse(v){
     if(typeof v==='number') return v;
     var s=String(v==null?'':v).trim(); if(!s) return NaN;
-    s=s.replace(/,/g,'').replace(/\s+/g,'');
+    s=s.replace(/\s+/g,'');
+    // A comma means "thousands" in 1,200 but "decimal point" to the large part of the world
+    // that writes 1,5 for 1.5. Stripping every comma turned 1,5 into 15 — a silent 10x error
+    // in a tool used to mix dilutions. Only strip when the number is properly grouped.
+    if(/^[-+]?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s=s.replace(/,/g,'');   // 1,200 / 1,200,000
+    else if((s.match(/,/g)||[]).length===1)        s=s.replace(',','.');  // 1,5 -> 1.5
+    else                                           s=s.replace(/,/g,'');
     s=s.replace(/([×xX*])?10([⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)/g,function(_m,_op,d){ return 'e'+unsup(d); });  // 1.2×10⁹
     s=s.replace(/([×xX*])10\^?([-+]?\d+)/g,'e$2');                                            // 1.2x10^9
     s=s.replace(/^10\^([-+]?\d+)$/,'1e$1');   // 10^9 — caret REQUIRED, else "1000" would read as 10^00
@@ -933,7 +971,7 @@ var SCI=(function(){
     return (a>=1e6||a<1e-4)? sci(n,sig) : plain(n,sig);          // auto
   }
   function syncBtns(){ ['auto','sci','plain'].forEach(function(k){ var b=document.getElementById('sci_'+k); if(b) b.classList.toggle('active',mode===k); }); }
-  function setMode(m){ mode=m; try{localStorage.setItem('dd_sci',m);}catch(e){} syncBtns(); refresh(); }
+  function setMode(m){ mode=m; try{lsSet('dd_sci',m);}catch(e){} syncBtns(); refresh(); }
   function refresh(){
     try{
       if(appMode==='calc'&&window.MBC) MBC.recompute();
@@ -1060,20 +1098,20 @@ function setMode(m) {
 function renderPalette() {
   const div = document.getElementById('paletteList');
   div.innerHTML = palette.map(c => `
-    <div class="pal-item${activeCondId===c.id?' selected':''}" onclick="setActiveCondId('${c.id}')">
-      <span class="pal-dot" style="background:${c.color};"></span>
+    <div class="pal-item${activeCondId===c.id?' selected':''}" onclick="setActiveCondId('${jsAttr(c.id)}')">
+      <span class="pal-dot" style="background:${safeColor(c.color)};"></span>
       <span class="pal-name">${escapeHtml(c.name)}</span>
       <span class="pal-val">${fmtPalVal(c)}</span>
       <div class="pal-actions">
-        <button class="pal-icobtn" onclick="event.stopPropagation();openCondModal('${c.id}')" title="Edit">✎</button>
-        <button class="pal-icobtn" onclick="event.stopPropagation();deleteCondition('${c.id}')" title="Delete">✕</button>
+        <button class="pal-icobtn" onclick="event.stopPropagation();openCondModal('${jsAttr(c.id)}')" title="Edit">✎</button>
+        <button class="pal-icobtn" onclick="event.stopPropagation();deleteCondition('${jsAttr(c.id)}')" title="Delete">✕</button>
       </div>
     </div>`).join('');
   // update active brush display
   const cond = palette.find(c=>c.id===activeCondId);
   const dot = document.getElementById('brushDot');
   const lbl = document.getElementById('brushLabel');
-  if (cond) { dot.style.background=cond.color; lbl.textContent=cond.name+(fmtPalVal(cond)?` (${fmtPalVal(cond)})`:``); }
+  if (cond) { dot.style.background=safeColor(cond.color); lbl.textContent=cond.name+(fmtPalVal(cond)?` (${fmtPalVal(cond)})`:``); }
   else { dot.style.background='var(--border)'; lbl.textContent=activeTool==='erase'?'Erasing…':activeTool==='exclude'?'Click/drag to exclude':'Pick a condition'; }
 }
 
@@ -1093,8 +1131,15 @@ function deleteCondition(id) {
   if (palette.find(c=>c.id===id)?.builtin) return;
   snapshotForUndo(); // keep builtins
   palette = palette.filter(c=>c.id!==id);
-  // clear wells using this condition
-  for(let r=0;r<8;r++) for(let c=0;c<12;c++) if(wellAssignments[r][c]===id) wellAssignments[r][c]=null;
+  // Clear wells using this condition — across EVERY plate, at each plate's own dimensions.
+  // A fixed 8x12 sweep of only the active plate left orphaned ids behind on 384-well and
+  // on the other plates, which then inflated the well and condition counts.
+  for(let r=0;r<NR;r++) for(let c=0;c<NC;c++) if(wellAssignments[r][c]===id) wellAssignments[r][c]=null;
+  plates.forEach((pl,i)=>{
+    if(i===activePlate||!pl.assign) return;
+    for(let r=0;r<pl.assign.length;r++) for(let c=0;c<pl.assign[r].length;c++)
+      if(pl.assign[r][c]===id) pl.assign[r][c]=null;
+  });
   if (activeCondId===id) activeCondId=null;
   renderPalette(); renderPlate(); update();
 }
@@ -1197,14 +1242,16 @@ function autoFillPlate() {
 function buildFillOrder(){
   const dir=document.getElementById('fillSelect').value;
   const pos=[];
+  // Bounds come from NR/NC, not a fixed 8x12 — otherwise auto-fill can only reach the first
+  // 96 wells of a 384-well plate and silently drops the rest of the requested replicates.
   switch(dir){
-    case 'col-ttb': for(let c=0;c<12;c++)for(let r=0;r<8;r++)pos.push([r,c]);break;
-    case 'col-btt': for(let c=0;c<12;c++)for(let r=7;r>=0;r--)pos.push([r,c]);break;
-    case 'row-ltr': for(let r=0;r<8;r++)for(let c=0;c<12;c++)pos.push([r,c]);break;
-    case 'row-rtl': for(let r=0;r<8;r++)for(let c=11;c>=0;c--)pos.push([r,c]);break;
-    case 'snake':   for(let r=0;r<8;r++){if(r%2===0)for(let c=0;c<12;c++)pos.push([r,c]);else for(let c=11;c>=0;c--)pos.push([r,c]);}break;
+    case 'col-ttb': for(let c=0;c<NC;c++)for(let r=0;r<NR;r++)pos.push([r,c]);break;
+    case 'col-btt': for(let c=0;c<NC;c++)for(let r=NR-1;r>=0;r--)pos.push([r,c]);break;
+    case 'row-ltr': for(let r=0;r<NR;r++)for(let c=0;c<NC;c++)pos.push([r,c]);break;
+    case 'row-rtl': for(let r=0;r<NR;r++)for(let c=NC-1;c>=0;c--)pos.push([r,c]);break;
+    case 'snake':   for(let r=0;r<NR;r++){if(r%2===0)for(let c=0;c<NC;c++)pos.push([r,c]);else for(let c=NC-1;c>=0;c--)pos.push([r,c]);}break;
     case 'spread':  {
-      const base=[];for(let c=0;c<12;c++)for(let r=0;r<8;r++)base.push([r,c]);
+      const base=[];for(let c=0;c<NC;c++)for(let r=0;r<NR;r++)base.push([r,c]);
       const avail=base.filter(([r,c])=>!excludedWells.has(`${r},${c}`));
       const total=palette.filter(x=>x.type==='cond').length*autoReps;
       const stride=Math.max(1,Math.floor(avail.length/Math.max(total,1)));
@@ -1212,7 +1259,7 @@ function buildFillOrder(){
       avail.forEach((x,i)=>{if(i%stride!==0)pos.push(x);});
       return pos;
     }
-    default: for(let c=0;c<12;c++)for(let r=0;r<8;r++)pos.push([r,c]);
+    default: for(let c=0;c<NC;c++)for(let r=0;r<NR;r++)pos.push([r,c]);
   }
   return pos;
 }
@@ -1451,7 +1498,9 @@ function shareLink(){
     const enc=_b64e(JSON.stringify(_compactState()));
     const url=location.origin+location.pathname+'#s='+enc;
     if(url.length>60000){ showToast('Layout too large for a link — use 💾 Save instead','warn'); return; }
-    history.replaceState(null,'',url);
+    // Deliberately NOT history.replaceState(url): rewriting the address bar turned the
+    // author's own tab into a "viewing a shared layout" session, which disabled autosave
+    // and made the next reload silently revert to the share-time snapshot.
     (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject())
       .then(()=>showToast('🔗 Share link copied to clipboard','green'))
       .catch(()=>window.prompt('Copy this share link:',url));
@@ -1643,12 +1692,12 @@ function renderPlate(){
         const condId=wellAssignments[ri][ci];
         const cond=condId?palette.find(x=>x.id===condId):null;
         if(cond){
-          const tc=lum(cond.color)>0.48?'#1a1814':'#fff';
+          const tc=lum(safeColor(cond.color))>0.48?'#1a1814':'#fff';
           const valStr=appMode==='phage'?(cond.moi?`MOI ${cond.moi}`:''):((cond.conc&&cond.conc>0)?`${cond.conc}`:'');
           const d=calcWellData(ri,ci,p);
           const tipCompound=appMode==='plasmid'?`${p.inducerName}: ${d?d.indVol.toFixed(3):0} µL`:`Phage: ${d?d.phageVol.toFixed(3):0} µL`;
           const tip=`${wellId} | ${cond.name} | ${tipCompound} | Culture: ${p[appMode==='phage'?'infVol':'cultureVol']} µL | ${appMode==='phage'?'MOI '+cond.moi:((cond.conc||0)+' '+(p.units||''))}`;
-          html+=`<div class="well${isPrev?' preview':''}" style="background:${cond.color};border-color:rgba(0,0,0,0.18);color:${tc};" data-row="${ri}" data-col="${ci}" data-tip="${escapeHtml(tip)}">
+          html+=`<div class="well${isPrev?' preview':''}" style="background:${safeColor(cond.color)};border-color:rgba(0,0,0,0.18);color:${tc};" data-row="${ri}" data-col="${ci}" data-tip="${escapeHtml(tip)}">
             <span class="well-id" style="color:${tc};">${wellId}</span>
             <span class="well-label">${escapeHtml(cond.name.length>9?cond.name.substring(0,8)+'…':cond.name)}</span>
             ${showReps&&valStr?`<span class="well-val" style="color:${tc};">${valStr}</span>`:''}
@@ -1675,7 +1724,7 @@ function renderPlate(){
   const p2=P();
   document.getElementById('legend').innerHTML=
     (legendItems.length?`<div class="li" style="font-weight:700;color:var(--text3);font-size:10px;width:100%;margin-bottom:2px;">${escapeHtml(p2.inducerName||'Compound')}</div>`:'')+
-    legendItems.map(cond=>`<div class="li"><span class="ld" style="background:${cond.color};"></span>${escapeHtml(cond.name)}${fmtPalVal(cond)?` (${escapeHtml(fmtPalVal(cond))})`:''}</div>`).join('')+
+    legendItems.map(cond=>`<div class="li"><span class="ld" style="background:${safeColor(cond.color)};"></span>${escapeHtml(cond.name)}${fmtPalVal(cond)?` (${escapeHtml(fmtPalVal(cond))})`:''}</div>`).join('')+
     `<div class="li"><span class="ld" style="background:var(--well-empty);border:1px solid var(--border);"></span>empty</div>`+
     (excludedWells.size?`<div class="li"><span class="ld" style="background:repeating-linear-gradient(45deg,#ccc 0,#ccc 2px,#f5f5f5 2px,#f5f5f5 6px);border:1px solid #ccc;"></span>excluded (${excludedWells.size})</div>`:'');
   // Update excl buttons
@@ -1712,7 +1761,7 @@ function renderWTable(p,wells){
     const compCell=compVol>0?`${compVol.toFixed(3)} µL <span style="font-size:9px;color:var(--text3);">(${appMode==='phage'?'phage':src})</span>`:`<span class="badge bn">—</span>`;
     return `<tr>
       <td style="font-weight:700;">${w.wellId}</td>
-      <td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${w.cond.color};margin-right:6px;vertical-align:middle;border:1px solid rgba(0,0,0,0.12);"></span>${escapeHtml(w.cond.name)}</td>
+      <td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${safeColor(w.cond.color)};margin-right:6px;vertical-align:middle;border:1px solid rgba(0,0,0,0.12);"></span>${escapeHtml(w.cond.name)}</td>
       <td>${typeB}</td><td>${concCell}</td>
       <td>${w.cultVol>0?w.cultVol.toFixed(1):'<span class="badge bn">—</span>'}</td>
       <td>${compCell}</td>
@@ -1744,7 +1793,7 @@ function renderMasterMix(p,wells){
     const concCell=appMode==='phage'?`MOI ${g.cond.moi||0}`:`${g.cond.conc||0} ${p.units}`;
     const wellList=g.wellIds.slice(0,6).join(', ')+(g.wellIds.length>6?`… +${g.wellIds.length-6}`:``);
     return `<tr>
-      <td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${g.cond.color};margin-right:6px;vertical-align:middle;"></span>${escapeHtml(g.cond.name)}</td>
+      <td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${safeColor(g.cond.color)};margin-right:6px;vertical-align:middle;"></span>${escapeHtml(g.cond.name)}</td>
       <td>${typeB}</td>
       <td style="font-family:var(--mono);font-size:11px;">${wellList} <span style="color:var(--text3);">(n=${n})</span></td>
       <td style="font-family:var(--mono);">${concCell}</td>
@@ -1761,7 +1810,9 @@ function renderMasterMix(p,wells){
 function renderMOIPanel(p){
   if(appMode!=='phage')return;
   const condWells=[];
-  for(let r=0;r<8;r++)for(let c=0;c<12;c++){const d=calcWellData(r,c,p);if(d&&d.cond.moi>0)condWells.push(d);}
+  // NR/NC, not 8x12: on a 384-well plate a fixed sweep saw only a quarter of the wells and
+  // under-reported the phage volume 4x, while the Bench Check panel showed the correct total.
+  for(let r=0;r<NR;r++)for(let c=0;c<NC;c++){const d=calcWellData(r,c,p);if(d&&d.cond.moi>0)condWells.push(d);}
   const groups={};
   condWells.forEach(d=>{if(!groups[d.cond.id]){groups[d.cond.id]={cond:d.cond,n:0,totalPhage:0};}groups[d.cond.id].n++;groups[d.cond.id].totalPhage+=d.phageVol;});
   const items=Object.values(groups);
@@ -1769,7 +1820,7 @@ function renderMOIPanel(p){
   document.getElementById('moiGrid').innerHTML=items.length?items.map(g=>`
     <div class="moi-card">
       <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;">
-        <span style="width:12px;height:12px;border-radius:3px;background:${g.cond.color};display:inline-block;flex-shrink:0;"></span>
+        <span style="width:12px;height:12px;border-radius:3px;background:${safeColor(g.cond.color)};display:inline-block;flex-shrink:0;"></span>
         <span style="font-size:12px;font-weight:700;">${escapeHtml(g.cond.name)}</span>
       </div>
       <div class="moi-val">MOI ${g.cond.moi}</div>
@@ -1788,7 +1839,15 @@ function renderSerialDilution(){
     document.getElementById('serialSub').textContent='';
     return;
   }
-  const nSteps=Math.ceil(Math.log(stock/target)/Math.log(factor));
+  // A factor of exactly 1 makes log(factor) zero and nSteps Infinity, which hangs the tab in
+  // the loop below. This fires on the FIRST keystroke of "100", so it is easy to hit by accident.
+  if(!(factor>1)){
+    document.getElementById('serialSteps').innerHTML='<div style="padding:14px;font-family:var(--mono);font-size:11px;color:var(--text3);">Dilution factor must be greater than 1 — a factor of 1 does not dilute.</div>';
+    document.getElementById('serialSub').textContent='';
+    return;
+  }
+  // Clamp as well: a factor like 1.0000001 is >1 but yields ~46 million steps.
+  const nSteps=Math.min(60,Math.ceil(Math.log(stock/target)/Math.log(factor)));
   const transfer=Math.max(minPip,stepVol/factor);
   const diluent=transfer*(factor-1);
   const steps=[];
@@ -2006,13 +2065,15 @@ function saveToStorage(){
   if(!_ready||_sharedSession)return;
   try{
     const fields=_FIELDS.reduce((a,id)=>{const el=document.getElementById(id);if(el)a[id]=el.value;return a;},{});
-    localStorage.setItem('dd_state',JSON.stringify({v:2,appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,plates:_serializePlates(),activePlate,wellAssignments,excludedWells:[...excludedWells],palette,_condIdCounter,fields}));
-  }catch(e){}
+    // Autosave is the only thing standing between the user and losing a whole plate layout.
+    // It used to fail silently, so a full storage quota looked exactly like a working save.
+    if(!lsSet('dd_state',JSON.stringify({v:2,appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,plates:_serializePlates(),activePlate,wellAssignments,excludedWells:[...excludedWells],palette,_condIdCounter,fields}))) lsWarnOnce();
+  }catch(e){ lsWarnOnce(); }
 }
 
 function restoreFromStorage(){
   try{
-    const raw=localStorage.getItem('dd_state');if(!raw)return false;
+    const raw=lsGet('dd_state');if(!raw)return false;
     const s=JSON.parse(raw);if(!s.v)return false;
     if(s.appMode)appMode=s.appMode;
     if(s.appTheme){appTheme=s.appTheme;document.body.dataset.theme=s.appTheme;}
@@ -2078,11 +2139,12 @@ function applyValidationUI(errors,warnings){
 // WELCOME BANNER
 // ══════════════════════════════════════════════════════════════════
 function showWelcomeBanner(){
-  if(localStorage.getItem('dd_welcomed'))return;
+  if(lsGet('dd_welcomed'))return;
   document.getElementById('welcomeBanner').style.display='flex';
 }
 function dismissWelcome(){
-  localStorage.setItem('dd_welcomed','1');
+  // lsSet never throws, so the banner always hides even when storage is unavailable.
+  lsSet('dd_welcomed','1');
   const b=document.getElementById('welcomeBanner');
   b.style.transition='opacity 0.3s';b.style.opacity='0';
   setTimeout(()=>b.style.display='none',320);
@@ -2186,8 +2248,8 @@ function loadJSON(event){
 // NAMED LAYOUTS (multiple named slots in localStorage, beyond autosave)
 // ══════════════════════════════════════════════════════════════════
 const _LAYOUTS_KEY='dd_layouts';
-function _readLayouts(){try{return JSON.parse(localStorage.getItem(_LAYOUTS_KEY)||'{}')||{};}catch(e){return{};}}
-function _writeLayouts(obj){try{localStorage.setItem(_LAYOUTS_KEY,JSON.stringify(obj));}catch(e){}}
+function _readLayouts(){try{return JSON.parse(lsGet(_LAYOUTS_KEY)||'{}')||{};}catch(e){return{};}}
+function _writeLayouts(obj){try{return lsSet(_LAYOUTS_KEY,JSON.stringify(obj));}catch(e){return false;}}
 function _escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function refreshLayoutSelect(){
   const sel=document.getElementById('layoutSelect');if(!sel)return;
@@ -2204,7 +2266,9 @@ function saveNamedLayout(){
   const layouts=_readLayouts();
   if(layouts[name]&&!window.confirm(`Overwrite existing layout "${name}"?`))return;
   layouts[name]=_mkPayload();
-  _writeLayouts(layouts);
+  // Report what actually happened. This used to show a green tick unconditionally, so a
+  // failed write (quota full, private mode) looked identical to a successful save.
+  if(!_writeLayouts(layouts)){ showToast(`Couldn’t save "${name}" — browser storage is full or unavailable. Use ⬇ JSON to keep it.`,'warn',6000); return; }
   _claimSharedSession();
   refreshLayoutSelect();
   document.getElementById('layoutSelect').value=name;
@@ -2269,7 +2333,7 @@ function buildPlateCanvas(){
         ctx.restore();
       } else if(cond){
         ctx.fillStyle=cond.color;rr(x,y,WS,WS,RAD);ctx.fill();
-        const tc=lum(cond.color)>0.48?'#1a1814':'#fff';
+        const tc=lum(safeColor(cond.color))>0.48?'#1a1814':'#fff';
         if(!big){
           ctx.globalAlpha=0.5;ctx.fillStyle=tc;ctx.font='600 7px monospace';ctx.textAlign='left';ctx.textBaseline='top';
           ctx.fillText(`${ROWS[ri]}${ci+1}`,x+4,y+4);
@@ -2419,11 +2483,11 @@ function rpFinishLoad(){ rpLoaded=true; rpMergeCustom(); rpFlatten(); rpRenderCa
   // Once the real number is known, refresh the hub so the two can never disagree.
   if(appMode==='home'&&window.renderHome) renderHome(); }
 function rpFlatten(){ rpAllRecipes=[]; (rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ rpAllRecipes.push(Object.assign({_cat:c.title,_catKey:c.key}, r)); }); }); }
-function rpCustom(){ try{ return JSON.parse(localStorage.getItem('dd_reagent_custom')||'[]'); }catch(e){ return []; } }
+function rpCustom(){ try{ return JSON.parse(lsGet('dd_reagent_custom')||'[]'); }catch(e){ return []; } }
 function rpMergeCustom(){ var cust=rpCustom(); var cat=(rpLib.categories||[]).find(function(c){return c.key==='custom';}); if(cust.length){ if(!cat){ cat={key:'custom',title:'My recipes',recipes:[]}; rpLib.categories.push(cat);} cat.recipes=cust; } else if(cat){ cat.recipes=[]; } }
-function rpRenderCats(){ var el=document.getElementById('rpCatFilter'); if(!el) return; var cats=[{key:'all',title:'All',n:rpAllRecipes.length}].concat((rpLib.categories||[]).map(function(c){return {key:c.key,title:c.title,n:(c.recipes||[]).length};})).filter(function(c){return c.n>0;}); el.innerHTML=cats.map(function(c){return '<button class="rp-cat'+(rpActiveCat===c.key?' active':'')+'" onclick="rpSetCat(\''+c.key+'\')">'+escapeHtml(c.title)+' <span class="rp-catn">'+c.n+'</span></button>';}).join(''); }
+function rpRenderCats(){ var el=document.getElementById('rpCatFilter'); if(!el) return; var cats=[{key:'all',title:'All',n:rpAllRecipes.length}].concat((rpLib.categories||[]).map(function(c){return {key:c.key,title:c.title,n:(c.recipes||[]).length};})).filter(function(c){return c.n>0;}); el.innerHTML=cats.map(function(c){return '<button class="rp-cat'+(rpActiveCat===c.key?' active':'')+'" onclick="rpSetCat(\''+jsAttr(c.key)+'\')">'+escapeHtml(c.title)+' <span class="rp-catn">'+c.n+'</span></button>';}).join(''); }
 function rpSetCat(k){ rpActiveCat=k; rpRenderCats(); rpRenderList(); }
-function rpRenderList(){ var q=(document.getElementById('rpSearch').value||'').trim().toLowerCase(); var list=rpAllRecipes.filter(function(r){return rpActiveCat==='all'||r._catKey===rpActiveCat;}); if(q) list=list.filter(function(r){ return (r.name+' '+(r.aka||[]).join(' ')+' '+(r.summary||'')+' '+r._cat).toLowerCase().indexOf(q)>=0; }); var el=document.getElementById('rpList'); if(!list.length){ el.innerHTML='<div class="rp-empty" style="padding:16px;">No matches.</div>'; return; } el.innerHTML=list.map(function(r){ return '<button class="rp-item'+(rpSelectedId===r.id?' active':'')+'" role="option" onclick="rpSelect(\''+r.id+'\')"><div class="rp-item-name">'+escapeHtml(r.name)+'</div><div class="rp-item-sum">'+escapeHtml(r.summary||r._cat)+'</div></button>'; }).join(''); }
+function rpRenderList(){ var q=(document.getElementById('rpSearch').value||'').trim().toLowerCase(); var list=rpAllRecipes.filter(function(r){return rpActiveCat==='all'||r._catKey===rpActiveCat;}); if(q) list=list.filter(function(r){ return (r.name+' '+(r.aka||[]).join(' ')+' '+(r.summary||'')+' '+r._cat).toLowerCase().indexOf(q)>=0; }); var el=document.getElementById('rpList'); if(!list.length){ el.innerHTML='<div class="rp-empty" style="padding:16px;">No matches.</div>'; return; } el.innerHTML=list.map(function(r){ return '<button class="rp-item'+(rpSelectedId===r.id?' active':'')+'" role="option" onclick="rpSelect(\''+jsAttr(r.id)+'\')"><div class="rp-item-name">'+escapeHtml(r.name)+'</div><div class="rp-item-sum">'+escapeHtml(r.summary||r._cat)+'</div></button>'; }).join(''); }
 function rpSelect(id){ rpSelectedId=id; rpRenderList(); rpCompute(); }
 function rpVolumeMl(){ var v=parseFloat(document.getElementById('rpVolume').value)||0; var u=document.getElementById('rpVolUnit').value; return u==='L'?v*1000:u==='uL'?v/1000:v; }
 function rpConcCanon(value,unit){ var u=(unit||'').trim().toLowerCase().replace(/µ/g,'u'); var mv={'mg/ml':1,'ug/ml':0.001,'g/ml':1000,'ng/ml':1e-6,'g/l':1,'mg/l':0.001,'ug/l':1e-6,'ug/ul':1,'mg/ul':1000,'ng/ul':0.001}; var mo={'m':1000,'mm':1,'um':0.001,'nm':1e-6,'pm':1e-9}; if(mv[u]!=null) return {fam:'massvol',val:value*mv[u]}; if(mo[u]!=null) return {fam:'molar',val:value*mo[u]}; if(u==='x'||u==='fold') return {fam:'fold',val:value}; if(u.indexOf('%')>=0) return {fam:'pct',val:value}; if(u==='u/ml'||u==='units/ml') return {fam:'act',val:value}; return null; }
@@ -2445,7 +2509,7 @@ function rpCompute(){ var r=rpAllRecipes.find(function(x){return x.id===rpSelect
 function rpCopy(){ if(!rpLastText){ showToast('Pick a recipe first','warn'); return; } (navigator.clipboard?navigator.clipboard.writeText(rpLastText):Promise.reject()).then(function(){ showToast('Prep sheet copied'); }).catch(function(){ var ta=document.createElement('textarea'); ta.value=rpLastText; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy'); showToast('Prep sheet copied');}catch(e){showToast('Copy failed','warn');} ta.remove(); }); }
 function rpPrint(){ var sheet=document.getElementById('rpSheet'); if(!rpSelectedId){ showToast('Pick a recipe first','warn'); return; } var w=window.open('','_blank'); if(!w){ showToast('Pop-up blocked','warn'); return; } w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Prep sheet</title><style>body{font-family:Georgia,serif;max-width:640px;margin:24px auto;padding:0 16px;color:#1a1a1a;}h2{margin:0 0 6px;}table{width:100%;border-collapse:collapse;margin:10px 0;}td{padding:6px 4px;border-bottom:1px solid #ddd;vertical-align:top;}.rp-camt{text-align:right;white-space:nowrap;}dl{display:grid;grid-template-columns:130px 1fr;gap:3px 10px;font-size:13px;}dt{font-weight:700;}dd{margin:0;}.rp-cdetail,.rp-cnote,.rp-src{font-size:11px;color:#666;}.rp-chaz{color:#b00;font-size:11px;}small{color:#888;}</style></head><body>'+sheet.innerHTML+'<p><small>Generated by Dilution Designer · verify against your lab protocol.</small></p></body></html>'); w.document.close(); w.focus(); setTimeout(function(){ w.print(); }, 250); }
 function rpExportLibrary(){ var data=JSON.stringify({version:(rpLib&&rpLib.version)||'1.0',categories:(rpLib?rpLib.categories:[])},null,1); var blob=new Blob([data],{type:'application/json'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='reagent-library.json'; a.click(); setTimeout(function(){URL.revokeObjectURL(a.href);},1000); showToast('Library exported'); }
-function rpImportLibrary(ev){ var f=ev.target.files&&ev.target.files[0]; if(!f) return; var rd=new FileReader(); rd.onload=function(){ try{ var d=JSON.parse(rd.result); var recipes=[]; if(Array.isArray(d)) recipes=d; else if(d.categories) recipes=d.categories.reduce(function(a,c){return a.concat(c.recipes||[]);},[]); else if(d.recipes) recipes=d.recipes; if(!recipes.length) throw new Error('no recipes found'); var cust=rpCustom(); var byId={}; cust.forEach(function(r){byId[r.id]=r;}); recipes.forEach(function(r){ if(r&&r.id&&r.name) byId[r.id]=r; }); var merged=Object.keys(byId).map(function(k){return byId[k];}); localStorage.setItem('dd_reagent_custom',JSON.stringify(merged)); rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes'; showToast('Imported '+recipes.length+' recipe(s)'); }catch(e){ showToast('Import failed: '+e.message,'warn'); } ev.target.value=''; }; rd.readAsText(f); }
+function rpImportLibrary(ev){ var f=ev.target.files&&ev.target.files[0]; if(!f) return; var rd=new FileReader(); rd.onload=function(){ try{ var d=JSON.parse(rd.result); var recipes=[]; if(Array.isArray(d)) recipes=d; else if(d.categories) recipes=d.categories.reduce(function(a,c){return a.concat(c.recipes||[]);},[]); else if(d.recipes) recipes=d.recipes; if(!recipes.length) throw new Error('no recipes found'); var cust=rpCustom(); var byId={}; cust.forEach(function(r){byId[r.id]=r;}); recipes.forEach(function(r){ if(r&&r.id&&r.name) byId[r.id]=r; }); var merged=Object.keys(byId).map(function(k){return byId[k];}); lsSet('dd_reagent_custom',JSON.stringify(merged)); rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes'; showToast('Imported '+recipes.length+' recipe(s)'); }catch(e){ showToast('Import failed: '+e.message,'warn'); } ev.target.value=''; }; rd.readAsText(f); }
 function rpAddCustom(){
   var bg=document.createElement('div'); bg.className='rp-modal-bg'; bg.onclick=function(e){ if(e.target===bg) bg.remove(); };
   bg.innerHTML='<div class="rp-modal"><h2 style="margin:0 0 4px;font-family:var(--serif,Georgia,serif);">Add a recipe</h2><p style="font-size:12px;color:var(--text3,#8a8172);margin:0 0 12px;">Saved in this browser. Each component: pick a type and fill the amount.</p>'+
@@ -2459,7 +2523,9 @@ function rpAddCustom(){
   document.body.appendChild(bg); rpAddCompRow(); rpAddCompRow();
 }
 function rpAddCompRow(){ var box=document.getElementById('rcRows'); if(!box) return; var row=document.createElement('div'); row.className='rc-row'; row.style.cssText='display:grid;grid-template-columns:1fr 110px 1fr 24px;gap:5px;margin-bottom:5px;align-items:center;'; row.innerHTML='<input class="rc-cn" placeholder="component"><select class="rc-ct"><option value="gL">g/L</option><option value="M">molarity+MW</option><option value="pctwv">% w/v</option><option value="pctvv">% v/v</option><option value="stock">from stock</option></select><input class="rc-cv" placeholder="value"><button class="btn" style="padding:2px 6px;" onclick="this.parentNode.remove()" title="remove">✕</button>'; box.appendChild(row); }
-function rpSaveCustom(){ var name=(document.getElementById('rcName').value||'').trim(); if(!name){ showToast('Name is required','warn'); return; } var comps=[]; document.querySelectorAll('#rcRows .rc-row').forEach(function(row){ var cn=(row.querySelector('.rc-cn').value||'').trim(); var ct=row.querySelector('.rc-ct').value; var cv=(row.querySelector('.rc-cv').value||'').trim(); if(!cn) return; if(ct==='gL'){ comps.push({name:cn,gramsPerLiter:parseFloat(cv)||0}); } else if(ct==='M'){ var p=cv.split(/[,;\s]+/).filter(Boolean); comps.push({name:cn,molarity_M:parseFloat(p[0])||0,mw_gmol:parseFloat(p[1])||0}); } else if(ct==='pctwv'){ comps.push({name:cn,percent:{value:parseFloat(cv)||0,type:'w/v'}}); } else if(ct==='pctvv'){ comps.push({name:cn,percent:{value:parseFloat(cv)||0,type:'v/v'}}); } else if(ct==='stock'){ var q=cv.split(/[,;]+/); comps.push({name:cn,note:'from stock: '+cv,fromStock:null}); if(!cv) comps[comps.length-1].note='from stock (add details)'; } }); if(!comps.length){ showToast('Add at least one component','warn'); return; } var rec={ id:'custom-'+Date.now(), name:name, summary:(document.getElementById('rcSum').value||'').trim()||'Custom recipe', components:comps, solvent:(document.getElementById('rcSolvent').value||'').trim(), sterilization:(document.getElementById('rcSteril').value||'').trim(), notes:['Custom recipe added by you.'], sources:[{title:'My lab protocol',license:'custom'}] }; var cust=rpCustom(); cust.push(rec); localStorage.setItem('dd_reagent_custom',JSON.stringify(cust)); rpMergeCustom(); rpFlatten(); rpActiveCat='custom'; rpSelectedId=rec.id; rpRenderCats(); rpRenderList(); rpCompute(); var bg=document.querySelector('.rp-modal-bg'); if(bg) bg.remove(); showToast('Recipe saved'); }
+function rpSaveCustom(){ var name=(document.getElementById('rcName').value||'').trim(); if(!name){ showToast('Name is required','warn'); return; } var comps=[]; document.querySelectorAll('#rcRows .rc-row').forEach(function(row){ var cn=(row.querySelector('.rc-cn').value||'').trim(); var ct=row.querySelector('.rc-ct').value; var cv=(row.querySelector('.rc-cv').value||'').trim(); if(!cn) return; if(ct==='gL'){ comps.push({name:cn,gramsPerLiter:parseFloat(cv)||0}); } else if(ct==='M'){ var p=cv.split(/[,;\s]+/).filter(Boolean); comps.push({name:cn,molarity_M:parseFloat(p[0])||0,mw_gmol:parseFloat(p[1])||0}); } else if(ct==='pctwv'){ comps.push({name:cn,percent:{value:parseFloat(cv)||0,type:'w/v'}}); } else if(ct==='pctvv'){ comps.push({name:cn,percent:{value:parseFloat(cv)||0,type:'v/v'}}); } else if(ct==='stock'){ var q=cv.split(/[,;]+/); comps.push({name:cn,note:'from stock: '+cv,fromStock:null}); if(!cv) comps[comps.length-1].note='from stock (add details)'; } }); if(!comps.length){ showToast('Add at least one component','warn'); return; } var rec={ id:'custom-'+Date.now(), name:name, summary:(document.getElementById('rcSum').value||'').trim()||'Custom recipe', components:comps, solvent:(document.getElementById('rcSolvent').value||'').trim(), sterilization:(document.getElementById('rcSteril').value||'').trim(), notes:['Custom recipe added by you.'], sources:[{title:'My lab protocol',license:'custom'}] }; var cust=rpCustom(); cust.push(rec);
+ if(!lsSet('dd_reagent_custom',JSON.stringify(cust))){ showToast('Couldn’t save the recipe — browser storage is full or unavailable.','warn',6000); return; }
+ rpMergeCustom(); rpFlatten(); rpActiveCat='custom'; rpSelectedId=rec.id; rpRenderCats(); rpRenderList(); rpCompute(); var bg=document.querySelector('.rp-modal-bg'); if(bg) bg.remove(); showToast('Recipe saved'); }
 
 /* ══════════════════════════ DILUTION & MOLARITY CALCULATOR ══════════════════════════ */
 (function(){
@@ -2975,8 +3041,12 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       ],
       compute:function(v){
         if(!(v.r>0&&v.value>0)) return null;
-        if(v.mode==='rpm2rcf'){ var rcf=1.118e-5*v.r*v.value*v.value; return {rows:[{label:'RCF',value:intc(rcf)+' × g',flag:'ok'}], note:'RCF = 1.118×10⁻⁵ × r(mm) × RPM²'}; }
-        var rpm=Math.sqrt(v.value/(1.118e-5*v.r)); return {rows:[{label:'RPM',value:intc(rpm)+' rpm',flag:'ok'}], note:'RPM = √(RCF ÷ (1.118×10⁻⁵ × r))'};
+        // The 1.118×10⁻⁵ constant is defined for radius in CENTIMETRES (RCF = 1.118e-5 · r(cm) · N²).
+        // The field asks for mm because rotor specs are published in mm, so convert here.
+        // Check: Eppendorf 5424, r = 84 mm, 15 000 rpm → 1.118e-5 × 8.4 × 15000² = 21 130 × g, its rated value.
+        var rcm=v.r/10;
+        if(v.mode==='rpm2rcf'){ var rcf=1.118e-5*rcm*v.value*v.value; return {rows:[{label:'RCF',value:intc(rcf)+' × g',flag:'ok'}], note:'RCF = 1.118×10⁻⁵ × r(cm) × RPM²  — radius entered in mm, converted to cm'}; }
+        var rpm=Math.sqrt(v.value/(1.118e-5*rcm)); return {rows:[{label:'RPM',value:intc(rpm)+' rpm',flag:'ok'}], note:'RPM = √(RCF ÷ (1.118×10⁻⁵ × r(cm)))  — radius entered in mm, converted to cm'};
       } }
   ];
   var byId={}; CALCS.forEach(function(c){ byId[c.id]=c; });
@@ -3113,7 +3183,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     });
   }
   function recompute(){ var calc=byId[MBC._cur]; if(!calc||calc.custom)return; var v=gather(calc); updateEchoes(calc,v); var res; try{ res=calc.compute(v); }catch(e){ res={warn:['Check your inputs.']}; } renderResult(calc,res); }
-  function openCalc(id){ var calc=byId[id]; if(!calc)return; MBC._cur=id; try{localStorage.setItem('mbc_last',id);}catch(e){} renderNav();
+  function openCalc(id){ var calc=byId[id]; if(!calc)return; MBC._cur=id; try{lsSet('mbc_last',id);}catch(e){} renderNav();
     var m=document.getElementById('mbcMain'); if(!m)return;
     if(calc.custom){ m.innerHTML='<div class="mbc-head"><h2>'+escapeHtml(calc.name)+'</h2><p>'+escapeHtml(calc.blurb||'')+'</p></div><div id="mbcCustom"></div>'; calc.custom(document.getElementById('mbcCustom')); return; }
     m.innerHTML='<div class="mbc-head"><h2>'+escapeHtml(calc.name)+'</h2><p>'+escapeHtml(calc.blurb||'')+'</p></div>'+
@@ -3129,7 +3199,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     CALCS.forEach(function(c){ if(q && (c.name+' '+(c.tags||'')+' '+(c.blurb||'')).toLowerCase().indexOf(q)<0) return; if(!groups[c.group]){groups[c.group]=[];order.push(c.group);} groups[c.group].push(c); });
     el.innerHTML=order.map(function(g){ return '<div class="mbc-group">'+escapeHtml(g)+'</div>'+groups[g].map(function(c){ return '<button class="mbc-item'+(c.id===MBC._cur?' active':'')+'" role="option" onclick="MBC.open(\''+c.id+'\')">'+escapeHtml(c.name)+'</button>'; }).join(''); }).join('')||'<div class="mbc-empty" style="padding:12px">No matches.</div>';
   }
-  function initCalc(){ var last=(MBC._cur&&byId[MBC._cur])?MBC._cur:null; if(!last){ try{last=localStorage.getItem('mbc_last');}catch(e){} } if(!byId[last]) last=CALCS[0].id; renderNav(); openCalc(last); }
+  function initCalc(){ var last=(MBC._cur&&byId[MBC._cur])?MBC._cur:null; if(!last){ try{last=lsGet('mbc_last');}catch(e){} } if(!byId[last]) last=CALCS[0].id; renderNav(); openCalc(last); }
 
   // ---------- self-test harness (?selftest=1) ----------
   // Understands plain, e-notation and superscript forms (1.2 × 10⁹) so the tests
@@ -3150,7 +3220,12 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       ['a260',{a260:1,factor:'50',cf:50,dil:1,path:1,target:20,fvol:50},[['Take sample',20,0.1],['Add diluent',30,0.1]]],
       ['pctmolar',{mw:58.44,hydrate:0,purity:100,mode:'molarity',value:5,vol:1000},[['% (w/v)',29.22,0.05],['mg/mL',292.2,0.5],['Weigh out',292.2,0.5]]],
       ['pctmolar',{mw:58.44,hydrate:0,purity:100,mode:'pct',value:0.9,vol:100},[['mg/mL',9,0.05]]],
-      ['rcf',{r:85,mode:'rpm2rcf',value:13000},[['RCF',160601,50]]],
+      // Anchored to a published instrument spec, NOT to our own output: Eppendorf 5424,
+      // r = 84 mm, 15 000 rpm is rated 21 130 × g. The previous expectation here was
+      // 160 601 — copied from the buggy implementation, so the suite validated the bug.
+      ['rcf',{r:84,mode:'rpm2rcf',value:15000},[['RCF',21130,30]]],
+      ['rcf',{r:85,mode:'rpm2rcf',value:13000},[['RCF',16060,20]]],
+      ['rcf',{r:85,mode:'rcf2rpm',value:16060},[['RPM',13000,25]]],
       ['od600',{od:0.6,factor:8e8,dil:1,targetOD:0.1,fvol:10},[['Density',4.8e8,1e6],['Take culture',1.667,0.01],['Add media',8.333,0.01]]],
       ['moivol',{titer:1e10,cells:5e8,infvol:1,moi:0.1},[['Add phage stock',5,0.05],['% cells infected',9.516,0.1]]],
       ['primer',{nmol:25,stock:100,work:10,wvol:100},[['Resuspend in',250,0.5]]],
@@ -3951,7 +4026,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     PROTO._txt=txt.join('\n');
   }
   function open(id){
-    var pr=pById[id]; if(!pr)return; cur=id; try{localStorage.setItem('pr_last',id);}catch(e){}
+    var pr=pById[id]; if(!pr)return; cur=id; try{lsSet('pr_last',id);}catch(e){}
     renderNav();
     var m=document.getElementById('prMain'); if(!m)return;
     m.innerHTML='<div class="mbc-head"><h2>'+escapeHtml(pr.name)+'</h2><p>'+escapeHtml(pr.blurb||'')+'</p></div>'+
@@ -3970,7 +4045,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     el.innerHTML=order.map(function(g){ return '<div class="mbc-group">'+escapeHtml(g)+'</div>'+groups[g].map(function(p){ return '<button class="mbc-item'+(p.id===cur?' active':'')+'" role="option" onclick="PROTO.open(\''+p.id+'\')">'+escapeHtml(p.name)+'</button>'; }).join(''); }).join('')||'<div class="mbc-empty" style="padding:12px">No matches.</div>';
   }
   window.PROTO={
-    init:function(){ var last=null; try{last=localStorage.getItem('pr_last');}catch(e){} if(!pById[last]) last=PROTOCOLS[0].id; renderNav(); open(last); },
+    init:function(){ var last=null; try{last=lsGet('pr_last');}catch(e){} if(!pById[last]) last=PROTOCOLS[0].id; renderNav(); open(last); },
     open:open, filter:renderNav, recompute:renderBody,
     tick:function(i,on){ done[cur+'_'+i]=on; var el=document.getElementById('prstep_'+i); if(el) el.classList.toggle('done',on); },
     reset:function(){ Object.keys(done).forEach(function(k){ if(k.indexOf(cur+'_')===0) delete done[k]; }); renderBody(); },
@@ -4005,7 +4080,11 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   var LADDERS=[
    {id:'neb-1kb', v:'NEB', t:'dna', n:'1 kb DNA Ladder (N3232)', b:[10000,8000,6000,5000,4000,3000,2000,1500,1000,500], ref:[3000]},
    {id:'neb-1kbplus', v:'NEB', t:'dna', n:'1 kb Plus DNA Ladder (N3200)', b:[10000,8000,6000,5000,4000,3000,2000,1500,1200,1000,900,800,700,600,500,400,300,200,100], ref:[3000,1000]},
-   {id:'neb-2log', v:'NEB', t:'dna', n:'2-Log DNA Ladder (N0550)', b:[10000,8000,6000,5000,4000,3000,2000,1500,1200,1000,500,400,300,200,100], ref:[3000,1000]},
+   // N0550 is the Quick-Load Purple version and was formerly sold as "Quick-Load Purple 2-Log".
+   // NEB renamed the 2-Log ladder to "1 kb Plus" with no change to the formulation, so this
+   // carries the same 19 bands as N3200 above. The old entry here was missing 600-900 bp,
+   // leaving a false blank across that whole region of the simulated gel.
+   {id:'neb-2log', v:'NEB', t:'dna', n:'Quick-Load Purple 1 kb Plus / 2-Log (N0550)', b:[10000,8000,6000,5000,4000,3000,2000,1500,1200,1000,900,800,700,600,500,400,300,200,100], ref:[3000,1000,500]},
    {id:'neb-100bp', v:'NEB', t:'dna', n:'100 bp DNA Ladder (N3231)', b:[1517,1200,1000,900,800,700,600,500,400,300,200,100], ref:[500]},
    {id:'thermo-gr1kb', v:'Thermo', t:'dna', n:'GeneRuler 1 kb (SM0311)', b:[10000,8000,6000,5000,4000,3500,3000,2500,2000,1500,1000,750,500,250], ref:[6000,3000,1000]},
    {id:'thermo-gr1kbplus', v:'Thermo', t:'dna', n:'GeneRuler 1 kb Plus (SM1331)', b:[20000,10000,7000,5000,4000,3000,2000,1500,1000,700,500,400,300,200,75], ref:[5000,1500,500]},
@@ -4014,13 +4093,16 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
    {id:'promega-1kb', v:'Promega', t:'dna', n:'1 kb DNA Ladder (G5711)', b:[10000,8000,6000,5000,4000,3000,2500,2000,1500,1000,750,500,250], ref:[3000,1000]},
    {id:'promega-100bp', v:'Promega', t:'dna', n:'100 bp DNA Ladder (G2101)', b:[1500,1000,900,800,700,600,500,400,300,200,100], ref:[500]},
    {id:'neb-color-p7712', v:'NEB', t:'protein', n:'Color Prestained, Broad Range (P7712)', b:[245,180,135,100,75,63,48,35,25,20,17,11], ref:[75,25]},
-   {id:'neb-blue-p7706', v:'NEB', t:'protein', n:'Blue Prestained, Broad Range (P7706)', b:[175,80,58,46,30,23,17,7], ref:[46]},
+   // These 8 bands are P7708's (MBP-β-gal 175, MBP-paramyosin 80, MBP-CBD 58, CBD-Mxe
+   // Intein-2CBD 46, CBD-Mxe Intein 30, CBD-BmFKBP13 25, lysozyme 17, aprotinin 7), not
+   // P7706's — P7706 is an 11-band 11-190 kDa standard. The 25 kDa band was mistyped as 23.
+   {id:'neb-blue-p7706', v:'NEB', t:'protein', n:'Prestained Protein Marker, Broad Range (P7708)', b:[175,80,58,46,30,25,17,7], ref:[46]},
    {id:'thermo-pageruler', v:'Thermo', t:'protein', n:'PageRuler Prestained (26616)', b:[180,130,100,70,55,40,35,25,15,10], ref:[70]},
    {id:'thermo-pagerulerplus', v:'Thermo', t:'protein', n:'PageRuler Plus Prestained (26619)', b:[250,130,100,70,55,35,25,15,10], ref:[70,25]},
    {id:'biorad-precision', v:'Bio-Rad', t:'protein', n:'Precision Plus Dual Color (1610374)', b:[250,150,100,75,50,37,25,20,15,10], ref:[75,25]},
    {id:'biorad-kaleido', v:'Bio-Rad', t:'protein', n:'Precision Plus Kaleidoscope (1610375)', b:[250,150,100,75,50,37,25,20,15,10], ref:[75,25]}
   ];
-  function customLadders(){ try{ return JSON.parse(localStorage.getItem('dd_gel_ladders')||'[]'); }catch(e){ return []; } }
+  function customLadders(){ try{ return JSON.parse(lsGet('dd_gel_ladders')||'[]'); }catch(e){ return []; } }
   function allLadders(){ return LADDERS.concat(customLadders()); }
 
   // ── Resolving ranges. Rf is linear in log10(size) across the range: this is a planning
@@ -4044,8 +4126,8 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   var S=null;
   function defState(){ return { type:'dna', pct:'1', ladder:'neb-1kb', look:'dark',
     lanes:[ {name:'Sample 1', sizes:'5000, 3000, 1000'}, {name:'Sample 2', sizes:'4200, 4000'} ] }; }
-  function load(){ try{ var j=JSON.parse(localStorage.getItem('dd_gel')||'null'); if(j&&j.lanes) return j; }catch(e){} return defState(); }
-  function save(){ try{ localStorage.setItem('dd_gel',JSON.stringify(S)); }catch(e){} }
+  function load(){ try{ var j=JSON.parse(lsGet('dd_gel')||'null'); if(j&&j.lanes) return j; }catch(e){} return defState(); }
+  function save(){ try{ lsSet('dd_gel',JSON.stringify(S)); }catch(e){} }
 
   function parseSizes(str){ return String(str||'').split(/[,;\s]+/).map(function(x){return SCI.parse(x);}).filter(function(n){return isFinite(n)&&n>0;}); }
   function unit(){ return S.type==='dna'?'bp':'kDa'; }
@@ -4241,14 +4323,14 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       if(!n||!b.length){ showToast('Give the ladder a name and some band sizes','warn'); return; }
       var list=customLadders(); var id='cust-'+Date.now();
       list.push({id:id, v:'Custom', t:S.type, n:n, b:b, ref:[]});
-      try{ localStorage.setItem('dd_gel_ladders',JSON.stringify(list)); }catch(e){}
+      try{ lsSet('dd_gel_ladders',JSON.stringify(list)); }catch(e){}
       S.ladder=id; renderControls(); render(); showToast('✓ Ladder saved','green');
     },
     png:function(){ var c=buildCanvas(); c.toBlob(function(bl){ var a=document.createElement('a');
       a.href=URL.createObjectURL(bl); a.download='gel-'+(S.type)+'-'+S.pct+'.png'; a.click();
       setTimeout(function(){URL.revokeObjectURL(a.href);},1000); showToast('✓ Gel PNG exported','green'); },'image/png'); },
     csv:function(){ var rows=bandTable(computeLanes());
-      var csv='Lane,Size,Rf,Status\n'+rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(',');}).join('\n');
+      var csv='Lane,Size,Rf,Status\n'+rows.map(function(r){return r.map(function(c){return csvCell(c);}).join(',');}).join('\n');
       _dl(csv,'gel-bands.csv','text/csv'); showToast('✓ Band table exported','green'); },
     copy:function(){ dcCopyText(GEL._txt); },
     toNotebook:function(){ if(!window.NB){ showToast('Notebook not ready','warn'); return; } NB.capture('gel'); },
@@ -4331,8 +4413,8 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   }
 
   // ── storage
-  function all(){ try{ return JSON.parse(localStorage.getItem('dd_notebook')||'[]'); }catch(e){ return []; } }
-  function persist(list){ if(window._sharedSession) return; try{ localStorage.setItem('dd_notebook',JSON.stringify(list)); }catch(e){ showToast('Notebook too large for local storage — export it','warn'); } }
+  function all(){ try{ return JSON.parse(lsGet('dd_notebook')||'[]'); }catch(e){ return []; } }
+  function persist(list){ if(window._sharedSession) return; try{ lsSet('dd_notebook',JSON.stringify(list)); }catch(e){ showToast('Notebook too large for local storage — export it','warn'); } }
   var cur=null;
   function entries(){ return all(); }
   function curEntry(){ var l=all(); return l.filter(function(e){return e.id===cur;})[0]||l[0]||null; }
@@ -4359,10 +4441,10 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     var body='';
     if(b.type==='text') body='<textarea oninput="NB.editText('+i+',this.value)" placeholder="Write your notes… supports **bold**, *italic*, `code`, # headings and - lists">'+escapeHtml(b.md||'')+'</textarea><div class="nb-prev">'+md2html(b.md)+'</div>';
     else if(b.type==='table') body='<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr>'+(b.cols||[]).map(function(c){return '<th>'+escapeHtml(c)+'</th>';}).join('')+'</tr></thead><tbody>'+(b.rows||[]).map(function(r){return '<tr>'+r.map(function(c){return '<td>'+escapeHtml(String(c))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div>';
-    else if(b.type==='image') body='<img class="nb-img" src="'+b.dataUrl+'" alt="'+escapeHtml(b.title||'figure')+'">';
+    else if(b.type==='image') body='<img class="nb-img" src="'+safeDataUrl(b.dataUrl)+'" alt="'+escapeHtml(b.title||'figure')+'">';
     else if(b.type==='kv') body='<div class="mbc-rows">'+(b.pairs||[]).map(function(p){return '<div class="mbc-row"><span class="mbc-rl">'+escapeHtml(p[0])+'</span><span class="mbc-rv">'+escapeHtml(String(p[1]))+'</span></div>';}).join('')+'</div>';
     else if(b.type==='steps') body='<ol class="nb-steps">'+(b.items||[]).map(function(s){return '<li class="'+(s.done?'done':'')+'"><b>'+escapeHtml(s.t)+'</b> — '+escapeHtml(String(s.d).replace(/<[^>]+>/g,''))+'</li>';}).join('')+'</ol>';
-    return '<div class="nb-blk"><div class="nb-bhead"><span class="nb-btype">'+b.type+'</span><span class="nb-btitle">'+escapeHtml(b.title||(b.type==='text'?'Note':''))+'</span>'+
+    return '<div class="nb-blk"><div class="nb-bhead"><span class="nb-btype">'+escapeHtml(b.type)+'</span><span class="nb-btitle">'+escapeHtml(b.title||(b.type==='text'?'Note':''))+'</span>'+
       '<span class="nb-bctl"><button onclick="NB.move('+i+',-1)" title="Move up" aria-label="Move block up">↑</button><button onclick="NB.move('+i+',1)" title="Move down" aria-label="Move block down">↓</button><button onclick="NB.delBlock('+i+')" title="Remove" aria-label="Remove block">✕</button></span></div>'+
       '<div class="nb-bbody">'+body+'</div></div>';
   }
@@ -4406,7 +4488,9 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     (e.blocks||[]).forEach(function(b){
       if(b.title&&b.type!=='text') L.push('## '+b.title,'');
       if(b.type==='text') L.push(b.md||'','');
-      else if(b.type==='table'){ L.push('| '+(b.cols||[]).join(' | ')+' |'); L.push('|'+(b.cols||[]).map(function(){return '---';}).join('|')+'|');
+      else if(b.type==='table'){ // pipes must be escaped in the HEADER too, or the column count
+        // stops matching the separator row and every viewer renders a broken table.
+        L.push('| '+(b.cols||[]).map(function(c){return String(c).replace(/\|/g,'\\|');}).join(' | ')+' |'); L.push('|'+(b.cols||[]).map(function(){return '---';}).join('|')+'|');
         (b.rows||[]).forEach(function(r){ L.push('| '+r.map(function(c){return String(c).replace(/\|/g,'\\|');}).join(' | ')+' |'); }); L.push(''); }
       else if(b.type==='kv'){ (b.pairs||[]).forEach(function(p){ L.push('- **'+p[0]+':** '+p[1]); }); L.push(''); }
       else if(b.type==='steps'){ (b.items||[]).forEach(function(s,i){ L.push((i+1)+'. ['+(s.done?'x':' ')+'] **'+s.t+'** — '+String(s.d).replace(/<[^>]+>/g,'')); }); L.push(''); }
@@ -4422,7 +4506,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       else if(b.type==='table') h+='<table><thead><tr>'+(b.cols||[]).map(function(c){return '<th>'+escapeHtml(c)+'</th>';}).join('')+'</tr></thead><tbody>'+(b.rows||[]).map(function(r){return '<tr>'+r.map(function(c){return '<td>'+escapeHtml(String(c))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>';
       else if(b.type==='kv') h+='<table><tbody>'+(b.pairs||[]).map(function(p){return '<tr><th>'+escapeHtml(p[0])+'</th><td>'+escapeHtml(String(p[1]))+'</td></tr>';}).join('')+'</tbody></table>';
       else if(b.type==='steps') h+='<ol>'+(b.items||[]).map(function(s){return '<li'+(s.done?' style="opacity:.6;text-decoration:line-through"':'')+'><b>'+escapeHtml(s.t)+'</b> — '+escapeHtml(String(s.d).replace(/<[^>]+>/g,''))+'</li>';}).join('')+'</ol>';
-      else if(b.type==='image') h+='<img src="'+b.dataUrl+'" alt="'+escapeHtml(b.title||'figure')+'">';
+      else if(b.type==='image') h+='<img src="'+safeDataUrl(b.dataUrl)+'" alt="'+escapeHtml(b.title||'figure')+'">';
     });
     return h;
   }
@@ -4448,7 +4532,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     if(!secs.length) return 'No tabular blocks in this entry\n';
     var out=[];
     secs.forEach(function(rows,i){ if(i) out.push([]); rows.forEach(function(r){ out.push(r); }); });
-    return out.map(function(r){ return r.map(function(c){ return '"'+String(c==null?'':c).replace(/"/g,'""')+'"'; }).join(','); }).join('\n')+'\n';
+    return out.map(function(r){ return r.map(function(c){ return csvCell(c); }).join(','); }).join('\n')+'\n';
   }
 
   window.NB={
@@ -4818,6 +4902,119 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     var reloading=false;
     navigator.serviceWorker.addEventListener('controllerchange',function(){ if(reloading) return; reloading=true; location.reload(); });
   });
+})();
+
+/* ══════════════════════ ACCESSIBILITY LAYER ══════════════════════
+   Applied centrally so it covers all 8 modules and everything they render dynamically.
+   Two problems this fixes, both measured in the browser:
+   1. ~59 controls had no accessible name. Almost all of them already sit next to a real
+      <label> that simply lacks a `for`, so we wire up the EXISTING visible text rather than
+      inventing new wording — the screen reader then says what the sighted user reads.
+   2. All three modal patterns (#condModal, .rp-modal-bg, .nb-modal-bg) had no role, never
+      moved focus off <body>, let Tab wander the page behind the overlay, and ignored Escape. */
+(function(){
+  var CTRL='input:not([type=hidden]):not([type=button]):not([type=submit]),select,textarea';
+
+  function named(el){
+    return el.getAttribute('aria-label')||el.getAttribute('aria-labelledby')||
+           (el.id&&document.querySelector('label[for="'+CSS.escape(el.id)+'"]'))||el.closest('label');
+  }
+  var uid=0;
+  // The LABELLED field wrapper. Deliberately excludes inner layout boxes like .dc-cu (a value
+  // input + unit select share one label above them) so closest() reaches the real label.
+  var FIELD='.f,.dc-f,.mbc-f,.pr-f,.gel-f,.nb-f,.rc-row,.ptab-fmt';
+  function wireLabels(root){
+    (root||document).querySelectorAll(CTRL).forEach(function(el){
+      if(named(el)) return;
+      if(!el.id) el.id='a11y-f'+(++uid);
+      var box=el.closest(FIELD)||el.parentElement;
+      var lab=box&&box.querySelector('label');
+      var txt=lab?lab.textContent.replace(/\s+/g,' ').trim():'';
+      if(!txt&&box){ txt=[].slice.call(box.childNodes).filter(function(n){return n.nodeType===3;})
+                          .map(function(n){return n.textContent;}).join(' ').replace(/\s+/g,' ').trim(); }
+      if(!txt) txt=el.getAttribute('title')||el.placeholder||'';
+      if(!txt) return;
+      // A wrapper's single <label> belongs to its first control; give it a real `for` link.
+      if(lab&&!lab.htmlFor){ lab.htmlFor=el.id; return; }
+      // Any further control under the same label (typically the unit dropdown beside a value
+      // box) gets the label text plus a qualifier, so the two never read identically.
+      if(el.tagName==='SELECT') txt=txt.replace(/\s*[—–-].*$/,'')+' — unit';
+      el.setAttribute('aria-label',txt.slice(0,90));
+    });
+  }
+
+  // ---- modals: role, labelling, initial focus, focus trap, Escape
+  var MODALS='#condModal,.rp-modal-bg,.nb-modal-bg,.modal-overlay';
+  var FOCUSABLE='button,[href],input:not([type=hidden]),select,textarea,[tabindex]:not([tabindex="-1"])';
+  var restoreTo=null;
+  // NOT offsetParent: every one of these overlays is position:fixed, and a fixed element's
+  // offsetParent is null, so an offsetParent test silently classes all of them as hidden.
+  function visible(m){ var cs=getComputedStyle(m);
+    return cs.display!=='none'&&cs.visibility!=='hidden'&&m.getClientRects().length>0; }
+  function openModals(){ return [].slice.call(document.querySelectorAll(MODALS)).filter(visible); }
+  function topModal(){ var m=openModals(); return m.length?m[m.length-1]:null; }
+  function dress(m){
+    if(m.__a11y) return; m.__a11y=true;
+    m.setAttribute('role','dialog'); m.setAttribute('aria-modal','true');
+    var t=m.querySelector('.modal-title,.rp-mtitle,.nb-mtitle,h2,h3');
+    if(t){ if(!t.id) t.id='a11y-mt'+(++uid); m.setAttribute('aria-labelledby',t.id); }
+    wireLabels(m);
+    // Move focus into the dialog. Retried on the next frame because the opener often fills in
+    // field values after the overlay is shown, which can pull focus back out.
+    function grab(){
+      var f=[].slice.call(m.querySelectorAll(FOCUSABLE)).filter(function(el){return el.getClientRects().length>0&&!el.disabled;})[0];
+      if(f&&!m.contains(document.activeElement)){ try{ f.focus(); }catch(e){} }
+    }
+    grab(); requestAnimationFrame(grab); setTimeout(grab,80);
+  }
+  function closeTop(m){
+    if(m.id==='condModal'&&typeof closeCondModal==='function'){ closeCondModal(); return; }
+    var cancel=[].slice.call(m.querySelectorAll('button')).filter(function(b){return /cancel|close/i.test(b.textContent);})[0];
+    if(cancel) cancel.click(); else m.remove();
+  }
+  document.addEventListener('keydown',function(e){
+    var m=topModal(); if(!m) return;
+    if(e.key==='Escape'){ e.preventDefault(); closeTop(m);
+      if(restoreTo){ try{ restoreTo.focus(); }catch(_){ } restoreTo=null; } return; }
+    if(e.key!=='Tab') return;
+    var f=[].slice.call(m.querySelectorAll(FOCUSABLE)).filter(function(el){return el.getClientRects().length>0&&!el.disabled;});
+    if(!f.length) return;
+    var first=f[0], last=f[f.length-1];
+    if(!m.contains(document.activeElement)){ e.preventDefault(); first.focus(); }
+    else if(e.shiftKey&&document.activeElement===first){ e.preventDefault(); last.focus(); }
+    else if(!e.shiftKey&&document.activeElement===last){ e.preventDefault(); first.focus(); }
+  },true);
+
+  /* Elements that respond to a click but are not buttons (the condition palette rows) were
+     mouse-only: no role, not in the tab order, no key handler. Give them button semantics. */
+  function wireClickables(root){
+    (root||document).querySelectorAll('[onclick]').forEach(function(el){
+      var t=el.tagName;
+      if(t==='BUTTON'||t==='A'||t==='INPUT'||t==='SELECT'||t==='TEXTAREA') return;
+      if(el.__kb) return; el.__kb=true;
+      if(!el.getAttribute('role')) el.setAttribute('role','button');
+      if(el.getAttribute('tabindex')===null) el.setAttribute('tabindex','0');
+      el.addEventListener('keydown',function(e){
+        if(e.key!=='Enter'&&e.key!==' ') return;
+        // Don't hijack keys meant for a control nested inside the clickable row.
+        if(e.target!==el&&/^(BUTTON|A|INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+        e.preventDefault(); el.click();
+      });
+    });
+  }
+
+  var pending=null;
+  function sweep(){
+    wireLabels(document);
+    wireClickables(document);
+    var m=topModal();
+    if(m){ if(!m.__a11y){ restoreTo=document.activeElement; dress(m); } }
+    else { [].slice.call(document.querySelectorAll(MODALS)).forEach(function(x){ x.__a11y=false; }); }
+  }
+  new MutationObserver(function(){ clearTimeout(pending); pending=setTimeout(sweep,60); })
+    .observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class']});
+  if(document.readyState!=='loading') sweep(); else document.addEventListener('DOMContentLoaded',sweep);
+  window.__a11ySweep=sweep;
 })();
 </script>
 </body>

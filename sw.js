@@ -1,7 +1,7 @@
 /* Dilution Designer — service worker.
    Precaches the whole app so it works with no network (bench / cold room / BSL suite).
    Bump CACHE on every release so clients pick the new version up. */
-const CACHE = 'dd-v1.2.0';   // BUMP THIS ON EVERY RELEASE or clients keep the old build
+const CACHE = 'dd-v1.3.0';   // BUMP THIS ON EVERY RELEASE or clients keep the old build
 
 const CORE = [
   './',
@@ -54,8 +54,16 @@ self.addEventListener('fetch', (e) => {
     e.respondWith((async () => {
       try {
         const net = await fetch(req);
-        const c = await caches.open(CACHE);
-        c.put('./index.html', net.clone());
+        // Only cache a genuinely good, same-origin, non-redirected HTML response. Caching any
+        // navigation response overwrote the offline copy with things like a GitHub Pages 404
+        // page, which then became the app for every subsequent offline load.
+        if (net && net.ok && net.status === 200 && net.type === 'basic') {
+          const ct = net.headers.get('content-type') || '';
+          if (ct.includes('text/html')) {
+            const c = await caches.open(CACHE);
+            c.put('./index.html', net.clone());
+          }
+        }
         return net;
       } catch (_) {
         const c = await caches.open(CACHE);
