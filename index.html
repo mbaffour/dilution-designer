@@ -345,6 +345,8 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <button class="mode-tab" id="modeTabDilcalc" onclick="setMode('dilcalc')">Dilution Calc</button>
     <button class="mode-tab" id="modeTabCalc" onclick="setMode('calc')">🧬 Calculators</button>
     <button class="mode-tab" id="modeTabProto" onclick="setMode('proto')">📋 Protocols</button>
+    <button class="mode-tab" id="modeTabGel" onclick="setMode('gel')">🧪 Gel Sim</button>
+    <button class="mode-tab" id="modeTabNb" onclick="setMode('notebook')">📓 Notebook</button>
   </div>
   <div class="theme-group">
     <button class="theme-btn active" data-theme="day" onclick="setTheme('day')">Day</button>
@@ -549,6 +551,30 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div id="prList" class="mbc-list" role="listbox" aria-label="Protocols"></div>
     </aside>
     <section class="mbc-main" id="prMain"></section>
+  </div>
+</div>
+
+<!-- ══════════ GEL SIMULATOR ══════════ -->
+<div id="gelView" style="display:none;padding:16px 20px 60px;max-width:1180px;margin:0 auto;">
+  <div class="mbc-grid">
+    <aside class="mbc-nav">
+      <div class="sl">Gel setup</div>
+      <div id="gelControls"></div>
+    </aside>
+    <section class="mbc-main" id="gelMain"></section>
+  </div>
+</div>
+
+<!-- ══════════ LAB NOTEBOOK ══════════ -->
+<div id="notebookView" style="display:none;padding:16px 20px 60px;max-width:1180px;margin:0 auto;">
+  <div class="mbc-grid">
+    <aside class="mbc-nav">
+      <div class="sl">Notebook entries</div>
+      <button class="btn ac" onclick="NB.newEntry()" style="width:100%;justify-content:center;">＋ New entry</button>
+      <div id="nbList" class="mbc-list" role="listbox" aria-label="Notebook entries"></div>
+      <div id="nbTools"></div>
+    </aside>
+    <section class="mbc-main" id="nbMain"></section>
   </div>
 </div>
 
@@ -983,21 +1009,28 @@ function setMode(m) {
   var mtH=document.getElementById('modeTabHome'); if(mtH) mtH.classList.toggle('active',m==='home');
   var mtC=document.getElementById('modeTabCalc'); if(mtC) mtC.classList.toggle('active',m==='calc');
   var mtP=document.getElementById('modeTabProto'); if(mtP) mtP.classList.toggle('active',m==='proto');
+  var mtG=document.getElementById('modeTabGel'); if(mtG) mtG.classList.toggle('active',m==='gel');
+  var mtN=document.getElementById('modeTabNb'); if(mtN) mtN.classList.toggle('active',m==='notebook');
   // Home, Reagent Prep, Dilution Calc and Calculators are self-contained views — hide the plate workspace when active.
   var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView'), dv=document.getElementById('dilcalcView'),
-      hv=document.getElementById('homeView'), cv=document.getElementById('calcView'), pv=document.getElementById('protoView');
-  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto');
+      hv=document.getElementById('homeView'), cv=document.getElementById('calcView'), pv=document.getElementById('protoView'),
+      gv=document.getElementById('gelView'), nv=document.getElementById('notebookView');
+  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto'||m==='gel'||m==='notebook');
   if(rv) rv.style.display = m==='reagent'?'':'none';
   if(dv) dv.style.display = m==='dilcalc'?'':'none';
   if(hv) hv.style.display = m==='home'?'':'none';
   if(cv) cv.style.display = m==='calc'?'':'none';
   if(pv) pv.style.display = m==='proto'?'':'none';
+  if(gv) gv.style.display = m==='gel'?'':'none';
+  if(nv) nv.style.display = m==='notebook'?'':'none';
   if(appEl) appEl.style.display = special?'none':'';
   if(m==='reagent'){ rpInit(); return; }
   if(m==='dilcalc'){ dcInit(); return; }
   if(m==='home'){ if(window.renderHome) renderHome(); return; }
   if(m==='calc'){ if(window.MBC) MBC.init(); return; }
   if(m==='proto'){ if(window.PROTO) PROTO.init(); return; }
+  if(m==='gel'){ if(window.GEL) GEL.init(); return; }
+  if(m==='notebook'){ if(window.NB) NB.init(); return; }
   document.getElementById('sbPlasmid').style.display = m==='plasmid'?'':'none';
   document.getElementById('sbPhage').style.display   = m==='phage'?'':'none';
   document.getElementById('moiPanel').style.display  = m==='phage'?'':'none';
@@ -3890,6 +3923,287 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     reset:function(){ Object.keys(done).forEach(function(k){ if(k.indexOf(cur+'_')===0) delete done[k]; }); renderBody(); },
     copy:function(){ dcCopyText(PROTO._txt); },
     list:PROTOCOLS
+  };
+})();
+
+/* ══════════════════════════ GEL SIMULATOR ══════════════════════════ */
+(function(){
+  var css=`
+  .gel-sec{font:600 10.5px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--text3);margin:14px 0 6px;}
+  .gel-lane{display:flex;gap:5px;align-items:center;margin-bottom:5px;}
+  .gel-lane input{font-family:var(--mono);font-size:12px;padding:6px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);box-sizing:border-box;}
+  .gel-lane input:focus-visible{outline:2px solid var(--accent2);outline-offset:1px;}
+  .gel-lname{flex:0 0 92px;}
+  .gel-lsizes{flex:1;min-width:120px;}
+  .gel-del{border:0;background:transparent;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 6px;min-width:26px;min-height:26px;}
+  .gel-del:hover{color:#c0392b;}
+  .gel-wrap{overflow-x:auto;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;}
+  .gel-wrap canvas{max-width:100%;height:auto;border-radius:6px;}
+  .gel-disc{font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5;font-style:italic;}
+  .gel-warn{margin-top:8px;padding:9px 12px;border-radius:8px;font-size:12px;line-height:1.5;border:1px solid;}
+  .gel-warn.bad{background:rgba(192,57,43,.10);border-color:rgba(192,57,43,.45);color:var(--text2);}
+  .gel-warn.warn{background:rgba(191,140,0,.10);border-color:rgba(191,140,0,.42);color:var(--text2);}
+  .gel-warn.ok{background:rgba(47,125,91,.10);border-color:rgba(47,125,91,.42);color:var(--text2);}
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  // ── Ladders. Band sizes are published facts; visuals below are drawn from the numbers,
+  //    no vendor artwork is reproduced. "ref" marks the vendor's reference/bright bands.
+  var LADDERS=[
+   {id:'neb-1kb', v:'NEB', t:'dna', n:'1 kb DNA Ladder (N3232)', b:[10000,8000,6000,5000,4000,3000,2000,1500,1000,500], ref:[3000]},
+   {id:'neb-1kbplus', v:'NEB', t:'dna', n:'1 kb Plus DNA Ladder (N3200)', b:[10000,8000,6000,5000,4000,3000,2000,1500,1200,1000,900,800,700,600,500,400,300,200,100], ref:[3000,1000]},
+   {id:'neb-2log', v:'NEB', t:'dna', n:'2-Log DNA Ladder (N0550)', b:[10000,8000,6000,5000,4000,3000,2000,1500,1200,1000,500,400,300,200,100], ref:[3000,1000]},
+   {id:'neb-100bp', v:'NEB', t:'dna', n:'100 bp DNA Ladder (N3231)', b:[1517,1200,1000,900,800,700,600,500,400,300,200,100], ref:[500]},
+   {id:'thermo-gr1kb', v:'Thermo', t:'dna', n:'GeneRuler 1 kb (SM0311)', b:[10000,8000,6000,5000,4000,3500,3000,2500,2000,1500,1000,750,500,250], ref:[6000,3000,1000]},
+   {id:'thermo-gr1kbplus', v:'Thermo', t:'dna', n:'GeneRuler 1 kb Plus (SM1331)', b:[20000,10000,7000,5000,4000,3000,2000,1500,1000,700,500,400,300,200,75], ref:[5000,1500,500]},
+   {id:'thermo-gr100bp', v:'Thermo', t:'dna', n:'GeneRuler 100 bp (SM0241)', b:[1000,900,800,700,600,500,400,300,200,100], ref:[500]},
+   {id:'thermo-gr50bp', v:'Thermo', t:'dna', n:'GeneRuler 50 bp (SM0371)', b:[1000,900,800,700,600,500,400,300,250,200,150,100,50], ref:[500,250]},
+   {id:'promega-1kb', v:'Promega', t:'dna', n:'1 kb DNA Ladder (G5711)', b:[10000,8000,6000,5000,4000,3000,2500,2000,1500,1000,750,500,250], ref:[3000,1000]},
+   {id:'promega-100bp', v:'Promega', t:'dna', n:'100 bp DNA Ladder (G2101)', b:[1500,1000,900,800,700,600,500,400,300,200,100], ref:[500]},
+   {id:'neb-color-p7712', v:'NEB', t:'protein', n:'Color Prestained, Broad Range (P7712)', b:[245,180,135,100,75,63,48,35,25,20,17,11], ref:[75,25]},
+   {id:'neb-blue-p7706', v:'NEB', t:'protein', n:'Blue Prestained, Broad Range (P7706)', b:[175,80,58,46,30,23,17,7], ref:[46]},
+   {id:'thermo-pageruler', v:'Thermo', t:'protein', n:'PageRuler Prestained (26616)', b:[180,130,100,70,55,40,35,25,15,10], ref:[70]},
+   {id:'thermo-pagerulerplus', v:'Thermo', t:'protein', n:'PageRuler Plus Prestained (26619)', b:[250,130,100,70,55,35,25,15,10], ref:[70,25]},
+   {id:'biorad-precision', v:'Bio-Rad', t:'protein', n:'Precision Plus Dual Color (1610374)', b:[250,150,100,75,50,37,25,20,15,10], ref:[75,25]},
+   {id:'biorad-kaleido', v:'Bio-Rad', t:'protein', n:'Precision Plus Kaleidoscope (1610375)', b:[250,150,100,75,50,37,25,20,15,10], ref:[75,25]}
+  ];
+  function customLadders(){ try{ return JSON.parse(localStorage.getItem('dd_gel_ladders')||'[]'); }catch(e){ return []; } }
+  function allLadders(){ return LADDERS.concat(customLadders()); }
+
+  // ── Resolving ranges. Rf is linear in log10(size) across the range: this is a planning
+  //    approximation, not a physical prediction (buffer/voltage/conformation all matter).
+  var DNA_RANGE={ '0.5':[1000,30000], '0.7':[800,15000], '0.8':[800,12000], '1':[500,10000],
+                  '1.2':[400,6000], '1.5':[200,3000], '2':[50,2000], '3':[20,1000] };
+  var PROT_RANGE={ '8':[25,200], '10':[15,100], '12':[10,70], '15':[5,40], '4-20':[5,250] };
+  var RF_TOP=0.08, RF_BOT=0.92, RESOLVE=0.035;
+
+  function rangeFor(s){ return (s.type==='dna'?DNA_RANGE[s.pct]:PROT_RANGE[s.pct])||[10,1000]; }
+  function rfOf(size,rng){
+    if(!(size>0)) return null;
+    var lo=rng[0], hi=rng[1];
+    var rf=RF_TOP+(RF_BOT-RF_TOP)*(Math.log10(hi)-Math.log10(size))/(Math.log10(hi)-Math.log10(lo));
+    var status='ok';
+    if(size>hi){ status='high'; rf=Math.max(0.028, rf); }
+    if(size<lo){ status='low';  rf=Math.min(0.975, rf); }
+    return {rf:Math.max(0.02,Math.min(0.985,rf)), status:status};
+  }
+
+  var S=null;
+  function defState(){ return { type:'dna', pct:'1', ladder:'neb-1kb', look:'dark',
+    lanes:[ {name:'Sample 1', sizes:'5000, 3000, 1000'}, {name:'Sample 2', sizes:'4200, 4000'} ] }; }
+  function load(){ try{ var j=JSON.parse(localStorage.getItem('dd_gel')||'null'); if(j&&j.lanes) return j; }catch(e){} return defState(); }
+  function save(){ try{ localStorage.setItem('dd_gel',JSON.stringify(S)); }catch(e){} }
+
+  function parseSizes(str){ return String(str||'').split(/[,;\s]+/).map(function(x){return SCI.parse(x);}).filter(function(n){return isFinite(n)&&n>0;}); }
+  function unit(){ return S.type==='dna'?'bp':'kDa'; }
+  function fmtSize(n){ if(S.type==='dna'&&n>=1000) return SCI.fmt(n/1000,3)+' kb'; return SCI.fmt(n,4)+' '+unit(); }
+
+  // ── model → lanes with computed Rf
+  function computeLanes(){
+    var rng=rangeFor(S), out=[];
+    var lad=allLadders().filter(function(l){return l.id===S.ladder;})[0];
+    if(lad) out.push({name:lad.n, ladder:true, ref:lad.ref||[],
+      bands:lad.b.map(function(sz){ var r=rfOf(sz,rng); return {size:sz, rf:r.rf, status:r.status}; })});
+    S.lanes.forEach(function(L){
+      out.push({name:L.name||'Lane', ladder:false, ref:[],
+        bands:parseSizes(L.sizes).map(function(sz){ var r=rfOf(sz,rng); return {size:sz, rf:r.rf, status:r.status}; })});
+    });
+    return out;
+  }
+
+  // ── the useful part: will it actually resolve?
+  function bestPct(){
+    var ranges=S.type==='dna'?DNA_RANGE:PROT_RANGE, best=null;
+    Object.keys(ranges).forEach(function(p){
+      var rng=ranges[p], worst=1, anyOut=false;
+      S.lanes.forEach(function(L){
+        var sz=parseSizes(L.sizes);
+        sz.forEach(function(x){ if(x>rng[1]||x<rng[0]) anyOut=true; });
+        for(var i=0;i<sz.length;i++) for(var j=i+1;j<sz.length;j++){
+          var a=rfOf(sz[i],rng), b=rfOf(sz[j],rng);
+          worst=Math.min(worst, Math.abs(a.rf-b.rf));
+        }
+      });
+      var score=(anyOut?0:1)*1000+worst;
+      if(!best||score>best.score) best={pct:p,score:score,worst:worst,anyOut:anyOut};
+    });
+    return best;
+  }
+  function warnings(lanes){
+    var w=[], rng=rangeFor(S);
+    lanes.forEach(function(L){
+      if(L.ladder) return;
+      for(var i=0;i<L.bands.length;i++){
+        for(var j=i+1;j<L.bands.length;j++){
+          if(Math.abs(L.bands[i].rf-L.bands[j].rf)<RESOLVE)
+            w.push({k:'bad', t:L.name+': '+fmtSize(L.bands[i].size)+' and '+fmtSize(L.bands[j].size)+' will not separate here.'});
+        }
+        var b=L.bands[i];
+        if(b.status==='high') w.push({k:'warn', t:L.name+': '+fmtSize(b.size)+' is above the resolving range of this gel — it will sit as a tight band near the well.'});
+        if(b.status==='low')  w.push({k:'warn', t:L.name+': '+fmtSize(b.size)+' is below the resolving range — it may run off with the dye front.'});
+      }
+    });
+    var bp=bestPct();
+    if(w.length && bp && String(bp.pct)!==String(S.pct) && !bp.anyOut && bp.worst>=RESOLVE)
+      w.push({k:'ok', t:'A '+bp.pct+(S.type==='dna'?'% agarose':'% acrylamide')+' gel would separate everything currently loaded.'});
+    if(!w.length) w.push({k:'ok', t:'All bands fall inside the resolving range of this gel and are far enough apart to read.'});
+    // ladder bracketing
+    var lad=lanes.filter(function(L){return L.ladder;})[0];
+    if(lad&&lad.bands.length){
+      var lmin=Math.min.apply(null,lad.bands.map(function(b){return b.size;}));
+      var lmax=Math.max.apply(null,lad.bands.map(function(b){return b.size;}));
+      var all=[]; S.lanes.forEach(function(L){ all=all.concat(parseSizes(L.sizes)); });
+      if(all.length&&(Math.min.apply(null,all)<lmin||Math.max.apply(null,all)>lmax))
+        w.push({k:'warn', t:'Some samples fall outside the ladder range ('+fmtSize(lmin)+'–'+fmtSize(lmax)+') — you will be extrapolating when you size them.'});
+    }
+    return w;
+  }
+
+  // ── canvas. Gel colours are deliberately photo-realistic and theme-independent
+  //    (a gel image looks the same whatever UI theme you use).
+  function buildCanvas(){
+    var lanes=computeLanes(), dark=(S.look==='dark');
+    var LW=78, GAP=8, LEFT=64, PADX=16, TOP=34, GELH=430, BOT=26;
+    var W=PADX*2+LEFT+lanes.length*(LW+GAP), H=TOP+GELH+BOT, DPR=2;
+    var c=document.createElement('canvas'); c.width=W*DPR; c.height=H*DPR;
+    c.style.width=W+'px'; c.style.height=H+'px';
+    var x=c.getContext('2d'); x.scale(DPR,DPR);
+    x.fillStyle=dark?'#0b0e12':'#f2f0ea'; x.fillRect(0,0,W,H);
+    var gx=PADX+LEFT, gy=TOP, gw=lanes.length*(LW+GAP)-GAP, gh=GELH;
+    x.fillStyle=dark?'#141a20':'#e9e6dd'; x.fillRect(gx,gy,gw,gh);
+    // ladder size labels down the left
+    var lad=lanes[0];
+    x.font='10px monospace'; x.textAlign='right'; x.textBaseline='middle';
+    x.fillStyle=dark?'#7d8994':'#7c7362';
+    if(lad&&lad.ladder) lad.bands.forEach(function(b){ x.fillText(fmtSize(b.size), gx-6, gy+b.rf*gh); });
+    lanes.forEach(function(L,i){
+      var lx=gx+i*(LW+GAP);
+      // well
+      x.fillStyle=dark?'#05070a':'#cfcabc'; x.fillRect(lx+8, gy+4, LW-16, 9);
+      // lane label
+      x.save(); x.font='600 10px monospace'; x.textAlign='center'; x.textBaseline='bottom';
+      x.fillStyle=dark?'#c8d2dc':'#3a352c';
+      var nm=L.name.length>13?L.name.slice(0,12)+'…':L.name;
+      x.fillText(nm, lx+LW/2, gy-8); x.restore();
+      L.bands.forEach(function(b){
+        var by=gy+b.rf*gh, isRef=L.ladder&&(L.ref||[]).indexOf(b.size)>=0;
+        var bh=isRef?5.5:4, alpha=isRef?0.98:(L.ladder?0.75:0.9);
+        // soft halo then core, so it reads like a stained band rather than a bar chart
+        var g=x.createLinearGradient(0,by-bh*2,0,by+bh*2);
+        var core=dark?'rgba(196,255,214,'+alpha+')':'rgba(30,40,60,'+alpha+')';
+        var edge=dark?'rgba(196,255,214,0)':'rgba(30,40,60,0)';
+        g.addColorStop(0,edge); g.addColorStop(0.5,core); g.addColorStop(1,edge);
+        x.fillStyle=g; x.fillRect(lx+7, by-bh*2, LW-14, bh*4);
+        x.fillStyle=core; x.fillRect(lx+7, by-bh/2, LW-14, bh);
+      });
+    });
+    // dye front
+    x.strokeStyle=dark?'rgba(120,140,255,0.5)':'rgba(80,90,160,0.45)'; x.setLineDash([4,4]);
+    x.beginPath(); x.moveTo(gx,gy+gh-6); x.lineTo(gx+gw,gy+gh-6); x.stroke(); x.setLineDash([]);
+    x.font='9px monospace'; x.textAlign='left'; x.fillStyle=dark?'#6b7a8a':'#8a8172';
+    x.fillText('dye front', gx+2, gy+gh+12);
+    x.textAlign='right';
+    x.fillText((S.type==='dna'?S.pct+'% agarose':S.pct+'% SDS-PAGE')+' · simulated', gx+gw, gy+gh+12);
+    return c;
+  }
+
+  function bandTable(lanes){
+    var rows=[];
+    lanes.forEach(function(L){ L.bands.forEach(function(b){
+      rows.push([L.name+(L.ladder?' (ladder)':''), fmtSize(b.size), SCI.fmt(b.rf,2),
+                 b.status==='ok'?'in range':(b.status==='high'?'above range':'below range')]);
+    });});
+    return rows;
+  }
+
+  function render(){
+    var main=document.getElementById('gelMain'); if(!main) return;
+    var lanes=computeLanes(), w=warnings(lanes), rows=bandTable(lanes);
+    main.innerHTML='<div class="mbc-head"><h2>Gel simulator</h2><p>Predict how your fragments will lay out — and whether they will actually separate — before you pour a gel.</p></div>'+
+      '<div class="gel-wrap" id="gelCanvasWrap"></div>'+
+      '<div class="gel-disc">Migration is modelled as linear in log₁₀(size) across this gel’s resolving range. It is a planning aid, not a prediction: real mobility also depends on buffer, voltage, temperature and conformation. Circular/supercoiled DNA is <b>not</b> modelled — it runs anomalously.</div>'+
+      w.map(function(x){return '<div class="gel-warn '+x.k+'">'+(x.k==='ok'?'✓ ':'⚠ ')+escapeHtml(x.t)+'</div>';}).join('')+
+      '<div class="mbc-actions"><button class="btn" onclick="GEL.png()">⬇ PNG</button>'+
+        '<button class="btn" onclick="GEL.copy()">Copy band table</button>'+
+        '<button class="btn" onclick="GEL.csv()">⬇ CSV</button>'+
+        '<button class="btn ac" onclick="GEL.toNotebook()">＋ Notebook</button></div>'+
+      '<div class="gel-sec">Bands (this table is the accessible equivalent of the image above)</div>'+
+      '<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Lane</th><th>Size</th><th>Rf</th><th>Status</th></tr></thead><tbody>'+
+      rows.map(function(r){return '<tr>'+r.map(function(c){return '<td>'+escapeHtml(String(c))+'</td>';}).join('')+'</tr>';}).join('')+
+      '</tbody></table></div>';
+    document.getElementById('gelCanvasWrap').appendChild(buildCanvas());
+    GEL._txt='Simulated gel — '+(S.type==='dna'?S.pct+'% agarose':S.pct+'% SDS-PAGE')+'\n'+
+      rows.map(function(r){return r.join('\t');}).join('\n');
+    save();
+  }
+
+  function renderControls(){
+    var el=document.getElementById('gelControls'); if(!el) return;
+    var lads=allLadders().filter(function(l){return l.t===S.type;});
+    if(!lads.filter(function(l){return l.id===S.ladder;}).length && lads.length) S.ladder=lads[0].id;
+    var pcts=Object.keys(S.type==='dna'?DNA_RANGE:PROT_RANGE);
+    el.innerHTML=
+      '<div class="mbc-f"><label for="gelType">Gel type</label><select id="gelType" onchange="GEL.setType(this.value)">'+
+        '<option value="dna"'+(S.type==='dna'?' selected':'')+'>DNA — agarose</option>'+
+        '<option value="protein"'+(S.type==='protein'?' selected':'')+'>Protein — SDS-PAGE</option></select></div>'+
+      '<div class="mbc-f"><label for="gelPct">'+(S.type==='dna'?'Agarose %':'Acrylamide %')+'</label><select id="gelPct" onchange="GEL.set(\'pct\',this.value)">'+
+        pcts.map(function(p){return '<option'+(String(p)===String(S.pct)?' selected':'')+'>'+p+'</option>';}).join('')+'</select></div>'+
+      '<div class="mbc-f"><label for="gelLadder">Ladder</label><select id="gelLadder" onchange="GEL.set(\'ladder\',this.value)">'+
+        lads.map(function(l){return '<option value="'+l.id+'"'+(l.id===S.ladder?' selected':'')+'>'+escapeHtml((l.v?l.v+' — ':'')+l.n)+'</option>';}).join('')+'</select></div>'+
+      '<div class="mbc-f"><label for="gelLook">Appearance</label><select id="gelLook" onchange="GEL.set(\'look\',this.value)">'+
+        '<option value="dark"'+(S.look==='dark'?' selected':'')+'>Stained on dark (UV/blue light)</option>'+
+        '<option value="light"'+(S.look==='light'?' selected':'')+'>Dark bands on light</option></select></div>'+
+      '<div class="gel-sec">Lanes</div>'+
+      S.lanes.map(function(L,i){ return '<div class="gel-lane">'+
+        '<input class="gel-lname" value="'+escapeHtml(L.name)+'" oninput="GEL.lane('+i+',\'name\',this.value)" placeholder="lane" aria-label="Lane '+(i+1)+' name">'+
+        '<input class="gel-lsizes" value="'+escapeHtml(L.sizes)+'" oninput="GEL.lane('+i+',\'sizes\',this.value)" placeholder="sizes, comma separated" aria-label="Lane '+(i+1)+' sizes">'+
+        '<button class="gel-del" onclick="GEL.delLane('+i+')" title="Remove lane" aria-label="Remove lane '+(i+1)+'">✕</button></div>'; }).join('')+
+      '<button class="btn" onclick="GEL.addLane()" style="width:100%;justify-content:center;margin-top:4px;">＋ Lane</button>'+
+      '<div class="gel-sec">Custom ladder</div>'+
+      '<div class="mbc-f"><input id="gelCustName" placeholder="name, e.g. In-house 1 kb" aria-label="Custom ladder name"></div>'+
+      '<div class="mbc-f"><input id="gelCustBands" placeholder="bands: 10000, 5000, 2000…" aria-label="Custom ladder bands"></div>'+
+      '<button class="btn" onclick="GEL.addLadder()" style="width:100%;justify-content:center;">Save ladder</button>'+
+      '<div class="mbc-hint" style="margin-top:8px;">Sizes accept 2e3 and 2×10³. Ladder band sizes are the vendors’ published values; the image is drawn from those numbers.</div>';
+  }
+
+  window.GEL={
+    init:function(){ if(!S) S=load(); renderControls(); render(); },
+    set:function(k,v){ S[k]=v; renderControls(); render(); },
+    setType:function(v){ S.type=v; S.pct=(v==='dna'?'1':'12');
+      var l=allLadders().filter(function(x){return x.t===v;})[0]; if(l) S.ladder=l.id;
+      S.lanes=(v==='dna')?[{name:'Sample 1',sizes:'5000, 3000, 1000'},{name:'Sample 2',sizes:'4200, 4000'}]
+                         :[{name:'Lysate',sizes:'70, 45, 25'},{name:'Elution',sizes:'45'}];
+      renderControls(); render(); },
+    lane:function(i,k,v){ if(S.lanes[i]){ S.lanes[i][k]=v; render(); } },
+    addLane:function(){ S.lanes.push({name:'Lane '+(S.lanes.length+1), sizes:''}); renderControls(); render(); },
+    delLane:function(i){ S.lanes.splice(i,1); renderControls(); render(); },
+    addLadder:function(){
+      var n=(document.getElementById('gelCustName').value||'').trim();
+      var b=parseSizes(document.getElementById('gelCustBands').value).sort(function(a,c){return c-a;});
+      if(!n||!b.length){ showToast('Give the ladder a name and some band sizes','warn'); return; }
+      var list=customLadders(); var id='cust-'+Date.now();
+      list.push({id:id, v:'Custom', t:S.type, n:n, b:b, ref:[]});
+      try{ localStorage.setItem('dd_gel_ladders',JSON.stringify(list)); }catch(e){}
+      S.ladder=id; renderControls(); render(); showToast('✓ Ladder saved','green');
+    },
+    png:function(){ var c=buildCanvas(); c.toBlob(function(bl){ var a=document.createElement('a');
+      a.href=URL.createObjectURL(bl); a.download='gel-'+(S.type)+'-'+S.pct+'.png'; a.click();
+      setTimeout(function(){URL.revokeObjectURL(a.href);},1000); showToast('✓ Gel PNG exported','green'); },'image/png'); },
+    csv:function(){ var rows=bandTable(computeLanes());
+      var csv='Lane,Size,Rf,Status\n'+rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(',');}).join('\n');
+      _dl(csv,'gel-bands.csv','text/csv'); showToast('✓ Band table exported','green'); },
+    copy:function(){ dcCopyText(GEL._txt); },
+    toNotebook:function(){ if(!window.NB){ showToast('Notebook not ready','warn'); return; } NB.capture('gel'); },
+    // consumed by the notebook capture picker
+    blocks:function(sel){
+      var lanes=computeLanes(), out=[];
+      if(sel.image) out.push({type:'image', title:'Simulated gel — '+(S.type==='dna'?S.pct+'% agarose':S.pct+'% SDS-PAGE'), dataUrl:buildCanvas().toDataURL('image/png')});
+      if(sel.table) out.push({type:'table', title:'Bands', cols:['Lane','Size','Rf','Status'], rows:bandTable(lanes)});
+      if(sel.warn) out.push({type:'kv', title:'Gel check', pairs:warnings(lanes).map(function(w,i){return ['Note '+(i+1), w.t];})});
+      return out;
+    },
+    _model:{ rfOf:rfOf, rangeFor:rangeFor, ladders:allLadders, RESOLVE:RESOLVE,
+             state:function(){return S||(S=load());}, warnings:function(){return warnings(computeLanes());} }
   };
 })();
 
