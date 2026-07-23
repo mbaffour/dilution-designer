@@ -948,8 +948,13 @@ var SCI=(function(){
     else                                           s=s.replace(/,/g,'');
     s=s.replace(/([×xX*])?10([⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)/g,function(_m,_op,d){ return 'e'+unsup(d); });  // 1.2×10⁹
     s=s.replace(/([×xX*])10\^?([-+]?\d+)/g,'e$2');                                            // 1.2x10^9
-    s=s.replace(/^10\^([-+]?\d+)$/,'1e$1');   // 10^9 — caret REQUIRED, else "1000" would read as 10^00
-    s=s.replace(/\^/,'e');
+    // 10^n ANYWHERE, not only as the whole string. Previously the anchored `^10\^n$` rule
+    // failed on "10^8 PFU/mL" (after the space strip, "10^8PFU/mL"), which then fell through
+    // to a blanket `^`→`e` that produced "10e8" = 1e9 — a silent 10x error. Handle 10^n here…
+    s=s.replace(/(^|[^\d.])10\^([-+]?\d+)/g,'$11e$2');
+    // …and DROP any remaining stray caret rather than turning it into `e` (which is what caused
+    // the 10x bug, and also made "5^2" read as 5e2 = 500).
+    s=s.replace(/\^/g,'');
     if(/^[eE]/.test(s)) s='1'+s;
     var n=parseFloat(s);
     return isFinite(n)?n:NaN;
@@ -1339,8 +1344,13 @@ function setPlateFormat(fmt){
   for(let r=0;r<NR;r++) for(let c=0;c<NC;c++){ if(wellAssignments[r][c]){ if(r<f.nr&&c<f.nc) na[r][c]=wellAssignments[r][c]; else dropped++; } }
   const nx=new Set(); excludedWells.forEach(k=>{ const [r,c]=k.split(',').map(Number); if(r<f.nr&&c<f.nc) nx.add(k); });
   if(dropped && !confirm(dropped+' assigned well(s) fall outside a '+fmt+'-well plate and will be dropped. Continue?')){ renderPlateTabs(); return; }
+  // Snapshot BEFORE the (destructive) format change so Ctrl+Z can bring the wells back —
+  // _snap() records fmt and _restoreSnapshot() calls setPlateDims(snap.fmt), so undo across a
+  // format change is already correct. Previously this wiped both stacks, making the one
+  // operation that can destroy hundreds of wells the only unundoable one.
+  snapshotForUndo();
   wellAssignments=na; excludedWells=nx; setPlateDims(fmt); plates[activePlate].fmt=fmt; flushActive();
-  _undoStack=[];_redoStack=[]; renderExclBar(); renderPlateTabs(); renderPlate(); update();
+  renderExclBar(); renderPlateTabs(); renderPlate(); update();
 }
 // Serialise / restore every plate (for JSON, localStorage, share links).
 function _serializePlates(){ flushActive(); return plates.map(pl=>({fmt:pl.fmt, name:pl.name, assign:pl.assign, excluded:[...pl.excluded]})); }
@@ -1779,7 +1789,11 @@ function renderMasterMix(p,wells){
   // Group by condId
   const groups={};
   wells.forEach(w=>{
-    if(!groups[w.cond.id]) groups[w.cond.id]={cond:w.cond,wellIds:[],cultTotal:0,compTotal:0,finalTotal:0};
+    // Capture the RESOLVED per-well concentration (w.conc), not the raw cond.conc. The
+    // positive control is defined with conc:null and resolves to maxCond in calcWellData, so
+    // reading cond.conc printed "0" (or literal "null") here while the per-well table showed
+    // the real value from w.conc.
+    if(!groups[w.cond.id]) groups[w.cond.id]={cond:w.cond,conc:w.conc,wellIds:[],cultTotal:0,compTotal:0,finalTotal:0};
     const g=groups[w.cond.id];
     g.wellIds.push(w.wellId);
     g.cultTotal+=w.cultVol;
@@ -1790,7 +1804,7 @@ function renderMasterMix(p,wells){
   document.getElementById('mmbody').innerHTML=rows.map(g=>{
     const n=g.wellIds.length;
     const typeB=g.cond.type==='cond'?`<span class="badge bp">condition</span>`:g.cond.type==='blank'?`<span class="badge bn">blank</span>`:`<span class="badge bb">control</span>`;
-    const concCell=appMode==='phage'?`MOI ${g.cond.moi||0}`:`${g.cond.conc||0} ${p.units}`;
+    const concCell=appMode==='phage'?`MOI ${g.cond.moi||0}`:`${g.conc||0} ${p.units}`;
     const wellList=g.wellIds.slice(0,6).join(', ')+(g.wellIds.length>6?`… +${g.wellIds.length-6}`:``);
     return `<tr>
       <td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${safeColor(g.cond.color)};margin-right:6px;vertical-align:middle;"></span>${escapeHtml(g.cond.name)}</td>
@@ -1889,7 +1903,7 @@ function renderBenchSteps(p,wells){
   steps.push({n:n++,ac:false,t:'Prepare workspace',d:`Label all tubes and wells. Prepare ice if needed.\nDate: ${p.expDate||'____________'}   Researcher: ${p.researcher||'____________'}\nExperiment: ${p.expName||'____________'}   Compound: ${p.inducerName}`});
   if(intmMode==='intermediate'){const vfs=(p.intmConc/p.stockConc)*p.intmPrepVol;const vm=p.intmPrepVol-vfs;steps.push({n:n++,ac:true,t:`Make intermediate stock (${p.intmConc.toLocaleString()} ${p.units})`,d:`1. Pipette ${vfs.toFixed(2)} µL of ${p.stockConc.toLocaleString()} ${p.units} ${p.inducerName} into labelled tube\n2. Add ${vm.toFixed(2)} µL media/buffer and vortex\n→ ${p.intmPrepVol} µL at ${p.intmConc.toLocaleString()} ${p.units}`});}
   const condGroups=grpArr.filter(g=>g.cond.type==='cond'||g.cond.type==='pos');
-  if(condGroups.length){steps.push({n:n++,ac:false,t:'Prepare condition master mixes',d:`One tube per condition (volumes include 10% overage):\n\n`+condGroups.map((g,i)=>{const cv=g.wells.reduce((s,w)=>s+w.cultVol,0)*OV;const iv=g.wells.reduce((s,w)=>s+w.indVol,0)*OV;return`Tube ${i+1} — ${g.cond.name} (${g.cond.conc} ${p.units}) — ${g.wells.length} wells:\n  ${cv.toFixed(1)} µL ${p.cultureName||'culture'} + ${iv.toFixed(2)} µL ${src}\n  Wells: ${g.wells.map(w=>w.wellId).join(', ')}`;}).join('\n\n')});}
+  if(condGroups.length){steps.push({n:n++,ac:false,t:'Prepare condition master mixes',d:`One tube per condition (volumes include 10% overage):\n\n`+condGroups.map((g,i)=>{const cv=g.wells.reduce((s,w)=>s+w.cultVol,0)*OV;const iv=g.wells.reduce((s,w)=>s+w.indVol,0)*OV;const gc=(g.wells[0]&&g.wells[0].conc!=null)?g.wells[0].conc:(g.cond.conc||0);return`Tube ${i+1} — ${g.cond.name} (${gc} ${p.units}) — ${g.wells.length} wells:\n  ${cv.toFixed(1)} µL ${p.cultureName||'culture'} + ${iv.toFixed(2)} µL ${src}\n  Wells: ${g.wells.map(w=>w.wellId).join(', ')}`;}).join('\n\n')});}
   const ctrlGroups=grpArr.filter(g=>g.cond.type==='neg'||g.cond.type==='cblank');
   if(ctrlGroups.length){steps.push({n:n++,ac:false,t:'Prepare control master mixes',d:ctrlGroups.map(g=>{const cv=g.wells.reduce((s,w)=>s+w.cultVol,0)*OV;return`${g.cond.name} (${g.wells.length} wells):\n  ${cv.toFixed(1)} µL ${p.cultureName||'culture'} — no ${p.inducerName}\n  Wells: ${g.wells.map(w=>w.wellId).join(', ')}`;}).join('\n\n')});}
   const blankGroups=grpArr.filter(g=>g.cond.type==='blank');
@@ -1965,9 +1979,9 @@ function downloadCSV(){
   csv+=`PER-WELL VOLUMES (each well independent)\nWell,Condition,Type,Target (${p.units}),Culture (µL),Compound (µL),Final vol (µL),Pipettable\n`;
   wells.forEach(w=>{const cv=appMode==='phage'?w.phageVol:w.indVol;csv+=`"${w.wellId}","${w.cond.name}","${w.cond.type}","${appMode==='phage'?w.moi:(w.conc||0)}","${w.cultVol.toFixed(2)}","${cv.toFixed(3)}","${w.finalVol.toFixed(2)}","${w.pip.label}"\n`;});
   const groups={};
-  wells.forEach(w=>{if(!groups[w.cond.id])groups[w.cond.id]={cond:w.cond,n:0,cult:0,comp:0,final:0};const g=groups[w.cond.id];g.n++;g.cult+=w.cultVol;g.comp+=appMode==='phage'?w.phageVol:w.indVol;g.final+=w.finalVol;});
+  wells.forEach(w=>{if(!groups[w.cond.id])groups[w.cond.id]={cond:w.cond,conc:w.conc,n:0,cult:0,comp:0,final:0};const g=groups[w.cond.id];g.n++;g.cult+=w.cultVol;g.comp+=appMode==='phage'?w.phageVol:w.indVol;g.final+=w.finalVol;});
   csv+=`\nMASTER MIX (+10% overage)\nCondition,Wells,Target,Culture total (µL),Compound total (µL),Grand total (µL)\n`;
-  Object.values(groups).forEach(g=>{csv+=`"${g.cond.name}","${g.n}","${appMode==='phage'?g.cond.moi:(g.cond.conc||0)}","${(g.cult*OV).toFixed(1)}","${(g.comp*OV).toFixed(2)}","${(g.final*OV).toFixed(1)}"\n`;});
+  Object.values(groups).forEach(g=>{csv+=`"${g.cond.name}","${g.n}","${appMode==='phage'?g.cond.moi:(g.conc||0)}","${(g.cult*OV).toFixed(1)}","${(g.comp*OV).toFixed(2)}","${(g.final*OV).toFixed(1)}"\n`;});
   _dl(csv,`dilution-${(p.expName||'experiment').replace(/\s+/g,'_')}.csv`,'text/csv');
   showToast('✓ CSV downloaded','green');
 }
@@ -2200,7 +2214,10 @@ function _mkPayload(){
   return{version:2,savedAt:new Date().toISOString(),appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,plates:platesData,activePlate,wellAssignments,excludedWells:[...excludedWells],palette,_condIdCounter,fields};
 }
 function saveJSON(){
-  _claimSharedSession();
+  // Exporting a .json FILE must not touch dd_state. This used to call _claimSharedSession(),
+  // which — when the viewer had opened a colleague's share link — overwrote the viewer's own
+  // autosaved experiment with the shared layout, silently, with no confirm and no undo. A file
+  // download needs none of that.
   const p=P();
   const name=(p.expName||'experiment').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
   const date=p.expDate||new Date().toISOString().slice(0,10);
@@ -2220,7 +2237,11 @@ function _applyState(s){
   if(s.showReps!=null)showReps=s.showReps;
   if(Array.isArray(s.plates)&&s.plates.length){ _loadPlates(s.plates); activePlate=Math.min(s.activePlate||0,plates.length-1); loadPlate(activePlate); }
   else { const wa=(s.wellAssignments||[]).map(r=>[...r]); plates=[{fmt:'96',name:'Plate 1',assign:wa,excluded:new Set(s.excludedWells||[])}]; activePlate=0; loadPlate(0); }
-  palette=s.palette;
+  // Guard the palette: a hand-edited or truncated file with no palette key would set it to
+  // undefined, and renderPalette()'s palette.map() then throws AFTER plates/wells/fields have
+  // already been overwritten — leaving a half-applied, permanently broken state. Keep a valid
+  // palette (fall back to the built-in controls) rather than crashing.
+  palette=(Array.isArray(s.palette)&&s.palette.length)?s.palette:(typeof defaultPalette==='function'?defaultPalette():(Array.isArray(palette)?palette:[]));
   _condIdCounter=s._condIdCounter||0;
   if(s.fields)Object.entries(s.fields).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
   setMode(appMode);setTheme(appTheme);setTool(activeTool);setIntm(intmMode);
@@ -2269,6 +2290,9 @@ function saveNamedLayout(){
   // Report what actually happened. This used to show a green tick unconditionally, so a
   // failed write (quota full, private mode) looked identical to a successful save.
   if(!_writeLayouts(layouts)){ showToast(`Couldn’t save "${name}" — browser storage is full or unavailable. Use ⬇ JSON to keep it.`,'warn',6000); return; }
+  // Claiming ownership re-enables autosave and writes dd_state. If the user is viewing someone
+  // else's shared layout, that would replace their own autosaved experiment — warn first.
+  if(_sharedSession && !confirm('You are viewing a shared layout. Keeping it will replace the experiment autosaved in this browser. Continue?')){ showToast(`Saved "${name}" to the layout list (your autosaved experiment is untouched).`,'',5000); refreshLayoutSelect(); return; }
   _claimSharedSession();
   refreshLayoutSelect();
   document.getElementById('layoutSelect').value=name;
@@ -2280,8 +2304,12 @@ function loadNamedLayout(){
   const s=_readLayouts()[name];
   if(!s){showToast('Layout not found','warn');refreshLayoutSelect();return;}
   try{
-    snapshotForUndo();
+    // Do NOT snapshotForUndo() here: _snap() only captures the ACTIVE plate, but _applyState
+    // replaces the entire plates[] array and activePlate. Undoing that single-plate snapshot
+    // onto a different workspace produced a corrupt hybrid. Loading a whole workspace is a
+    // clean break, like switchPlate/removePlate, so clear the history instead.
     _applyState(s);
+    _undoStack=[];_redoStack=[];
     showToast(`✓ Layout "${name}" loaded`,'green');
   }catch(err){showToast('Could not load layout','warn');}
 }
@@ -2443,6 +2471,9 @@ showWelcomeBanner();
   .rp-tbl{width:100%;border-collapse:collapse;margin:6px 0 4px;}
   .rp-tbl td{padding:8px 6px;border-bottom:1px solid var(--line,#eee);vertical-align:top;}
   .rp-cname{font-weight:600;color:var(--text,#2a2519);}
+  /* Present in textContent (so Markdown/CSV/Word exports get a real delimiter between
+     name, detail, note and hazard) but never painted — the divs already stack visually. */
+  .rp-sep{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;}
   .rp-camt{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
   .rp-camt strong{font-size:14px;}
   .rp-cdetail{font:10.5px var(--mono,monospace);color:var(--text3,#8a8172);font-weight:400;margin-top:2px;}
@@ -2496,7 +2527,7 @@ function rpMass(g){ if(g>=1) return rpNum(g)+' g'; if(g>=0.001) return rpNum(g*1
 function rpVol(mL){ if(mL>=1000) return rpNum(mL/1000)+' L'; if(mL>=1) return rpNum(mL)+' mL'; return rpNum(mL*1000)+' µL'; }
 function rpComponentAmount(c,volMl){ var volL=volMl/1000; if(c.gramsPerLiter!=null) return {kind:'mass',grams:c.gramsPerLiter*volL,detail:c.gramsPerLiter+' g/L'}; if(c.molarity_M!=null&&c.mw_gmol!=null) return {kind:'mass',grams:c.molarity_M*c.mw_gmol*volL,detail:rpNum(c.molarity_M)+' M · MW '+rpNum(c.mw_gmol)+(c.form?' · '+c.form:'')}; if(c.percent){ if((c.percent.type||'w/v').toLowerCase()==='v/v') return {kind:'vol',mL:(c.percent.value/100)*volMl,detail:c.percent.value+'% v/v'}; return {kind:'mass',grams:(c.percent.value/100)*volMl,detail:c.percent.value+'% w/v'}; } if(c.volumeFraction) return {kind:'vol',mL:(c.volumeFraction.value/100)*volMl,detail:c.volumeFraction.value+'% v/v'}; if(c.fromStock){ var s=c.fromStock; var sc=rpConcCanon(s.stockConc,s.stockUnit), fc=rpConcCanon(s.finalConc,s.finalUnit); if(sc&&fc&&sc.fam===fc.fam&&sc.val>0){ return {kind:'vol',mL:(fc.val*volMl)/sc.val,detail:'from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock → '+rpNum(s.finalConc)+' '+s.finalUnit}; } return {kind:'note',text:'to '+rpNum(s.finalConc)+' '+s.finalUnit+' from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock'}; } return {kind:'note',text:c.note||'(see notes)'}; }
 function rpAmountStr(a){ return a.kind==='mass'?rpMass(a.grams):a.kind==='vol'?rpVol(a.mL):'—'; }
-function rpCompute(){ var r=rpAllRecipes.find(function(x){return x.id===rpSelectedId;}); var el=document.getElementById('rpSheet'); if(!r){ el.innerHTML='<div class="rp-empty">Pick a reagent from the library to see exactly what to weigh and pipette for your volume.</div>'; return; } var volMl=rpVolumeMl(); var lines=[]; var rows=(r.components||[]).map(function(c){ var a=rpComponentAmount(c,volMl); var amtTxt = a.kind==='note'?a.text:rpAmountStr(a); lines.push('  '+c.name+': '+amtTxt); var amt=a.kind==='note'?'<span class="rp-note-amt">'+escapeHtml(a.text)+'</span>':'<strong>'+escapeHtml(rpAmountStr(a))+'</strong>'; var det=a.detail?'<div class="rp-cdetail">'+escapeHtml(a.detail)+'</div>':''; var note=c.note?'<div class="rp-cnote">'+escapeHtml(c.note)+'</div>':''; var haz=c.hazard?'<div class="rp-chaz">⚠ '+escapeHtml(c.hazard)+'</div>':''; return '<tr><td class="rp-cname">'+escapeHtml(c.name)+det+note+haz+'</td><td class="rp-camt">'+amt+'</td></tr>'; }).join('');
+function rpCompute(){ var r=rpAllRecipes.find(function(x){return x.id===rpSelectedId;}); var el=document.getElementById('rpSheet'); if(!r){ el.innerHTML='<div class="rp-empty">Pick a reagent from the library to see exactly what to weigh and pipette for your volume.</div>'; return; } var volMl=rpVolumeMl(); var lines=[]; var rows=(r.components||[]).map(function(c){ var a=rpComponentAmount(c,volMl); var amtTxt = a.kind==='note'?a.text:rpAmountStr(a); lines.push('  '+c.name+': '+amtTxt); var amt=a.kind==='note'?'<span class="rp-note-amt">'+escapeHtml(a.text)+'</span>':'<strong>'+escapeHtml(rpAmountStr(a))+'</strong>'; var SEP='<span class="rp-sep"> — </span>'; var det=a.detail?SEP+'<div class="rp-cdetail">'+escapeHtml(a.detail)+'</div>':''; var note=c.note?SEP+'<div class="rp-cnote">'+escapeHtml(c.note)+'</div>':''; var haz=c.hazard?SEP+'<div class="rp-chaz">⚠ '+escapeHtml(c.hazard)+'</div>':''; return '<tr><td class="rp-cname">'+escapeHtml(c.name)+det+note+haz+'</td><td class="rp-camt">'+amt+'</td></tr>'; }).join('');
   var meta=[]; function m(k,v){ if(v!=null&&v!=='') meta.push('<dt>'+k+'</dt><dd>'+escapeHtml(String(v))+'</dd>'); }
   m('Bring to volume with', r.solvent); m('Final pH', r.finalPH); m('Adjust pH with', r.adjustPHWith); m('Sterilize', r.sterilization); m('Storage', r.storage); m('Shelf life', r.shelfLife); if(r.hazards) meta.push('<dt style="color:var(--danger,#c0392b)">Hazards</dt><dd style="color:var(--danger,#c0392b)">'+escapeHtml(r.hazards)+'</dd>');
   var notes=(r.notes&&r.notes.length)?'<div class="rp-notes"><strong>Notes</strong><ul>'+r.notes.map(function(n){return '<li>'+escapeHtml(n)+'</li>';}).join('')+'</ul></div>':'';
@@ -2632,12 +2663,15 @@ function dcCalc(){
     out.innerHTML='<div class="dc-warn err"><b>These units don’t match.</b> Stock is in '+escapeHtml(u1)+', target is in '+escapeHtml(u2)+'.'+hint+'</div>'; return;
   }
   var v2ml=dcVolMl(v2,uv);
-  if(factor<1){
-    out.innerHTML='<div class="dc-warn err"><b>Can’t dilute up.</b> Your target ('+escapeHtml(c2+' '+u2)+') is more concentrated than your stock ('+escapeHtml(c1+' '+u1)+'). You’d need a stronger stock, or to concentrate the sample.</div>'; return;
-  }
+  // Equality FIRST, and with tolerance. Concentrations are scaled by power-of-ten multipliers,
+  // so 1 µM and 1000 nM differ in IEEE-754 (factor 0.9999999999999998). Testing factor<1 before
+  // the equality check made the tool falsely refuse identical concentrations as "can't dilute up".
   if(Math.abs(factor-1)<1e-9){
     out.innerHTML='<div class="dc-card"><div class="dc-big">Stock already equals the target — use it <b>undiluted</b>. Measure <b>'+dcFmtVol(v2ml)+'</b>, no diluent needed.</div></div>';
     dcLastText=(name||'Stock')+': use undiluted, '+dcFmtVol(v2ml)+'.'; return;
+  }
+  if(factor<1-1e-9){
+    out.innerHTML='<div class="dc-warn err"><b>Can’t dilute up.</b> Your target ('+escapeHtml(c2+' '+u2)+') is more concentrated than your stock ('+escapeHtml(c1+' '+u1)+'). You’d need a stronger stock, or to concentrate the sample.</div>'; return;
   }
   var v1ml=v2ml/factor, vdil=v2ml-v1ml;
   var stockLabel=name||('the '+c1+' '+u1+' stock');
@@ -2647,10 +2681,18 @@ function dcCalc(){
   var warn='';
   if(v1ml>0&&v1ml<0.001){ // < 1 µL: suggest an intermediate pre-dilution
     var p=Math.pow(10,Math.ceil(Math.log10(0.002/v1ml)));
+    // p is rounded UP, so the intermediate transfer can overshoot the final volume. Step it
+    // back down until it fits; otherwise the recipe printed an impossible negative diluent
+    // volume, e.g. "take 16.67 µL + -6,667 nL diluent" for a 10 µL reaction.
+    while(p>10 && v1ml*p > v2ml*0.5) p/=10;
     var interV1=v1ml*p, interConc=dcFmtConc(s.fam,s.val/p);
-    warn='<div class="dc-warn info"><b>'+dcFmtVol(v1ml)+' is too little to pipette accurately.</b> Make an intermediate first:'+
-      '<ol class="dc-steps"><li>Dilute the stock <b>1:'+rpNum(p)+'</b> (e.g. 10 µL stock + '+rpNum((p-1)*10)+' µL '+escapeHtml(dil)+') → intermediate ≈ '+interConc+'.</li>'+
-      '<li>From that, take <b>'+dcFmtVol(interV1)+'</b> + '+dcFmtVol(v2ml-interV1)+' '+escapeHtml(dil)+' → '+dcFmtVol(v2ml)+'.</li></ol></div>';
+    if(interV1>=v2ml){
+      warn='<div class="dc-warn info"><b>'+dcFmtVol(v1ml)+' is too little to pipette accurately</b>, and any pre-dilution big enough to fix that will not fit inside '+dcFmtVol(v2ml)+'. Prepare a larger final volume, or make the intermediate as a separate stock first.</div>';
+    } else {
+      warn='<div class="dc-warn info"><b>'+dcFmtVol(v1ml)+' is too little to pipette accurately.</b> Make an intermediate first:'+
+        '<ol class="dc-steps"><li>Dilute the stock <b>1:'+rpNum(p)+'</b> (e.g. 10 µL stock + '+rpNum((p-1)*10)+' µL '+escapeHtml(dil)+') → intermediate ≈ '+interConc+'.</li>'+
+        '<li>From that, take <b>'+dcFmtVol(interV1)+'</b> + '+dcFmtVol(v2ml-interV1)+' '+escapeHtml(dil)+' → '+dcFmtVol(v2ml)+'.</li></ol></div>';
+    }
   } else if(factor<1.1){
     warn='<div class="dc-warn info">This is barely a dilution ('+rpNum(factor)+'×) — pipetting error will dominate. Consider preparing fresh at the final concentration instead.</div>';
   } else if(vdil>0&&vdil<0.001){
@@ -2786,7 +2828,14 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   function conc(M){ if(!isFinite(M)||M<0)return '—'; if(M>=1)return fmt(M)+' M'; if(M>=1e-3)return fmt(M*1e3)+' mM'; if(M>=1e-6)return fmt(M*1e6)+' µM'; if(M>=1e-9)return fmt(M*1e9)+' nM'; return fmt(M*1e12)+' pM'; }
   var VF={'L':1,'mL':1e-3,'µL':1e-6,'nL':1e-9};
   function vL(v,u){ return v*(VF[u]||1); }               // → litres
-  function cleanSeq(s){ return (s||'').toUpperCase().replace(/[^ACGTUN]/g,''); }
+  // Strip FASTA description lines FIRST, or the letters in a ">T4_gp23_F" header get spliced
+  // onto the front of the sequence and inflate length/GC/Tm. Then whitelist the standard bases.
+  function cleanSeq(s){ return String(s||'').replace(/^\s*>.*$/gm,'').toUpperCase().replace(/[^ACGTUN]/g,''); }
+  // How many real letters were discarded (degenerate IUPAC codes, stray text) — so the caller
+  // can warn instead of silently returning a Tm for a sequence the user never typed.
+  function seqDropped(s){ var body=String(s||'').replace(/^\s*>.*$/gm,'');
+    var kept=body.toUpperCase().replace(/[^ACGTUN]/g,'').length;
+    return Math.max(0,(body.match(/[A-Za-z]/g)||[]).length-kept); }
 
   // ---------- calculator registry ----------
   var G_NA='Nucleic acids & PCR', G_CELL='Cells & phage', G_CONC='Concentrations & general';
@@ -2891,7 +2940,9 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
           {label:'Suggested Ta',value:fmt(pick-5,3)+' °C'},
           {label:'',value:'Wallace '+fmt(wallace,3)+' °C · salt-adj '+fmt(salt,3)+' °C · A'+A+' T'+T+' G'+G+' C'+C,sub:true}
         ];
-        var warn=[]; if(gc<40||gc>60) warn.push('GC '+fmt(gc,3)+'% is outside the ideal 40–60% window.');
+        var warn=[]; var dr=seqDropped(v.seq);
+        if(dr>0) warn.push(dr+' non-standard character'+(dr>1?'s were':' was')+' ignored (IUPAC degenerate bases and stray text are not counted toward length, GC% or Tm).');
+        if(gc<40||gc>60) warn.push('GC '+fmt(gc,3)+'% is outside the ideal 40–60% window.');
         return {rows:rows, warn:warn, note:N<14?'Wallace rule (N<14): 2(A+T)+4(G+C)':'Salt-adjusted: 81.5 + 0.41·GC% − 675/N + 16.6·log₁₀[Na⁺]'};
       } },
     { id:'seqtool', name:'Sequence toolkit', group:G_NA, tags:'reverse complement gc translate sequence dna rna revcomp',
@@ -2905,11 +2956,13 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
         var c=s.split('').map(function(b){return comp[b]||'N';}).join('');
         var rc=c.split('').reverse().join('');
         var G=(s.match(/G/g)||[]).length, C=(s.match(/C/g)||[]).length;
+        var warn=[]; var dr=seqDropped(v.seq);
+        if(dr>0) warn.push(dr+' non-standard character'+(dr>1?'s were':' was')+' ignored (IUPAC degenerate bases and FASTA headers are not part of the analysed sequence).');
         return {rows:[
           {label:'Length',value:s.length+' nt'},
           {label:'Type',value:isRNA?'RNA (U detected)':'DNA'},
           {label:'GC content',value:fmt((G+C)/s.length*100,3)+' %'}
-        ], note:'Reverse complement (5′→3′):', protocol:rc, table:{cols:['','Sequence (5′→3′)'],rows:[['Reverse complement',rc],['Complement',c]]} };
+        ], warn:warn, note:'Reverse complement (5′→3′):', protocol:rc, table:{cols:['','Sequence (5′→3′)'],rows:[['Reverse complement',rc],['Complement',c]]} };
       } },
     // ---- Cells & phage ----
     { id:'od600', name:'OD₆₀₀ → cells/mL + back-dilution', group:G_CELL, tags:'od600 cells cfu density back dilution log phase culture',
@@ -3240,6 +3293,14 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     n++; if(!_near(pcrPer({mode:'cf',stock:5,final:1},25),5,0.01)) fails.push('pcr cf per-rxn wrong');
     n++; try{ var sd=byId['seqtool'].compute({seq:'ATGC'}); if(sd.protocol!=='GCAT') fails.push('seqtool DNA revcomp got '+sd.protocol+' want GCAT'); }catch(e){ fails.push('seqtool DNA threw '+e.message); }
     n++; try{ var sr=byId['seqtool'].compute({seq:'AUGC'}); if(sr.protocol!=='GCAU') fails.push('seqtool RNA revcomp got '+sr.protocol+' want GCAU'); }catch(e){ fails.push('seqtool RNA threw '+e.message); }
+    // A pasted FASTA record must not splice its header letters onto the sequence.
+    n++; try{ var sf=byId['tm'].compute({seq:'>T4_gp23_F\nGGATCCATGGCTTAA'});
+      if(sf.rows[0].value!=='15 nt') fails.push('tm: FASTA header leaked into the sequence (length '+sf.rows[0].value+', want 15 nt)');
+    }catch(e){ fails.push('tm FASTA threw '+e.message); }
+    // Dropped characters must be surfaced, never silently ignored.
+    n++; try{ var sd2=byId['tm'].compute({seq:'ATGCRYSWKMATGC'});
+      if(!(sd2.warn||[]).some(function(w){return /non-standard/i.test(w);})) fails.push('tm: degenerate bases dropped with no warning');
+    }catch(e){ fails.push('tm degenerate threw '+e.message); }
     // ── gel simulator model + ladder integrity
     if(window.GEL&&GEL._model){
       var M=GEL._model, rng=M.rangeFor({type:'dna',pct:'1'});
@@ -3257,6 +3318,11 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       if(!neb||neb.b.length!==10||neb.b[0]!==10000||neb.ref.indexOf(3000)<0) fails.push('gel: NEB 1 kb ladder spec wrong');
       n++; var bp=M.ladders().filter(function(L){return L.id==='biorad-precision';})[0];
       if(!bp||bp.b[0]!==250||bp.b[bp.b.length-1]!==10) fails.push('gel: Bio-Rad Precision Plus spec wrong');
+      // NEB N3200/N0550 are the same 19-band formulation; 0.5/1.0/3.0 kb are the reference bands.
+      n++; var kp=M.ladders().filter(function(L){return L.id==='neb-1kbplus';})[0];
+      if(!kp||kp.b.length!==19||kp.ref.indexOf(500)<0) fails.push('gel: NEB 1 kb Plus bands/reference wrong');
+      n++; var tl=M.ladders().filter(function(L){return L.id==='neb-2log';})[0];
+      if(!tl||tl.b.length!==19||[600,700,800,900].some(function(x){return tl.b.indexOf(x)<0;})) fails.push('gel: NEB 2-Log/N0550 is missing its 600–900 bp bands');
     }
     // ── notebook markdown + serialisers
     if(window.NB&&NB._md2html){
@@ -3268,6 +3334,22 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       n++; var csv=NB._toCsv(te);
       if(csv.indexOf('"A","B"')<0) fails.push('notebook: CSV export failed');
       n++; if(csv.charAt(0)==='\n') fails.push('notebook: CSV must not start with a blank row');
+      // '*' is a multiplication sign in this app (SCI accepts 2*10^8) — it must survive markdown.
+      n++; if(NB._md2html('titer 2*10^8 and 2*10^6').indexOf('<em>')>=0) fails.push('markdown: * multiplication was eaten as italic');
+      n++; if(NB._md2html('a *real* italic').indexOf('<em>real</em>')<0) fails.push('markdown: genuine italic stopped working');
+      // XML-illegal control characters must never reach document.xml, or Word rejects the file.
+      n++; try{ var dx=NBDOCX.build({id:'t',title:'T',date:'2026-01-01',blocks:[{type:'text',md:'a\x0Bb\x00c'}]});
+        var dxml=new TextDecoder().decode(dx.files.filter(function(f){return f.name==='word/document.xml';})[0].data);
+        if(/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(dxml)) fails.push('docx: XML-illegal control char survived into document.xml');
+      }catch(e){ fails.push('docx: build threw on control characters — '+e.message); }
+    }
+    // ── scientific-notation parsing: every one of these is a silent-wrong-number risk
+    if(window.SCI){
+      var sciCases=[['10^8',1e8],['10^8 PFU/mL',1e8],['10^3 cells',1e3],['2*10^8',2e8],['2×10⁸',2e8],
+                    ['1,200',1200],['1,5',1.5],['2e8',2e8],['1000',1000],['10⁸',1e8]];
+      sciCases.forEach(function(c){ n++;
+        var got=SCI.parse(c[0]);
+        if(!(Math.abs(got-c[1])<=Math.abs(c[1])*1e-9)) fails.push('SCI.parse("'+c[0]+'") = '+got+', want '+c[1]); });
     }
     return {total:n, passed:n-fails.length, failures:fails};
   }
@@ -3291,7 +3373,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       {m:'dilcalc',icon:'💧',title:'Dilution & Molarity',desc:'C1V1 across every unit, serial dilutions, molarity↔mass, and weigh-outs.'},
       {m:'reagent',icon:'⚗️',title:'Reagent Prep',desc:nRec+' verified buffer / media / stock recipes — including miniprep P1/P2/P3, Buffer PE, CTAB — scaled to any volume.'},
       {m:'calc',icon:'🧬',title:'Molbio Calculators',desc:CALCS.length+' bench calculators: ng↔pmol, A260, ligation, primer Tm, OD→cells, phage titer/MOI, %↔molarity & more.'},
-      {m:'proto',icon:'📋',title:'Protocols',desc:(window.PROTO?PROTO.list.length:10)+' step-by-step protocols — miniprep, CTAB gDNA, gels, transformation, plaque assay — that rescale as you change the numbers.'},
+      {m:'proto',icon:'📋',title:'Protocols',desc:(window.PROTO?PROTO.list.length:21)+' step-by-step protocols — miniprep, CTAB gDNA, gels, transformation, plaque assay — that rescale as you change the numbers.'},
       {m:'gel',icon:'🧪',title:'Gel Simulator',desc:'Predict an agarose or SDS-PAGE run before you pour it — '+nLad+' vendor ladders, band-resolution warnings and a best-% suggestion.'},
       {m:'notebook',icon:'📓',title:'Lab Notebook',desc:'Pull results from any module into a dated entry, add your own notes, and export to Markdown, HTML, PDF, Word, CSV or JSON.'}
     ];
@@ -4052,6 +4134,9 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     copy:function(){ dcCopyText(PROTO._txt); },
     list:PROTOCOLS
   };
+  // The hub renders before this IIFE runs, so its protocol count starts as a literal.
+  // Refresh it now that the real list exists, so the two can never disagree.
+  if(typeof appMode!=='undefined'&&appMode==='home'&&window.renderHome) try{ renderHome(); }catch(e){}
 })();
 
 /* ══════════════════════════ GEL SIMULATOR ══════════════════════════ */
@@ -4079,7 +4164,9 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   //    no vendor artwork is reproduced. "ref" marks the vendor's reference/bright bands.
   var LADDERS=[
    {id:'neb-1kb', v:'NEB', t:'dna', n:'1 kb DNA Ladder (N3232)', b:[10000,8000,6000,5000,4000,3000,2000,1500,1000,500], ref:[3000]},
-   {id:'neb-1kbplus', v:'NEB', t:'dna', n:'1 kb Plus DNA Ladder (N3200)', b:[10000,8000,6000,5000,4000,3000,2000,1500,1200,1000,900,800,700,600,500,400,300,200,100], ref:[3000,1000]},
+   // NEB's spec for N3200: "the 0.5, 1.0 and 3.0 kb bands have increased intensity to serve as
+   // reference points" — 500 belongs in ref, especially as the 100–900 bp region is nine even rungs.
+   {id:'neb-1kbplus', v:'NEB', t:'dna', n:'1 kb Plus DNA Ladder (N3200)', b:[10000,8000,6000,5000,4000,3000,2000,1500,1200,1000,900,800,700,600,500,400,300,200,100], ref:[3000,1000,500]},
    // N0550 is the Quick-Load Purple version and was formerly sold as "Quick-Load Purple 2-Log".
    // NEB renamed the 2-Log ladder to "1 kb Plus" with no change to the formulation, so this
    // carries the same 19 bands as N3200 above. The old entry here was missing 600-900 bp,
@@ -4281,7 +4368,10 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     var el=document.getElementById('gelControls'); if(!el) return;
     var lads=allLadders().filter(function(l){return l.t===S.type;});
     if(!lads.filter(function(l){return l.id===S.ladder;}).length && lads.length) S.ladder=lads[0].id;
-    var pcts=Object.keys(S.type==='dna'?DNA_RANGE:PROT_RANGE);
+    // Sort numerically. Object.keys() returns integer-like keys ('1','2','3') first in numeric
+    // order and only then the rest in insertion order, which rendered the gel-percentage
+    // dropdown as 1, 2, 3, 0.5, 0.7, 0.8, 1.2, 1.5.
+    var pcts=Object.keys(S.type==='dna'?DNA_RANGE:PROT_RANGE).sort(function(a,b){return parseFloat(a)-parseFloat(b);});
     el.innerHTML=
       '<div class="mbc-f"><label for="gelType">Gel type</label><select id="gelType" onchange="GEL.setType(this.value)">'+
         '<option value="dna"'+(S.type==='dna'?' selected':'')+'>DNA — agarose</option>'+
@@ -4394,7 +4484,10 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     var s=escapeHtml(String(src||''));
     s=s.replace(/`([^`\n]+)`/g,'<code>$1</code>');
     s=s.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');
-    s=s.replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>');
+    // Italic, but NOT when '*' is a multiplication sign. This app's own SCI parser accepts
+    // '2*10^8', so users type '*' as multiply; requiring the opening '*' to sit at a
+    // non-word boundary and be followed by a non-space keeps "titer 2*10^8 ... 2*10^6" intact.
+    s=s.replace(/(^|[^\w*])\*([^\s*][^*\n]*?)\*(?![\w])/g,'$1<em>$2</em>');
     s=s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
     var out=[], list=null;
     s.split(/\n/).forEach(function(line){
@@ -4413,12 +4506,22 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   }
 
   // ── storage
-  function all(){ try{ return JSON.parse(lsGet('dd_notebook')||'[]'); }catch(e){ return []; } }
-  function persist(list){ if(window._sharedSession) return; try{ lsSet('dd_notebook',JSON.stringify(list)); }catch(e){ showToast('Notebook too large for local storage — export it','warn'); } }
+  // The in-memory list is the source of truth; storage is a write-through cache. Previously
+  // all() re-parsed storage on every call, so if a write failed (quota — image blocks embed
+  // full base64 PNGs) the mutated entry was garbage-collected and the next render silently
+  // reverted to the pre-edit text, with the textarea still showing what the user had typed.
+  var _list=null;
+  function all(){ if(!_list){ try{ _list=JSON.parse(lsGet('dd_notebook')||'[]'); }catch(e){ _list=[]; }
+                              if(!Array.isArray(_list)) _list=[]; } return _list; }
+  function persist(list){ _list=list;                       // keep the edit even if the write fails
+    if(window._sharedSession) return true;
+    if(!lsSet('dd_notebook',JSON.stringify(list))){
+      showToast('Notebook too large for this browser’s storage — export it to keep it safe.','warn',6000); return false; }
+    return true; }
   var cur=null;
   function entries(){ return all(); }
   function curEntry(){ var l=all(); return l.filter(function(e){return e.id===cur;})[0]||l[0]||null; }
-  function saveEntry(e){ var l=all(); var i=l.map(function(x){return x.id;}).indexOf(e.id); if(i<0) l.unshift(e); else l[i]=e; persist(l); }
+  function saveEntry(e){ var l=all(); var i=l.map(function(x){return x.id;}).indexOf(e.id); if(i<0) l.unshift(e); else l[i]=e; return persist(l); }
   function today(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 
   // ── capture sources (each module exposes blocks(sel))
@@ -4551,8 +4654,10 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       var t=e.blocks[i]; e.blocks[i]=e.blocks[j]; e.blocks[j]=t; saveEntry(e); render(); },
     delBlock:function(i){ var e=curEntry(); if(!e) return; e.blocks.splice(i,1); saveEntry(e); render(); },
     addBlocks:function(blocks){ var e=curEntry(); if(!e){ NB.newEntry(); e=curEntry(); }
-      e.blocks=e.blocks.concat(blocks||[]); saveEntry(e);
-      if(appMode==='notebook') render(); showToast('✓ Added '+(blocks||[]).length+' block(s) to “'+(e.title||'entry')+'”','green'); },
+      e.blocks=e.blocks.concat(blocks||[]); var ok=saveEntry(e);
+      if(appMode==='notebook') render();
+      // Only claim success if it actually persisted — persist() already warns on failure.
+      if(ok!==false) showToast('✓ Added '+(blocks||[]).length+' block(s) to “'+(e.title||'entry')+'”','green'); },
     // picker: choose what to pull in
     pick:function(src){ NB._pickModal(src||null); },
     capture:function(src){ NB._pickModal(src); },
@@ -4750,7 +4855,13 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     var out=new Uint8Array(off), p=0; chunks.forEach(function(c){ out.set(c,p); p+=c.length; });
     return out;
   }
-  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function esc(s){ return String(s==null?'':s)
+    // XML 1.0 forbids these control characters outright; a single one (e.g. U+000B, the
+    // vertical tab Word puts on the clipboard for a soft line break) makes document.xml
+    // malformed and Word refuses to open the whole package. Keep \t \n \r, which are legal.
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,' ')
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/g,'$1')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function para(text,opt){
     opt=opt||{}; var rpr='';
     if(opt.b) rpr+='<w:b/>';
@@ -4790,7 +4901,8 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       var h=l.match(/^(#{1,3})\s+(.*)$/);
       if(h){ out+=para(h[2],{b:true,sz:h[1].length===1?30:(h[1].length===2?26:24),space:160}); return; }
       var li=l.match(/^\s*(?:[-*]|\d+[.)])\s+(.*)$/);
-      var t=(li?'• '+li[1]:l).replace(/\*\*(.+?)\*\*/g,'$1').replace(/\*(.+?)\*/g,'$1').replace(/`(.+?)`/g,'$1');
+      // Same italic-vs-multiplication guard as md2html, so a Word export of "2*10^8" keeps its asterisks.
+      var t=(li?'• '+li[1]:l).replace(/\*\*(.+?)\*\*/g,'$1').replace(/(^|[^\w*])\*([^\s*][^*\n]*?)\*(?![\w])/g,'$1$2').replace(/`(.+?)`/g,'$1');
       if(t.trim()) out+=para(t);
     });
     return out;
