@@ -649,18 +649,21 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div class="f"><label>Culture available (µL)</label><input type="number" id="infTotal" value="25000" min="0" step="any" oninput="update()"></div>
     </div>
     <div class="f"><label>Culture / host name</label><input id="hostName" placeholder="e.g. E. coli BL21" oninput="update()"></div>
-    <div class="sl" style="margin-top:4px;">Phage stock</div>
+    <div class="sl" style="margin-top:4px;">Phage stocks</div>
+    <div id="phageList"></div>
+    <button class="addbtn" onclick="openPhageModal(null)" style="width:100%;padding:7px;margin-top:4px;">＋ Add phage stock</button>
+    <div class="ibox" style="margin-top:4px;font-size:10px;">Each condition picks one of these stocks, so a plate can compare phages whose titers differ by orders of magnitude.</div>
+    <div class="sl" style="margin-top:4px;">Dilution &amp; pipetting</div>
     <div class="r2">
-      <div class="f"><label>Titer (PFU/mL)</label><input type="number" id="phageTiter" value="1e10" step="any" oninput="update()"></div>
-      <div class="f"><label>Vol available (µL)</label><input type="number" id="phageVol" value="1000" step="any" oninput="update()"></div>
+      <div class="f"><label>Dilution factor</label><input type="number" id="sdFactor" value="10" min="2" step="1" oninput="update()"></div>
+      <div class="f"><label>Step volume (µL)</label><input type="number" id="sdStepVol" value="10" min="1" step="1" oninput="update()"></div>
     </div>
-    <div class="sl" style="margin-top:4px;">Serial Dilution Planner</div>
-    <div class="f"><label>Target working titer (PFU/mL)</label><input type="number" id="sdTarget" value="1e8" step="any" oninput="renderSerialDilution()"></div>
     <div class="r2">
-      <div class="f"><label>Dilution factor</label><input type="number" id="sdFactor" value="10" min="2" step="1" oninput="renderSerialDilution()"></div>
-      <div class="f"><label>Min pipettable (µL)</label><input type="number" id="sdMinPip" value="2" min="0.5" step="0.5" oninput="renderSerialDilution()"></div>
+      <div class="f"><label>Min pipettable (µL)</label><input type="number" id="sdMinPip" value="2" min="0.1" step="0.5" oninput="update()"></div>
+      <div class="f"><label>Max pipettable (µL)</label><input type="number" id="sdMaxPip" value="20" min="1" step="1" oninput="update()"></div>
     </div>
-    <div class="f"><label>Step volume (µL)</label><input type="number" id="sdStepVol" value="10" min="1" step="1" oninput="renderSerialDilution()"></div>
+    <div class="f"><label for="sdPctCap">Cap at % of well volume</label><input type="number" id="sdPctCap" value="10" min="0" max="100" step="1" oninput="update()"><span class="h">0 = no cap</span></div>
+    <div class="f"><label for="sdTarget">Manual target titer (PFU/mL)</label><input type="number" id="sdTarget" value="1e8" step="any" oninput="update()"><span class="h">for the fixed-target scheme</span></div>
   </div>
 
   <!-- CONDITIONS PALETTE -->
@@ -770,7 +773,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
 
   <!-- SERIAL DILUTION (phage mode) -->
   <div class="panel" id="serialPanel" style="display:none;">
-    <div class="ph"><span class="ptitle">Serial Dilution Scheme</span><span class="psub" id="serialSub"></span></div>
+    <div class="ph"><span class="ptitle">Dilution &amp; pipetting plan</span><span class="psub" id="serialSub"></span></div>
     <div class="serial-steps" id="serialSteps"></div>
   </div>
 
@@ -792,9 +795,11 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <div style="overflow-x:auto;">
       <table><thead><tr>
         <th>Well</th><th>Condition</th><th>Type</th>
+        <th id="thPhage" style="display:none;">Phage stock</th>
         <th id="thConc">Target</th>
         <th id="thCult">Culture (µL)</th>
         <th id="thInd">Compound (µL)</th>
+        <th id="thPip" style="display:none;">Pipette from dilution</th>
         <th>Final vol (µL)</th><th>Pipettable?</th>
       </tr></thead>
       <tbody id="wbody"></tbody></table>
@@ -843,6 +848,17 @@ body.print-plate-mode .excl-bar{display:none!important;}
         <span id="condModalConcUnit" style="font-family:var(--mono);font-size:12px;color:var(--text2);display:flex;align-items:center;padding:0 6px;"></span>
       </div>
     </div>
+    <!-- Phage mode only: which stock this condition draws from, plus an
+         optional per-condition titer for a re-titered aliquot. -->
+    <div class="f" id="condModalPhageRow" style="display:none;">
+      <label for="condModalPhage">Phage stock</label>
+      <select id="condModalPhage"></select>
+    </div>
+    <div class="f" id="condModalTiterRow" style="display:none;">
+      <label for="condModalTiter">Titer override (PFU/mL)</label>
+      <input type="number" id="condModalTiter" placeholder="blank = use the stock's titer" step="any">
+      <span class="h" id="condModalTiterHint"></span>
+    </div>
     <div class="f">
       <label>Color</label>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:7px;" id="modalPalette"></div>
@@ -864,6 +880,47 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <div class="modal-footer">
       <button class="modal-btn" onclick="closeCondModal()">Cancel</button>
       <button class="modal-btn primary" onclick="saveCondModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ PHAGE STOCK MODAL ══════════ -->
+<div class="modal-overlay" id="phageModal" style="display:none;" onclick="if(event.target===this)closePhageModal()">
+  <div class="modal-box">
+    <div class="modal-title" id="phageModalTitle">Add phage stock</div>
+    <input type="hidden" id="phageModalId">
+    <div class="f">
+      <label for="phageModalName">Name</label>
+      <input id="phageModalName" placeholder="e.g. T4, N4 lysate 2026-07">
+    </div>
+    <div class="r2">
+      <div class="f"><label for="phageModalTiter">Titer (PFU/mL)</label><input type="number" id="phageModalTiter" value="1e10" step="any"></div>
+      <div class="f"><label for="phageModalVol">Vol available (µL)</label><input type="number" id="phageModalVol" value="1000" min="0" step="any"></div>
+    </div>
+    <div class="f">
+      <label for="phageModalNote">Note (optional)</label>
+      <input id="phageModalNote" placeholder="e.g. CsCl-purified, stored 4 °C">
+    </div>
+    <!-- Titer straight from a plaque assay, using the same math as the
+         Phage titer calculator (titerFromPlaques). -->
+    <details id="phageModalAssay" style="margin-bottom:11px;">
+      <!-- tabindex is explicit: the modal focus trap selects on [tabindex], and a
+           bare <summary> would fall outside it and become keyboard-unreachable. -->
+      <summary tabindex="0" style="font-family:var(--mono);font-size:11px;color:var(--text2);cursor:pointer;padding:5px 0;">Calculate titer from a plaque assay</summary>
+      <div style="padding-top:7px;">
+        <div class="r2">
+          <div class="f"><label for="paPlaques">Plaques counted</label><input type="number" id="paPlaques" value="120" min="0" step="1" oninput="updatePlaqueAssay()"></div>
+          <div class="f"><label for="paDil">Total dilution</label><input type="number" id="paDil" value="1e6" step="any" oninput="updatePlaqueAssay()"></div>
+        </div>
+        <div class="f"><label for="paPlated">Volume plated (mL)</label><input type="number" id="paPlated" value="0.1" min="0" step="any" oninput="updatePlaqueAssay()"></div>
+        <div class="ibox" id="paResult" style="font-size:10.5px;">Enter a plate count.</div>
+        <button class="addbtn" type="button" onclick="applyPlaqueAssay()" style="width:100%;padding:7px;margin-top:6px;">Use this titer</button>
+      </div>
+    </details>
+    <div class="modal-footer">
+      <button class="modal-btn" id="phageModalDelete" onclick="deletePhageFromModal()" style="margin-right:auto;">Delete</button>
+      <button class="modal-btn" onclick="closePhageModal()">Cancel</button>
+      <button class="modal-btn primary" onclick="savePhageModal()">Save</button>
     </div>
   </div>
 </div>
@@ -1033,6 +1090,60 @@ let palette = [
   {id:'pos',  name:'Positive ctrl', conc:null,moi:null,color:'#d47b7b',type:'pos', builtin:true},
 ];
 
+// ── Phage stock registry (phage mode) ──────────────────────────────
+// One entry per lysate/aliquot on the bench. A condition points at one
+// of these via cond.phageId, so a plate can compare phages whose titers
+// differ by orders of magnitude. cond.titer (optional) overrides the
+// stock's titer for that one condition — e.g. a re-titered aliquot.
+let phages = [{id:'p1', name:'Phage 1', titer:1e10, vol:1000, note:''}];
+let _phageIdCounter = 1;
+
+// The stock a condition draws from, and the titer actually used for it.
+function phageFor(cond){
+  if(!cond)return phages[0]||null;
+  return phages.find(x=>x.id===cond.phageId)||phages[0]||null;
+}
+function titerFor(cond){
+  if(cond&&cond.titer>0)return cond.titer;          // per-condition override
+  const st=phageFor(cond);
+  return st&&st.titer>0?st.titer:0;
+}
+
+// Restore the registry from any saved state, old or new.
+// Layouts saved before the registry existed carry a single global titer in
+// `fields.phageTiter` / `fields.phageVol`; those become stock #1 and every
+// condition points at it, so an old share link opens with identical numbers.
+// Everything here is untrusted input (share links, imported JSON), so each
+// field is coerced rather than trusted.
+function _adoptPhages(raw,legacyTiter,legacyVol){
+  const out=[];
+  (Array.isArray(raw)?raw:[]).forEach((x,i)=>{
+    if(!x||typeof x!=='object')return;
+    const t=Number(x.titer), v=Number(x.vol);
+    out.push({
+      id:  String(x.id||'').trim()||('p'+(i+1)),
+      name:String(x.name==null?'Phage':x.name).slice(0,80)||'Phage',
+      titer:isFinite(t)&&t>0?t:0,
+      vol: isFinite(v)&&v>=0?v:0,
+      note:String(x.note==null?'':x.note).slice(0,200)
+    });
+  });
+  if(!out.length){
+    const t=Number(legacyTiter), v=Number(legacyVol);
+    out.push({id:'p1',name:'Phage 1',titer:isFinite(t)&&t>0?t:1e10,vol:isFinite(v)&&v>=0?v:1000,note:''});
+  }
+  phages=out;
+  _phageIdCounter=out.reduce((m,x)=>{const n=/^p(\d+)$/.exec(x.id);return n?Math.max(m,+n[1]):m;},0)||out.length;
+  _reconcilePhageRefs();
+}
+
+// Any condition whose stock is missing (deleted, or a pre-registry layout)
+// falls back to the first stock rather than silently computing 0 µL.
+function _reconcilePhageRefs(){
+  if(!phages.length)phages=[{id:'p1',name:'Phage 1',titer:1e10,vol:1000,note:''}];
+  palette.forEach(c=>{ if(!c.phageId||!phages.some(pp=>pp.id===c.phageId)) c.phageId=phages[0].id; });
+}
+
 const CC = ['#74b480','#3d8a55','#e87520','#6090cc','#b87ab0','#d4954a','#1e4888','#905090',
             '#3a6aaa','#2d6e42','#8b4510','#481850','#4aabb0','#e05c5c','#d4c44a','#6a3070'];
 const PALETTE_COLORS = [
@@ -1101,6 +1212,9 @@ function setMode(m) {
 // PALETTE MANAGEMENT
 // ══════════════════════════════════════════════════════════════════
 function renderPalette() {
+  // Kept together so every restore path (share link, JSON, localStorage, undo)
+  // refreshes the stock list too — they all already call renderPalette().
+  renderPhageList();
   const div = document.getElementById('paletteList');
   div.innerHTML = palette.map(c => `
     <div class="pal-item${activeCondId===c.id?' selected':''}" onclick="setActiveCondId('${jsAttr(c.id)}')">
@@ -1121,7 +1235,13 @@ function renderPalette() {
 }
 
 function fmtPalVal(c) {
-  if (appMode==='phage') return c.moi!=null&&c.moi>0?`MOI ${c.moi}`:'';
+  if (appMode==='phage') {
+    if (!(c.moi>0)) return '';
+    // Name the stock: on a multi-phage plate "MOI 1" alone is ambiguous.
+    const st=phageFor(c);
+    const tag=phages.length>1&&st?` · ${st.name}`:'';
+    return `MOI ${c.moi}${tag}${c.titer>0?' *':''}`;
+  }
   const units = (document.getElementById('concUnits')||{}).value||'nM';
   if (c.type==='cond' && c.conc!=null && c.conc>0) return `${c.conc} ${units}`;
   return '';
@@ -1164,6 +1284,22 @@ function openCondModal(id) {
   document.getElementById('condModalColorPicker').value = defaultColor;
   document.getElementById('condModalColorHex').value = defaultColor;
   document.getElementById('condModalType').value = cond?.type||'cond';
+  // Phage stock + optional titer override — phage mode only.
+  const isPhage = appMode==='phage';
+  document.getElementById('condModalPhageRow').style.display = isPhage?'':'none';
+  document.getElementById('condModalTiterRow').style.display = isPhage?'':'none';
+  if(isPhage){
+    const sel=document.getElementById('condModalPhage');
+    sel.innerHTML=phages.map(ph=>`<option value="${escapeHtml(ph.id)}">${escapeHtml(ph.name)} — ${ph.titer>0?ph.titer.toExponential(2):'no titer'} PFU/mL</option>`).join('');
+    sel.value = (cond&&phages.some(ph=>ph.id===cond.phageId)) ? cond.phageId : (phages[0]?.id||'');
+    document.getElementById('condModalTiter').value = cond?.titer>0?cond.titer:'';
+    const syncHint=()=>{
+      const st=phages.find(ph=>ph.id===sel.value);
+      document.getElementById('condModalTiterHint').textContent =
+        st&&st.titer>0?`blank = ${st.titer.toExponential(2)} PFU/mL from ${st.name}`:'this stock has no titer set';
+    };
+    sel.onchange=syncHint; syncHint();
+  }
   // Palette swatches
   document.getElementById('modalPalette').innerHTML = PALETTE_COLORS.map(col=>
     `<span style="width:18px;height:18px;border-radius:4px;background:${col};cursor:pointer;display:inline-block;border:2px solid ${col===defaultColor?'var(--text)':'transparent'};" onclick="setModalColor('${col}')"></span>`
@@ -1188,16 +1324,127 @@ function saveCondModal() {
   const colorHex = document.getElementById('condModalColorHex').value.trim();
   const color = /^#[0-9a-fA-F]{6}$/.test(colorHex)?colorHex:document.getElementById('condModalColorPicker').value;
   const type = document.getElementById('condModalType').value;
+  // Phage fields are only meaningful in phage mode; in plasmid mode keep
+  // whatever the condition already had rather than wiping it, so switching
+  // modes to tweak a name does not silently drop a stock assignment.
+  const existing = id ? palette.find(c=>c.id===id) : null;
+  const isPhage = appMode==='phage';
+  const phageId = isPhage ? (document.getElementById('condModalPhage').value||phages[0]?.id)
+                          : (existing?.phageId||phages[0]?.id);
+  const tOv = isPhage ? (parseFloat(document.getElementById('condModalTiter').value)||0)
+                      : (existing?.titer||0);
   if (id) {
     const idx = palette.findIndex(c=>c.id===id);
-    if (idx>=0) Object.assign(palette[idx],{name,conc:concRaw,moi:concRaw,color,type});
+    if (idx>=0) Object.assign(palette[idx],{name,conc:concRaw,moi:concRaw,color,type,phageId,titer:tOv});
   } else {
     _condIdCounter++;
     const newId='c'+_condIdCounter;
-    palette.push({id:newId,name,conc:concRaw,moi:concRaw,color,type,builtin:false});
+    palette.push({id:newId,name,conc:concRaw,moi:concRaw,color,type,phageId,titer:tOv,builtin:false});
     setActiveCondId(newId);
   }
   closeCondModal(); renderPalette(); renderPlate(); update();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PHAGE STOCK REGISTRY — list + modal
+// ══════════════════════════════════════════════════════════════════
+function renderPhageList(){
+  const div=document.getElementById('phageList');
+  if(!div)return;
+  // The row itself is not clickable: the edit/delete buttons are always visible
+  // (rather than hover-revealed like the condition rows), so there is nothing
+  // here that a keyboard or touch user cannot reach.
+  div.innerHTML=phages.map(ph=>{
+    const used=palette.filter(c=>c.phageId===ph.id&&(c.moi||0)>0).length;
+    const meta=[ph.titer>0?ph.titer.toExponential(2)+' PFU/mL':'no titer',
+                ph.vol>0?ph.vol+' µL':null,
+                used?used+(used===1?' cond.':' conds.'):null].filter(Boolean).join(' · ');
+    return `<div class="pal-item">
+      <span class="pal-name" title="${escapeHtml(ph.note||ph.name)}">${escapeHtml(ph.name)}</span>
+      <span class="pal-val">${escapeHtml(meta)}</span>
+      <div class="pal-actions" style="opacity:1;">
+        <button class="pal-icobtn" onclick="openPhageModal('${jsAttr(ph.id)}')" title="Edit ${escapeHtml(ph.name)}" aria-label="Edit phage stock ${escapeHtml(ph.name)}">✎</button>
+        <button class="pal-icobtn" onclick="deletePhage('${jsAttr(ph.id)}')" title="Delete ${escapeHtml(ph.name)}" aria-label="Delete phage stock ${escapeHtml(ph.name)}"${phages.length<2?' disabled':''}>✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+let _editingPhageId=null;
+function openPhageModal(id){
+  _editingPhageId=id||null;
+  const ph=id?phages.find(x=>x.id===id):null;
+  document.getElementById('phageModalTitle').textContent=id?'Edit phage stock':'Add phage stock';
+  document.getElementById('phageModalId').value=id||'';
+  document.getElementById('phageModalName').value=ph?ph.name:`Phage ${phages.length+1}`;
+  document.getElementById('phageModalTiter').value=ph&&ph.titer>0?ph.titer:'1e10';
+  document.getElementById('phageModalVol').value=ph?ph.vol:1000;
+  document.getElementById('phageModalNote').value=ph?ph.note||'':'';
+  // Deleting the last stock would leave every condition pointing at nothing.
+  document.getElementById('phageModalDelete').style.display=(id&&phages.length>1)?'':'none';
+  document.getElementById('phageModalAssay').open=false;
+  updatePlaqueAssay();
+  document.getElementById('phageModal').style.display='flex';
+  document.getElementById('phageModalName').focus();
+}
+function closePhageModal(){ document.getElementById('phageModal').style.display='none'; }
+
+function savePhageModal(){
+  snapshotForUndo();
+  const id=document.getElementById('phageModalId').value;
+  const name=document.getElementById('phageModalName').value.trim()||'Phage';
+  const titer=parseFloat(document.getElementById('phageModalTiter').value)||0;
+  const vol=parseFloat(document.getElementById('phageModalVol').value)||0;
+  const note=document.getElementById('phageModalNote').value.trim();
+  if(id){
+    const ph=phages.find(x=>x.id===id);
+    if(ph)Object.assign(ph,{name,titer,vol,note});
+  }else{
+    _phageIdCounter++;
+    phages.push({id:'p'+_phageIdCounter,name,titer,vol,note});
+  }
+  closePhageModal(); _reconcilePhageRefs(); renderPhageList(); renderPalette(); update();
+}
+
+function deletePhage(id){
+  if(phages.length<2){ showToast('Keep at least one phage stock','warn'); return; }
+  const ph=phages.find(x=>x.id===id); if(!ph)return;
+  const users=palette.filter(c=>c.phageId===id);
+  if(users.length&&!confirm(`${users.length} condition(s) use "${ph.name}". They will fall back to "${(phages.find(x=>x.id!==id)||{}).name}". Delete anyway?`))return;
+  snapshotForUndo();
+  phages=phages.filter(x=>x.id!==id);
+  _reconcilePhageRefs();
+  renderPhageList(); renderPalette(); update();
+}
+function deletePhageFromModal(){
+  const id=document.getElementById('phageModalId').value;
+  if(!id)return;
+  closePhageModal();
+  deletePhage(id);
+}
+
+// ── Plaque assay → titer, inside the stock modal ──
+function updatePlaqueAssay(){
+  const el=document.getElementById('paResult'); if(!el)return;
+  const plaques=parseFloat(document.getElementById('paPlaques').value);
+  const dil=parseFloat(document.getElementById('paDil').value);
+  const plated=parseFloat(document.getElementById('paPlated').value);
+  const t=titerFromPlaques(plaques,dil,plated);
+  if(!isFinite(t)||t<=0){ el.className='ibox'; el.textContent='Enter plaques, dilution and volume plated.'; return; }
+  // The 30–300 window is the same caveat the Phage titer calculator states.
+  const off=plaques<30||plaques>300;
+  el.className=off?'ibox w':'ibox';
+  el.innerHTML=`<strong>${escapeHtml(t.toExponential(2))} PFU/mL</strong> = ${escapeHtml(String(plaques))} × ${escapeHtml(dil.toExponential(0))} ÷ ${escapeHtml(String(plated))} mL`
+    +(off?`<br>⚠ ${escapeHtml(String(plaques))} plaques is outside the 30–300 countable window — the estimate is statistically weak.`:'');
+}
+function applyPlaqueAssay(){
+  const plaques=parseFloat(document.getElementById('paPlaques').value);
+  const dil=parseFloat(document.getElementById('paDil').value);
+  const plated=parseFloat(document.getElementById('paPlated').value);
+  const t=titerFromPlaques(plaques,dil,plated);
+  if(!isFinite(t)||t<=0){ showToast('Enter a valid plaque count first','warn'); return; }
+  document.getElementById('phageModalTiter').value=t.toExponential(3);
+  showToast('✓ Titer filled from the plaque count','green');
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1400,7 +1647,8 @@ function renderBenchCheck(p,wells){
   }
   const chips=[];
   chips.push(['≈ '+tips,'Pipette tips']);
-  chips.push([compoundTot.toFixed(1)+' µL', isPhage?'Phage to dispense':((p.inducerName||'Compound')+' needed')]);
+  const stocksUsed=isPhage?new Set(wells.filter(w=>w.stock&&w.phageVol>0).map(w=>w.stock.id)).size:0;
+  chips.push([compoundTot.toFixed(1)+' µL', isPhage?(stocksUsed>1?`Neat phage (${stocksUsed} stocks)`:'Neat phage needed'):((p.inducerName||'Compound')+' needed')]);
   chips.push([(cultureTot/1000).toFixed(2)+' mL', (isPhage?'Culture':(p.cultureName||'Culture'))+' needed']);
   if(mediaTot>0) chips.push([(mediaTot/1000).toFixed(2)+' mL','Media (blanks)']);
   chips.push([wells.length+'','Wells filled']);
@@ -1412,6 +1660,21 @@ function renderBenchCheck(p,wells){
       if(compoundTot>avail) html+=`<div class="bench-warn short">⚠ <span><b>Stock short:</b> you need ${compoundTot.toFixed(1)} µL of ${escapeHtml(p.inducerName||'compound')} (incl. 10% overage) but only ${avail} µL is on hand — prepare more, or trim wells/volume.</span></div>`;
       else html+=`<div class="bench-warn ok">✓ <span><b>Stock OK:</b> need ${compoundTot.toFixed(1)} µL of ${escapeHtml(p.inducerName||'compound')}; ${avail} µL available.</span></div>`;
     }
+  }
+  if(isPhage){
+    // One line per stock: a single combined "phage needed" total is meaningless
+    // once the plate draws from more than one lysate. The figure quoted is what
+    // actually leaves the tube (neatDraw), not the neat-equivalent in the wells.
+    phageSeriesByStock(p).forEach(({ph,kMax,neatDraw,neatEquiv})=>{
+      if(!(ph.titer>0)){
+        html+=`<div class="bench-warn short">⚠ <span><b>${escapeHtml(ph.name)} has no titer.</b> Wells assigned to it cannot be calculated — set a titer, or calculate one from a plaque count.</span></div>`;
+        return;
+      }
+      if(!(neatDraw>0)) return;
+      const via=kMax>0?` (via a ${kMax}-step dilution; the wells themselves hold ${neatEquiv.toFixed(3)} µL of neat phage)`:'';
+      if(ph.vol>0&&neatDraw>ph.vol) html+=`<div class="bench-warn short">⚠ <span><b>${escapeHtml(ph.name)} short:</b> the plan draws ${neatDraw.toFixed(2)} µL from the tube${via} but only ${escapeHtml(String(ph.vol))} µL is on hand.</span></div>`;
+      else html+=`<div class="bench-warn ok">✓ <span><b>${escapeHtml(ph.name)}:</b> draw ${neatDraw.toFixed(2)} µL from the tube${via}${ph.vol>0?`; ${escapeHtml(String(ph.vol))} µL available`:''}.</span></div>`;
+    });
   }
   if(edgeSamples>0){
     html+=`<div class="bench-warn edge">⬚ <span><b>${edgeSamples} sample well${edgeSamples>1?'s':''} on the plate edge.</b> Outer wells evaporate faster and can bias readouts. Consider moving samples inward and ringing the plate with buffer/blank${freeEdge>0?` (${freeEdge} free edge well${freeEdge>1?'s':''} available)`:''}. 🎲 Randomise also spreads edge risk across conditions.</span></div>`;
@@ -1445,6 +1708,9 @@ function importCSV(ev){
       const header=_parseCSVLine(lines[hi]).map(h=>h.replace(/"/g,'').trim().toLowerCase());
       const iWell=header.indexOf('well'), iCond=header.indexOf('condition');
       const iTarget=header.findIndex(h=>h.indexOf('target')===0);
+      // Optional, written by our own phage-mode exports so a multi-phage plate round-trips.
+      const iPhage=header.findIndex(h=>h==='phage'||h==='phage stock');
+      const iTiter=header.findIndex(h=>h.indexOf('titer')===0);
       if(iWell<0||iCond<0) throw new Error('CSV needs Well and Condition columns');
       let maxR=0,maxC=0; const parsed=[];
       lines.slice(hi+1).map(_parseCSVLine).forEach(fl=>{
@@ -1453,25 +1719,37 @@ function importCSV(ev){
         const r=_rowIndex(m[1].toUpperCase()), c=parseInt(m[2],10)-1; if(r<0||c<0||r>15||c>23) return;
         const cond=(fl[iCond]||'').replace(/"/g,'').trim();
         const target=iTarget>=0?(parseFloat((fl[iTarget]||'').replace(/"/g,''))||0):0;
-        parsed.push({r,c,cond,target}); maxR=Math.max(maxR,r); maxC=Math.max(maxC,c);
+        const phage=iPhage>=0?(fl[iPhage]||'').replace(/"/g,'').trim():'';
+        const titer=iTiter>=0?(parseFloat((fl[iTiter]||'').replace(/"/g,''))||0):0;
+        parsed.push({r,c,cond,target,phage,titer}); maxR=Math.max(maxR,r); maxC=Math.max(maxC,c);
       });
       if(!parsed.length) throw new Error('no valid well rows found');
       const fmt=(maxR>7||maxC>11)?'384':'96'; const fd=PLATE_FMT[fmt];
       const byName={}; palette.forEach(pp=>byName[pp.name.toLowerCase()]=pp);
       const assign=Array.from({length:fd.nr},()=>Array(fd.nc).fill(null)); const excl=new Set();
-      let placed=0, created=0;
-      parsed.forEach(({r,c,cond,target})=>{
+      const byPhageName={}; phages.forEach(ph=>byPhageName[ph.name.toLowerCase()]=ph);
+      let placed=0, created=0, newStocks=0;
+      parsed.forEach(({r,c,cond,target,phage,titer})=>{
         if(!cond) return;
         if(cond.toUpperCase()==='[EXCLUDED]'){ excl.add(r+','+c); return; }
         let entry=byName[cond.toLowerCase()];
         if(!entry){ const color=CC[(palette.filter(pp=>!pp.builtin).length)%CC.length]||'#74b480'; entry={id:'c'+(++_condIdCounter),name:cond,conc:appMode==='phage'?0:target,moi:appMode==='phage'?target:0,color,type:'cond'}; palette.push(entry); byName[cond.toLowerCase()]=entry; created++; }
         else if(target && entry.type==='cond'){ if(appMode==='phage') entry.moi=target; else entry.conc=target; }
+        // Re-attach the stock the row names, creating it if this file came from
+        // a plate with phages we do not have yet.
+        if(appMode==='phage'&&phage){
+          let ph=byPhageName[phage.toLowerCase()];
+          if(!ph){ _phageIdCounter++; ph={id:'p'+_phageIdCounter,name:phage,titer:titer>0?titer:0,vol:0,note:''}; phages.push(ph); byPhageName[phage.toLowerCase()]=ph; newStocks++; }
+          else if(titer>0&&!(ph.titer>0)) ph.titer=titer;
+          entry.phageId=ph.id;
+        }
         assign[r][c]=entry.id; placed++;
       });
       snapshotForUndo();
       setPlateDims(fmt); wellAssignments=assign; excludedWells=excl; plates[activePlate].fmt=fmt; flushActive();
+      _reconcilePhageRefs();
       renderPalette(); renderExclBar(); renderPlateTabs(); renderPlate(); update();
-      showToast(`✓ Imported ${placed} wells${created?`, ${created} new condition${created>1?'s':''}`:''}`,'green');
+      showToast(`✓ Imported ${placed} wells${created?`, ${created} new condition${created>1?'s':''}`:''}${newStocks?`, ${newStocks} new phage stock${newStocks>1?'s':''}`:''}`,'green');
     }catch(e){ showToast('CSV import failed: '+e.message,'warn'); }
     ev.target.value='';
   };
@@ -1487,12 +1765,13 @@ function _compactState(){
   flushActive();
   const fields=_FIELDS.reduce((a,id)=>{const el=document.getElementById(id);if(el)a[id]=el.value;return a;},{});
   const pl=plates.map(p=>{ const cells=[]; p.assign.forEach((row,r)=>row.forEach((id,c)=>{ if(id) cells.push([r,c,id]); })); return {f:p.fmt,n:p.name,c:cells,x:[...p.excluded]}; });
-  return {v:2,m:appMode,t:appTheme,im:intmMode,tl:activeTool,rt:repToolN,rd:repToolDir,ar:autoReps,sr:showReps,pal:palette,pl,ap:activePlate,fl:fields,ci:_condIdCounter};
+  return {v:2,m:appMode,t:appTheme,im:intmMode,tl:activeTool,rt:repToolN,rd:repToolDir,ar:autoReps,sr:showReps,pal:palette,ph:phages,pl,ap:activePlate,fl:fields,ci:_condIdCounter};
 }
 function _applyCompact(s){
   if(s.m)appMode=s.m; if(s.t)appTheme=s.t; if(s.im)intmMode=s.im;
   if(s.tl)activeTool=s.tl; if(s.rt)repToolN=s.rt; if(s.rd)repToolDir=s.rd; if(s.ar)autoReps=s.ar; if(s.sr!=null)showReps=s.sr;
   palette=s.pal||palette; _condIdCounter=s.ci||0;
+  _adoptPhages(s.ph,(s.fl||{}).phageTiter,(s.fl||{}).phageVol);
   plates=(s.pl||[]).map(p=>{ const fmt=PLATE_FMT[p.f]?p.f:'96', fd=PLATE_FMT[fmt]; const assign=Array.from({length:fd.nr},()=>Array(fd.nc).fill(null)); (p.c||[]).forEach(cell=>{ const r=cell[0],c=cell[1],id=cell[2]; if(r<fd.nr&&c<fd.nc) assign[r][c]=id; }); return {fmt,name:p.n||'Plate',assign,excluded:new Set(p.x||[])}; });
   if(!plates.length) plates=[{fmt:'96',name:'Plate 1',assign:Array.from({length:8},()=>Array(12).fill(null)),excluded:new Set()}];
   activePlate=Math.min(s.ap||0,plates.length-1); loadPlate(activePlate);
@@ -1610,15 +1889,26 @@ function P(){
     cultureName:document.getElementById('cultureName')?.value||document.getElementById('hostName')?.value||'Culture',
     units:document.getElementById('concUnits')?.value||'nM',
     bacterialConc:parseFloat(document.getElementById('bacterialConc')?.value)||2e8,
-    phageTiter:parseFloat(document.getElementById('phageTiter')?.value)||1e10,
-    phageVol:parseFloat(document.getElementById('phageVol')?.value)||1000,
+    // Titers live in the `phages` registry now — there is deliberately no
+    // p.phageTiter any more, so nothing can accidentally apply one stock's
+    // titer to a different phage.
+    phages,
     infVol:parseFloat(document.getElementById('infVol')?.value)||200,
     infTotal:parseFloat(document.getElementById('infTotal')?.value)||25000,
     sdTarget:parseFloat(document.getElementById('sdTarget')?.value)||1e8,
     sdFactor:parseFloat(document.getElementById('sdFactor')?.value)||10,
     sdMinPip:parseFloat(document.getElementById('sdMinPip')?.value)||2,
+    sdMaxPip:parseFloat(document.getElementById('sdMaxPip')?.value)||20,
+    // 0 means "no cap" — one field instead of a checkbox plus a number.
+    sdPctCap:Math.max(0,parseFloat(document.getElementById('sdPctCap')?.value)||0),
     sdStepVol:parseFloat(document.getElementById('sdStepVol')?.value)||10,
   };
+}
+
+// The pipetting window the solver works inside, assembled once.
+function pipOpts(p){
+  return {factor:p.sdFactor,minPip:p.sdMinPip,maxPip:p.sdMaxPip,
+          capOn:p.sdPctCap>0,pctCap:p.sdPctCap,wellVolUl:p.infVol};
 }
 
 function calcWellData(r,c,p){
@@ -1645,8 +1935,24 @@ function calcWellData(r,c,p){
     return{wellId,cond,conc:targetConc,cultVol:cv,mediaVol:mv,indVol:iv,finalVol:cv+mv+iv,pip};
   } else {
     const moi=cond.moi||0;
-    const phageVol=moi>0?(moi*p.bacterialConc*p.infVol)/p.phageTiter:0;
-    return{wellId,cond,moi,cultVol:p.infVol,phageVol,finalVol:p.infVol+phageVol,pip:pipCheck(phageVol,moi)};
+    // Titer is per-condition now: its stock's, or its own override. Using one
+    // global titer here silently scaled every phage but the first one wrong.
+    const stock=phageFor(cond);
+    const titer=titerFor(cond);
+    const phageVol=phageVolFor(moi,p.bacterialConc,p.infVol,titer);
+    const pfu=pfuPerWellFor(moi,p.bacterialConc,p.infVol);
+    // Pipettability is judged on what you WILL pipette — the volume of the
+    // working dilution — not on the neat volume. 0.04 µL of neat lysate is
+    // "impossible"; 4 µL of the 10⁻² dilution that delivers the same PFU is not,
+    // and flagging the well red for the former is just wrong once the tool has
+    // worked out the latter.
+    const plan=(moi>0&&titer>0)?planPipetting(pfu,titer,pipOpts(p)):null;
+    const pip=(moi>0&&!(titer>0)) ? {label:'no titer set for this stock',cls:'bd'}
+      : !plan                     ? pipCheck(phageVol,moi)
+      : plan.pick                 ? {label:`${plan.pick.vol.toFixed(1)} µL of ${plan.pick.label}`,cls:'bg'}
+      :                             {label:'no pipettable dilution',cls:'bd'};
+    return{wellId,cond,moi,stock,titer,pfu,plan,
+           cultVol:p.infVol,phageVol,finalVol:p.infVol+phageVol,pip};
   }
 }
 
@@ -1663,6 +1969,88 @@ function pipCheck(vol,val){
   if(vol<1.0)return{label:`${vol.toFixed(3)} µL — borderline`,cls:'bw'};
   if(vol>200)return{label:`${vol.toFixed(1)} µL — very large`,cls:'bw'};
   return{label:'good',cls:'bg'};
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PHAGE MATH — pure, no DOM. Deliberately defined out here rather than
+// inside the calculators IIFE: if that IIFE ever fails to parse, MBC
+// silently becomes undefined and takes everything in it with it. The
+// plate must not depend on that. The `titer` calculator calls back into
+// titerFromPlaques() so the plaque math exists in exactly one place.
+// ══════════════════════════════════════════════════════════════════
+
+// Plaque assay → PFU/mL.  plaques counted on a plate that received
+// `platedMl` mL of a `dil`-fold dilution.
+function titerFromPlaques(plaques,dil,platedMl){
+  if(!(plaques>0&&dil>0&&platedMl>0))return NaN;
+  return plaques*dil/platedMl;
+}
+
+// Volume (µL) of a stock at `titer` PFU/mL needed to hit `moi` against a
+// well holding `wellVolUl` µL of culture at `cellsPerMl` CFU/mL.
+//   cells   = cellsPerMl * wellVolUl/1000
+//   PFU     = moi * cells
+//   vol(µL) = PFU/titer * 1000   →  the 1000s cancel.
+function phageVolFor(moi,cellsPerMl,wellVolUl,titer){
+  if(!(moi>0&&cellsPerMl>0&&wellVolUl>0&&titer>0))return 0;
+  return (moi*cellsPerMl*wellVolUl)/titer;
+}
+
+// "neat", "10⁻³", or "1/5⁴" for non-decadic ladders.
+function dilLabel(k,factor){
+  if(k===0)return'neat';
+  const sup=String(k).split('').map(d=>'⁰¹²³⁴⁵⁶⁷⁸⁹'[+d]).join('');
+  return factor===10?`10⁻${sup}`:`1/${factor}${sup}`;
+}
+
+function pfuPerWellFor(moi,cellsPerMl,wellVolUl){
+  if(!(moi>0&&cellsPerMl>0&&wellVolUl>0))return 0;
+  return moi*cellsPerMl*(wellVolUl/1000);
+}
+
+// Which dilution of a stock can you actually pipette?
+//
+// Walks the dilution ladder k = 0…maxSteps (k=0 is the neat stock) and
+// asks, at each rung, how many µL of THAT dilution deliver `pfuPerWell`.
+// Diluting further makes the volume larger, so the ladder is monotonic
+// increasing in k and the first rung that clears every active check is
+// also the least-dilution one — no search needed.
+//
+// opts: {factor, minPip, maxPip, capOn, pctCap, wellVolUl, maxSteps}
+// returns {steps:[{k,label,titer,vol,ok,why}], pick, reason}
+//   pick   = the recommended step, or null when none qualifies
+//   reason = why nothing qualified (never a silent fallback)
+function planPipetting(pfuPerWell,titer,opts){
+  const o=opts||{};
+  const factor=o.factor>1?o.factor:10;
+  const minPip=o.minPip>0?o.minPip:2;
+  const maxPip=o.maxPip>0?o.maxPip:20;
+  const capOn=!!o.capOn;
+  const pctCap=o.pctCap>0?o.pctCap:10;
+  const wellVolUl=o.wellVolUl>0?o.wellVolUl:0;
+  const maxSteps=o.maxSteps>0?o.maxSteps:12;
+  const capUl=(capOn&&wellVolUl>0)?wellVolUl*pctCap/100:Infinity;
+  if(!(pfuPerWell>0&&titer>0))return{steps:[],pick:null,reason:'Set a titer and an MOI first.'};
+  const steps=[];
+  for(let k=0;k<=maxSteps;k++){
+    const dTiter=titer/Math.pow(factor,k);
+    const vol=pfuPerWell/dTiter*1000;   // PFU / (PFU/mL) = mL → µL
+    let ok=true,why='';
+    if(vol<minPip){ok=false;why=`below ${minPip} µL`;}
+    else if(vol>maxPip){ok=false;why=`above ${maxPip} µL`;}
+    else if(vol>capUl){ok=false;why=`> ${pctCap}% of the well`;}
+    steps.push({k,label:dilLabel(k,factor),titer:dTiter,vol,ok,why});
+  }
+  const pick=steps.find(s=>s.ok)||null;
+  let reason='';
+  if(!pick){
+    const last=steps[steps.length-1];
+    const fmtUl=v=>v>=1e5||v<0.01?v.toExponential(2):v.toFixed(1);
+    if(steps[0].vol>maxPip) reason=`Even neat stock needs ${fmtUl(steps[0].vol)} µL — more than the ${maxPip} µL ceiling. Use a higher-titer stock, fewer cells, or a lower MOI.`;
+    else if(capOn&&steps.some(s=>s.vol>=minPip&&s.vol<=maxPip&&s.vol>capUl)) reason=`Every pipettable dilution exceeds ${pctCap}% of the ${wellVolUl} µL well. Raise the cap, raise the stock titer, or lower the MOI.`;
+    else reason=`No dilution between neat and ${dilLabel(maxSteps,factor)} lands in ${minPip}–${maxPip} µL (deepest gives ${fmtUl(last.vol)} µL).`;
+  }
+  return{steps,pick,reason};
 }
 
 function fmtSci(n){
@@ -1752,7 +2140,7 @@ function renderMetrics(p,wells){
   document.getElementById('mets').innerHTML=`
     <div class="mc ${tot<=(NR*NC-excludedWells.size)?'g':'b'}"><div class="mv">${tot}/${NR*NC-excludedWells.size}</div><div class="ml">WELLS USED</div></div>
     <div class="mc ${condWells.length===0||allOk?'g':'b'}"><div class="mv">${condWells.length===0?'—':allOk?'✓ OK':'⚠ Check'}</div><div class="ml">PIPETTABILITY</div></div>
-    <div class="mc"><div class="mv">${appMode==='plasmid'?(totCult/1000).toFixed(2)+' mL':fmtSciStr(p.phageTiter)+' PFU'}</div><div class="ml">${appMode==='plasmid'?'CULTURE NEEDED':'PHAGE STOCK'}</div></div>
+    <div class="mc"><div class="mv">${appMode==='plasmid'?(totCult/1000).toFixed(2)+' mL':(phages.length>1?phages.length+' stocks':(phages[0]&&phages[0].titer>0?fmtSciStr(phages[0].titer)+' PFU/mL':'no titer'))}</div><div class="ml">${appMode==='plasmid'?'CULTURE NEEDED':'PHAGE STOCK'}</div></div>
     <div class="mc ${fold<=4?'g':fold<=16?'w':'b'}"><div class="mv">${condWells.length>=2?fold.toFixed(1)+'×':'—'}</div><div class="ml">VOL SPREAD</div></div>
     <div class="mc g"><div class="mv">${wells.length}</div><div class="ml">ASSIGNED WELLS</div></div>
     <div class="mc"><div class="mv">${new Set(Object.values(wellAssignments).flat().filter(Boolean)).size}</div><div class="ml">CONDITIONS</div></div>`;
@@ -1761,6 +2149,11 @@ function renderMetrics(p,wells){
 function renderWTable(p,wells){
   const u=p.units;
   const src=intmMode==='intermediate'?'intm':'stock';
+  const isPhage=appMode==='phage';
+  // Which dilution each condition is pipetted from, computed once per condition
+  // rather than once per well.
+  const planByCond={};
+  if(isPhage) phageGroups(p).forEach(g=>{planByCond[g.cond.id]=g;});
   document.getElementById('wbody').innerHTML=wells.map(w=>{
     const typeB=w.cond.type==='cond'?`<span class="badge bp">condition</span>`:
                 w.cond.type==='blank'?`<span class="badge bn">blank</span>`:
@@ -1769,23 +2162,36 @@ function renderWTable(p,wells){
     const concCell=appMode==='phage'?`<span class="badge bb">MOI ${w.moi||0}</span>`:`<span class="badge bp">${w.conc} ${u}</span>`;
     const compVol=appMode==='phage'?w.phageVol:w.indVol;
     const compCell=compVol>0?`${compVol.toFixed(3)} µL <span style="font-size:9px;color:var(--text3);">(${appMode==='phage'?'phage':src})</span>`:`<span class="badge bn">—</span>`;
+    // Phage mode only: which stock, and the dilution+volume actually pipetted.
+    let phageCell='', pipCell='';
+    if(isPhage){
+      phageCell=`<td>${w.stock?escapeHtml(w.stock.name):'<span class="badge bn">—</span>'}${w.titer>0?`<span style="font-size:9px;color:var(--text3);"> ${escapeHtml(w.titer.toExponential(2))}${w.cond.titer>0?'*':''}</span>`:''}</td>`;
+      const g=planByCond[w.cond.id], pk=g&&g.plan?g.plan.pick:null;
+      pipCell=`<td>${pk?`<strong>${pk.vol.toFixed(1)} µL</strong> of ${escapeHtml(pk.label)} <span style="font-size:9px;color:var(--text3);">(${escapeHtml(pk.titer.toExponential(2))})</span>`
+                     :(w.moi>0?'<span class="badge bw">no pipettable dilution</span>':'<span class="badge bn">—</span>')}</td>`;
+    }
     return `<tr>
       <td style="font-weight:700;">${w.wellId}</td>
       <td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${safeColor(w.cond.color)};margin-right:6px;vertical-align:middle;border:1px solid rgba(0,0,0,0.12);"></span>${escapeHtml(w.cond.name)}</td>
-      <td>${typeB}</td><td>${concCell}</td>
+      <td>${typeB}</td>${phageCell}<td>${concCell}</td>
       <td>${w.cultVol>0?w.cultVol.toFixed(1):'<span class="badge bn">—</span>'}</td>
-      <td>${compCell}</td>
+      <td>${compCell}</td>${pipCell}
       <td>${w.finalVol.toFixed(2)}</td>
       <td><span class="badge ${w.pip.cls}">${w.pip.label}</span></td>
     </tr>`;
-  }).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:20px;">No wells assigned — paint conditions onto the plate map above.</td></tr>';
+  }).join('')||`<tr><td colspan="${isPhage?10:8}" style="text-align:center;color:var(--text3);padding:20px;">No wells assigned — paint conditions onto the plate map above.</td></tr>`;
   document.getElementById('wclabel').textContent=`${wells.length} wells`;
-  document.getElementById('thConc').textContent=appMode==='phage'?'MOI':`Target (${p.units})`;
-  document.getElementById('thCult').textContent=appMode==='phage'?`Host culture (µL)`:`${p.cultureName||'Culture'} (µL)`;
-  document.getElementById('thInd').textContent=appMode==='phage'?`Phage (µL)`:`${p.inducerName} (µL)`;
+  document.getElementById('thPhage').style.display=isPhage?'':'none';
+  document.getElementById('thPip').style.display=isPhage?'':'none';
+  document.getElementById('thConc').textContent=isPhage?'MOI':`Target (${p.units})`;
+  document.getElementById('thCult').textContent=isPhage?`Host culture (µL)`:`${p.cultureName||'Culture'} (µL)`;
+  document.getElementById('thInd').textContent=isPhage?`Neat phage (µL)`:`${p.inducerName} (µL)`;
 }
 
 function renderMasterMix(p,wells){
+  const isPhage=appMode==='phage';
+  const planByCond={};
+  if(isPhage) phageGroups(p).forEach(g=>{planByCond[g.cond.id]=g;});
   // Group by condId
   const groups={};
   wells.forEach(w=>{
@@ -1793,95 +2199,231 @@ function renderMasterMix(p,wells){
     // positive control is defined with conc:null and resolves to maxCond in calcWellData, so
     // reading cond.conc printed "0" (or literal "null") here while the per-well table showed
     // the real value from w.conc.
-    if(!groups[w.cond.id]) groups[w.cond.id]={cond:w.cond,conc:w.conc,wellIds:[],cultTotal:0,compTotal:0,finalTotal:0};
+    if(!groups[w.cond.id]) groups[w.cond.id]={cond:w.cond,conc:w.conc,stock:w.stock,wellIds:[],cultTotal:0,compTotal:0,finalTotal:0};
     const g=groups[w.cond.id];
     g.wellIds.push(w.wellId);
     g.cultTotal+=w.cultVol;
-    g.compTotal+=appMode==='phage'?w.phageVol:w.indVol;
+    g.compTotal+=isPhage?w.phageVol:w.indVol;
     g.finalTotal+=w.finalVol;
   });
   const rows=Object.values(groups);
   document.getElementById('mmbody').innerHTML=rows.map(g=>{
     const n=g.wellIds.length;
     const typeB=g.cond.type==='cond'?`<span class="badge bp">condition</span>`:g.cond.type==='blank'?`<span class="badge bn">blank</span>`:`<span class="badge bb">control</span>`;
-    const concCell=appMode==='phage'?`MOI ${g.cond.moi||0}`:`${g.conc||0} ${p.units}`;
+    const concCell=isPhage
+      ? `MOI ${escapeHtml(String(g.cond.moi||0))}${g.stock?`<span style="color:var(--text3);"> · ${escapeHtml(g.stock.name)}</span>`:''}`
+      : `${g.conc||0} ${p.units}`;
     const wellList=g.wellIds.slice(0,6).join(', ')+(g.wellIds.length>6?`… +${g.wellIds.length-6}`:``);
+    // In phage mode the actionable number is the volume of the WORKING DILUTION,
+    // not of neat lysate — the neat figure is often a fraction of a microlitre.
+    const pk=isPhage?(planByCond[g.cond.id]&&planByCond[g.cond.id].plan.pick):null;
+    const compCell=isPhage
+      ? (pk?`<strong>${(pk.vol*n*OV).toFixed(1)}</strong> µL of ${escapeHtml(pk.label)}<br><span style="font-size:9px;color:var(--text3);">${pk.vol.toFixed(1)} µL × ${n} wells +10% · neat equiv. ${(g.compTotal*OV).toFixed(3)} µL</span>`
+              :(g.compTotal>0?`${(g.compTotal*OV).toFixed(3)} µL neat<br><span style="font-size:9px;color:var(--text3);">no pipettable dilution</span>`:'—'))
+      : (g.compTotal>0?(g.compTotal*OV).toFixed(2):'—');
     return `<tr>
       <td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${safeColor(g.cond.color)};margin-right:6px;vertical-align:middle;"></span>${escapeHtml(g.cond.name)}</td>
       <td>${typeB}</td>
       <td style="font-family:var(--mono);font-size:11px;">${wellList} <span style="color:var(--text3);">(n=${n})</span></td>
       <td style="font-family:var(--mono);">${concCell}</td>
       <td>${g.cultTotal>0?(g.cultTotal*OV).toFixed(1):'—'}</td>
-      <td>${g.compTotal>0?(g.compTotal*OV).toFixed(2):'—'}</td>
+      <td>${compCell}</td>
       <td style="font-weight:700;">${(g.finalTotal*OV).toFixed(1)}</td>
     </tr>`;
   }).join('')||'<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:16px;">No conditions assigned.</td></tr>';
-  document.getElementById('mmThConc').textContent=appMode==='phage'?'MOI':`Concentration (${p.units})`;
-  document.getElementById('mmThCult').textContent=appMode==='phage'?'Culture total (µL)':'Culture total (µL)';
-  document.getElementById('mmThInd').textContent=appMode==='phage'?'Phage total (µL)':`${p.inducerName} total (µL)`;
+  document.getElementById('mmThConc').textContent=isPhage?'MOI / stock':`Concentration (${p.units})`;
+  document.getElementById('mmThCult').textContent='Culture total (µL)';
+  document.getElementById('mmThInd').textContent=isPhage?'Phage to dispense':`${p.inducerName} total (µL)`;
+}
+
+// Every painted infection well, grouped by condition, with the dilution each
+// condition should actually be pipetted from. Shared by the MOI panel, the
+// pipetting-plan panel, the bench check and the exports — one computation, so
+// the four can never disagree the way the bench check and MOI panel once did.
+function phageGroups(p){
+  const groups={};
+  // NR/NC, not 8x12: on a 384-well plate a fixed sweep saw only a quarter of the wells and
+  // under-reported the phage volume 4x, while the Bench Check panel showed the correct total.
+  for(let r=0;r<NR;r++)for(let c=0;c<NC;c++){
+    const d=calcWellData(r,c,p);
+    if(!d||!(d.cond.moi>0))continue;
+    let g=groups[d.cond.id];
+    // Reuse the plan calcWellData already built for this condition rather than
+    // recomputing it — same inputs, so it cannot differ.
+    if(!g)g=groups[d.cond.id]={cond:d.cond,stock:d.stock,titer:d.titer,pfu:d.pfu,n:0,totalPhage:0,
+                               plan:d.plan||{steps:[],pick:null,reason:'Set a titer and an MOI first.'}};
+    g.n++; g.totalPhage+=d.phageVol;
+  }
+  const items=Object.values(groups);
+  items.forEach(g=>{
+    const pick=g.plan.pick;
+    // Volume of the CHOSEN dilution the plate needs: per-well × wells, +10% overage.
+    g.pickVolPerWell = pick?pick.vol:null;
+    g.pickTotal      = pick?pick.vol*g.n*OV:null;
+  });
+  return items;
 }
 
 function renderMOIPanel(p){
   if(appMode!=='phage')return;
-  const condWells=[];
-  // NR/NC, not 8x12: on a 384-well plate a fixed sweep saw only a quarter of the wells and
-  // under-reported the phage volume 4x, while the Bench Check panel showed the correct total.
-  for(let r=0;r<NR;r++)for(let c=0;c<NC;c++){const d=calcWellData(r,c,p);if(d&&d.cond.moi>0)condWells.push(d);}
-  const groups={};
-  condWells.forEach(d=>{if(!groups[d.cond.id]){groups[d.cond.id]={cond:d.cond,n:0,totalPhage:0};}groups[d.cond.id].n++;groups[d.cond.id].totalPhage+=d.phageVol;});
-  const items=Object.values(groups);
-  document.getElementById('moiSub').textContent=`${condWells.length} infection wells`;
-  document.getElementById('moiGrid').innerHTML=items.length?items.map(g=>`
+  const items=phageGroups(p);
+  const nWells=items.reduce((s,g)=>s+g.n,0);
+  const multi=phages.length>1;
+  document.getElementById('moiSub').textContent=
+    `${nWells} infection wells · ${multi?phages.length+' phage stocks':'1 phage stock'}`;
+  document.getElementById('moiGrid').innerHTML=items.length?items.map(g=>{
+    const pick=g.plan.pick;
+    const pctOfWell=pick&&p.infVol>0?(pick.vol/p.infVol*100):0;
+    const rec=!(g.titer>0)
+      ? `<div class="moi-label"><span class="badge bd">no titer on ${escapeHtml(g.stock?g.stock.name:'this stock')}</span></div>`
+      : pick
+        ? `<div class="moi-label" style="margin-top:7px;">pipette from
+             <strong style="color:var(--accent);">${escapeHtml(pick.label)}</strong>
+             (${escapeHtml(pick.titer.toExponential(2))} PFU/mL)</div>
+           <div class="moi-label"><strong>${pick.vol.toFixed(1)} µL</strong>/well ·
+             ${g.n} wells +10% = <strong>${g.pickTotal.toFixed(0)} µL</strong> of that dilution
+             · ${pctOfWell.toFixed(1)}% of the well</div>`
+        : `<div class="moi-label" style="margin-top:7px;"><span class="badge bw">not pipettable</span>
+             <span style="display:block;margin-top:3px;">${escapeHtml(g.plan.reason)}</span></div>`;
+    return `
     <div class="moi-card">
       <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;">
         <span style="width:12px;height:12px;border-radius:3px;background:${safeColor(g.cond.color)};display:inline-block;flex-shrink:0;"></span>
         <span style="font-size:12px;font-weight:700;">${escapeHtml(g.cond.name)}</span>
       </div>
-      <div class="moi-val">MOI ${g.cond.moi}</div>
-      <div class="moi-label">per well: ${(g.totalPhage/g.n).toFixed(3)} µL phage</div>
-      <div class="moi-label">total (${g.n} wells + 10%): ${(g.totalPhage*OV).toFixed(2)} µL</div>
-      <div class="moi-label">bacteria/well: ${(p.bacterialConc*p.infVol/1000).toExponential(2)} CFU</div>
-    </div>`).join(''):`<div style="padding:14px;font-family:var(--mono);font-size:11px;color:var(--text3);">Add phage MOI conditions to the plate to see calculations here.</div>`;
+      <div class="moi-val">MOI ${escapeHtml(String(g.cond.moi))}</div>
+      <div class="moi-label">${escapeHtml(g.stock?g.stock.name:'—')} · ${g.titer>0?escapeHtml(g.titer.toExponential(2))+' PFU/mL':'no titer'}${g.cond.titer>0?' (override)':''}</div>
+      <div class="moi-label">${escapeHtml(g.pfu.toExponential(2))} PFU/well · bacteria/well: ${escapeHtml((p.bacterialConc*p.infVol/1000).toExponential(2))} CFU</div>
+      <div class="moi-label">neat stock would be ${g.totalPhage>0?escapeHtml((g.totalPhage/g.n).toFixed(3)):'0'} µL/well</div>
+      ${rec}
+    </div>`;}).join(''):`<div style="padding:14px;font-family:var(--mono);font-size:11px;color:var(--text3);">Add phage MOI conditions to the plate to see calculations here.</div>`;
 }
 
+// Size a serial dilution so every tube holds enough for what is drawn from it:
+// the plate's demand at that rung PLUS the transfer that seeds the next rung.
+// Solved from the deepest rung backwards, because prepare[k] depends on
+// prepare[k+1] and nothing else.
+//
+//   demand : array indexed by k, µL of dilution k the plate needs (incl. overage)
+//   returns {prep[], transferIn[], diluent[], neatDraw}
+function sizeDilutionSeries(demand,kMax,factor,minPip,stepVol){
+  const prep=new Array(kMax+1).fill(0);
+  for(let k=kMax;k>=1;k--){
+    const seedNext = k<kMax ? prep[k+1]/factor : 0;
+    prep[k]=Math.max((demand[k]||0)+seedNext, stepVol);
+    // The transfer INTO this tube must itself be pipettable; if it is not,
+    // scale the whole tube up until it is.
+    if(prep[k]/factor<minPip) prep[k]=minPip*factor;
+  }
+  const transferIn=new Array(kMax+1).fill(0), diluent=new Array(kMax+1).fill(0);
+  for(let k=1;k<=kMax;k++){ transferIn[k]=prep[k]/factor; diluent[k]=prep[k]-transferIn[k]; }
+  const neatDraw=(demand[0]||0)+(kMax>=1?transferIn[1]:0);
+  return{prep,transferIn,diluent,neatDraw};
+}
+
+// Per stock in use: its conditions, the sized dilution series, and how much
+// neat lysate the plan ACTUALLY draws from the tube.
+//
+// `neatDraw` and `neatEquiv` are different numbers and both matter. neatEquiv is
+// the theoretical volume of undiluted phage the wells contain; neatDraw is what
+// you really pipette out of the tube, which is larger whenever a dilution has to
+// be made (you cannot take 0.13 µL — you take 2 µL and dilute it). The bench
+// check used to show the first while the plan showed the second.
+function phageSeriesByStock(p){
+  const groups=phageGroups(p);
+  return phages.map(ph=>{
+    const gs=groups.filter(g=>g.stock&&g.stock.id===ph.id);
+    if(!gs.length)return null;
+    const shared=gs.filter(g=>!(g.cond.titer>0));  // conditions on the stock's own titer
+    const own=gs.filter(g=>g.cond.titer>0);        // overrides get their own numbers
+    const demand=[]; let kMax=0;
+    shared.forEach(g=>{const pk=g.plan.pick;if(!pk)return;demand[pk.k]=(demand[pk.k]||0)+pk.vol*g.n*OV;kMax=Math.max(kMax,pk.k);});
+    const series=(kMax>0&&ph.titer>0)?sizeDilutionSeries(demand,kMax,p.sdFactor,p.sdMinPip,p.sdStepVol):null;
+    const neatEquiv=gs.reduce((s,g)=>s+g.totalPhage,0)*OV;
+    const neatDraw=series?series.neatDraw:(demand[0]||neatEquiv);
+    return{ph,gs,shared,own,demand,kMax,series,neatDraw,neatEquiv};
+  }).filter(Boolean);
+}
+
+// One block per phage stock that is actually on the plate: the ladder with a
+// pipettable verdict on every rung, then the recipe to build it.
 function renderSerialDilution(){
   if(appMode!=='phage')return;
   const p=P();
-  const stock=p.phageTiter, target=p.sdTarget, factor=p.sdFactor, minPip=p.sdMinPip, stepVol=p.sdStepVol;
-  if(!stock||!target||stock<=target){
-    document.getElementById('serialSteps').innerHTML='<div style="padding:14px;font-family:var(--mono);font-size:11px;color:var(--text3);">Set stock titer > target titer to generate a scheme.</div>';
-    document.getElementById('serialSub').textContent='';
-    return;
-  }
-  // A factor of exactly 1 makes log(factor) zero and nSteps Infinity, which hangs the tab in
-  // the loop below. This fires on the FIRST keystroke of "100", so it is easy to hit by accident.
-  if(!(factor>1)){
-    document.getElementById('serialSteps').innerHTML='<div style="padding:14px;font-family:var(--mono);font-size:11px;color:var(--text3);">Dilution factor must be greater than 1 — a factor of 1 does not dilute.</div>';
-    document.getElementById('serialSub').textContent='';
-    return;
-  }
-  // Clamp as well: a factor like 1.0000001 is >1 but yields ~46 million steps.
-  const nSteps=Math.min(60,Math.ceil(Math.log(stock/target)/Math.log(factor)));
-  const transfer=Math.max(minPip,stepVol/factor);
-  const diluent=transfer*(factor-1);
-  const steps=[];
-  let titer=stock;
-  for(let i=1;i<=nSteps;i++){
-    const prevTiter=titer;
-    titer=prevTiter/factor;
-    steps.push({n:i,from:i===1?'stock':` Step ${i-1}`,fromTiter:prevTiter,transfer,diluent,toTiter:titer,final:i===nSteps});
-  }
-  document.getElementById('serialSub').textContent=`${stock.toExponential(1)} → ${target.toExponential(1)} PFU/mL in ${nSteps} steps`;
-  document.getElementById('serialSteps').innerHTML=steps.map(s=>`
-    <div class="s-step">
-      <div class="s-num${s.final?' final':''}">${s.n}</div>
-      <div style="flex:1;">
-        Take <strong>${s.transfer.toFixed(1)} µL</strong> from ${s.from} (${s.fromTiter.toExponential(2)} PFU/mL)
-        + <strong>${s.diluent.toFixed(1)} µL</strong> diluent
-        → <strong>${s.toTiter.toExponential(2)} PFU/mL</strong>
-        ${s.final?'<span class="badge bg" style="margin-left:8px;">working stock</span>':''}
-      </div>
-    </div>`).join('');
+  const factor=p.sdFactor;
+  const stepsEl=document.getElementById('serialSteps'), subEl=document.getElementById('serialSub');
+  const msg=t=>{stepsEl.innerHTML=`<div style="padding:14px;font-family:var(--mono);font-size:11px;color:var(--text3);">${escapeHtml(t)}</div>`;subEl.textContent='';};
+  // A factor of exactly 1 makes log(factor) zero and the step count Infinity, which hangs the
+  // tab. This fires on the FIRST keystroke of "100", so it is easy to hit by accident.
+  if(!(factor>1)){ msg('Dilution factor must be greater than 1 — a factor of 1 does not dilute.'); return; }
+  if(!(p.sdMaxPip>p.sdMinPip)){ msg('Max pipettable must be greater than min pipettable.'); return; }
+
+  const byStock=phageSeriesByStock(p);
+  if(!byStock.length){ msg('Paint some MOI conditions onto the plate to get a dilution and pipetting plan.'); return; }
+
+  // A condition with a titer override does not come out of the shared ladder —
+  // its numbers are its own — so it is reported but not folded into the recipe.
+  subEl.textContent=`${byStock.length} stock${byStock.length===1?'':'s'} in use · ${byStock.reduce((s,x)=>s+x.gs.reduce((t,g)=>t+g.n,0),0)} wells`;
+
+  stepsEl.innerHTML=byStock.map(({ph,gs,shared,own,kMax,series,neatDraw})=>{
+    if(!(ph.titer>0)) return `<div class="s-step"><div class="s-num">!</div><div style="flex:1;">
+      <strong>${escapeHtml(ph.name)}</strong> has no titer — set one (or calculate it from a plaque count) to plan a dilution.</div></div>`;
+
+    const ladder=planPipetting(Math.max(...gs.map(g=>g.pfu)),ph.titer,pipOpts(p)).steps;
+    const shownK=Math.min(ladder.length-1, kMax+2);
+    const neat=neatDraw;
+    const overdrawn=ph.vol>0&&neat>ph.vol;
+
+    // ── the ladder: every rung, and what each condition would need from it ──
+    const rungs=ladder.slice(0,shownK+1).map(s=>{
+      const users=shared.filter(g=>g.plan.pick&&g.plan.pick.k===s.k);
+      const badge=users.length?'<span class="badge bg">use for '+escapeHtml(users.map(g=>g.cond.name).join(', '))+'</span>'
+                             :`<span class="badge bn">${escapeHtml(s.ok?'pipettable':s.why)}</span>`;
+      const prepTxt=series&&s.k>=1&&s.k<=kMax
+        ? ` · make <strong>${series.prep[s.k].toFixed(0)} µL</strong>`
+        : (s.k===0?' · neat stock':'');
+      return `<div class="s-step" style="${users.length?'border-color:var(--accent2);':''}">
+        <div class="s-num${users.length?' final':''}">${s.k===0?'0':escapeHtml(String(s.k))}</div>
+        <div style="flex:1;">
+          <strong>${escapeHtml(s.label)}</strong> = ${escapeHtml(s.titer.toExponential(2))} PFU/mL
+          → <strong>${s.vol<0.01?escapeHtml(s.vol.toExponential(1)):s.vol.toFixed(s.vol<10?2:1)} µL</strong>/well
+          for the highest MOI here${prepTxt}
+          <span style="margin-left:8px;">${badge}</span>
+        </div>
+      </div>`;
+    }).join('');
+
+    // ── the recipe to build it ──
+    const recipe=series?Array.from({length:kMax},(_,i)=>{
+      const k=i+1;
+      return `<div class="s-step">
+        <div class="s-num${k===kMax?' final':''}">${k}</div>
+        <div style="flex:1;">
+          Take <strong>${series.transferIn[k].toFixed(1)} µL</strong> from ${k===1?'the neat stock':dilLabel(k-1,factor)}
+          + <strong>${series.diluent[k].toFixed(1)} µL</strong> diluent
+          → <strong>${series.prep[k].toFixed(0)} µL</strong> at ${escapeHtml((ph.titer/Math.pow(factor,k)).toExponential(2))} PFU/mL
+        </div>
+      </div>`;
+    }).join(''):'';
+
+    const notes=[];
+    notes.push(`Draws <strong>${neat.toFixed(1)} µL</strong> of neat ${escapeHtml(ph.name)}${ph.vol>0?` of the ${escapeHtml(String(ph.vol))} µL you have`:''}${kMax>0?' — more than the wells contain, because the first dilution step has to be pipettable':''}.`);
+    if(overdrawn) notes.push(`<span class="badge bd">not enough stock — short by ${(neat-ph.vol).toFixed(1)} µL</span>`);
+    shared.filter(g=>!g.plan.pick).forEach(g=>notes.push(`<span class="badge bw">${escapeHtml(g.cond.name)}</span> ${escapeHtml(g.plan.reason)}`));
+    own.forEach(g=>notes.push(`<span class="badge bp">${escapeHtml(g.cond.name)}</span> uses its own titer override (${escapeHtml(g.titer.toExponential(2))} PFU/mL) — planned separately.`));
+
+    return `
+      <div style="margin-top:4px;">
+        <div style="font-family:var(--mono);font-size:11px;color:var(--text2);margin-bottom:7px;">
+          <strong style="font-size:12px;color:var(--text);">${escapeHtml(ph.name)}</strong>
+          · ${escapeHtml(ph.titer.toExponential(2))} PFU/mL
+          · ${escapeHtml(gs.length+(gs.length===1?' condition':' conditions'))}
+        </div>
+        ${rungs}
+        ${recipe?`<div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin:9px 0 6px;">RECIPE — ${escapeHtml(String(kMax))}-step ${escapeHtml(String(factor))}-fold series</div>${recipe}`:''}
+        <div class="ibox${overdrawn?' d':''}" style="margin-top:8px;font-size:10.5px;">${notes.join('<br>')}</div>
+      </div>`;
+  }).join('');
 }
 
 function renderIntmR(p){
@@ -1973,31 +2515,99 @@ document.addEventListener('click',e=>{const p=document.getElementById('colorPick
 // ══════════════════════════════════════════════════════════════════
 // EXPORT
 // ══════════════════════════════════════════════════════════════════
+
+// One flat description of the dilution & pipetting plan, reused verbatim by the
+// CSV, the clipboard text and the notebook so no two exports can drift apart.
+// Returns {header:[…], rows:[[…]], lines:[…]} — lines are the plain-text form.
+function phagePlanExport(p){
+  const header=['Phage','Titer (PFU/mL)','Condition','MOI','Wells','PFU/well','Dilution','µL/well','Total µL of dilution (+10%)','Note'];
+  const rows=[], lines=[];
+  if(appMode!=='phage') return{header,rows,lines};
+  const factor=p.sdFactor;
+  phageSeriesByStock(p).forEach(({ph,gs,kMax,series,neatDraw})=>{
+    lines.push(`${ph.name} — ${ph.titer>0?ph.titer.toExponential(2)+' PFU/mL':'NO TITER SET'}${ph.vol>0?` · ${ph.vol} µL on hand`:''}`);
+    gs.forEach(g=>{
+      const pk=g.plan.pick;
+      rows.push([ph.name, g.titer>0?g.titer.toExponential(3):'', g.cond.name, g.cond.moi, g.n,
+                 g.pfu>0?g.pfu.toExponential(3):'',
+                 pk?pk.label:'', pk?pk.vol.toFixed(2):'', pk?g.pickTotal.toFixed(1):'',
+                 pk?(g.cond.titer>0?'per-condition titer override':''):g.plan.reason]);
+      lines.push(pk
+        ? `  ${g.cond.name} (MOI ${g.cond.moi}, ${g.n} wells): pipette ${pk.vol.toFixed(1)} µL of the ${pk.label} dilution (${pk.titer.toExponential(2)} PFU/mL) — prepare ${g.pickTotal.toFixed(0)} µL`
+        : `  ${g.cond.name} (MOI ${g.cond.moi}): ${g.plan.reason}`);
+    });
+    // The recipe, from the same sizing the panel uses.
+    if(series){
+      lines.push(`  Recipe (${kMax}-step ${factor}-fold):`);
+      for(let k=1;k<=kMax;k++)
+        lines.push(`    ${k}. ${series.transferIn[k].toFixed(1)} µL of ${k===1?'neat stock':dilLabel(k-1,factor)} + ${series.diluent[k].toFixed(1)} µL diluent = ${series.prep[k].toFixed(0)} µL at ${(ph.titer/Math.pow(factor,k)).toExponential(2)} PFU/mL`);
+    }
+    lines.push(`  Draws ${neatDraw.toFixed(1)} µL of neat ${ph.name}${ph.vol>0?` (have ${ph.vol} µL)`:''}`);
+    lines.push('');
+  });
+  return{header,rows,lines};
+}
+
 function downloadCSV(){
   const p=P(); const wells=getAllWells(p);
-  let csv=`Experiment,${p.expName}\nDate,${p.expDate}\nResearcher,${p.researcher}\nNotes,${p.expNotes}\nMode,${appMode}\nCompound,${p.inducerName}\nStock conc (${p.units}),${p.stockConc}\nCulture,${p.cultureName}\nCulture per well (µL),${p.cultureVol}\n\n`;
-  csv+=`PER-WELL VOLUMES (each well independent)\nWell,Condition,Type,Target (${p.units}),Culture (µL),Compound (µL),Final vol (µL),Pipettable\n`;
-  wells.forEach(w=>{const cv=appMode==='phage'?w.phageVol:w.indVol;csv+=`"${w.wellId}","${w.cond.name}","${w.cond.type}","${appMode==='phage'?w.moi:(w.conc||0)}","${w.cultVol.toFixed(2)}","${cv.toFixed(3)}","${w.finalVol.toFixed(2)}","${w.pip.label}"\n`;});
+  const isPhage=appMode==='phage';
+  const planByCond={};
+  if(isPhage) phageGroups(p).forEach(g=>{planByCond[g.cond.id]=g;});
+  let csv=`Experiment,${p.expName}\nDate,${p.expDate}\nResearcher,${p.researcher}\nNotes,${p.expNotes}\nMode,${appMode}\nCompound,${p.inducerName}\nStock conc (${p.units}),${p.stockConc}\nCulture,${p.cultureName}\nCulture per well (µL),${p.cultureVol}\n`;
+  if(isPhage){
+    csv+=`\nPHAGE STOCKS\nPhage,Titer (PFU/mL),Vol available (µL),Note\n`;
+    phages.forEach(ph=>{csv+=`"${ph.name}","${ph.titer>0?ph.titer.toExponential(3):''}","${ph.vol}","${(ph.note||'').replace(/"/g,'""')}"\n`;});
+  }
+  csv+=`\nPER-WELL VOLUMES (each well independent)\nWell,Condition,Type,${isPhage?'Phage,Titer (PFU/mL),':''}Target (${p.units}),Culture (µL),${isPhage?'Neat phage (µL),Dilution,µL of dilution,':'Compound (µL),'}Final vol (µL),Pipettable\n`;
+  wells.forEach(w=>{
+    const cv=isPhage?w.phageVol:w.indVol;
+    const pk=isPhage?(planByCond[w.cond.id]&&planByCond[w.cond.id].plan.pick):null;
+    csv+=`"${w.wellId}","${w.cond.name}","${w.cond.type}",`
+      +(isPhage?`"${w.stock?w.stock.name:''}","${w.titer>0?w.titer.toExponential(3):''}",`:'')
+      +`"${isPhage?w.moi:(w.conc||0)}","${w.cultVol.toFixed(2)}","${cv.toFixed(3)}",`
+      +(isPhage?`"${pk?pk.label:''}","${pk?pk.vol.toFixed(2):''}",`:'')
+      +`"${w.finalVol.toFixed(2)}","${w.pip.label}"\n`;
+  });
   const groups={};
-  wells.forEach(w=>{if(!groups[w.cond.id])groups[w.cond.id]={cond:w.cond,conc:w.conc,n:0,cult:0,comp:0,final:0};const g=groups[w.cond.id];g.n++;g.cult+=w.cultVol;g.comp+=appMode==='phage'?w.phageVol:w.indVol;g.final+=w.finalVol;});
-  csv+=`\nMASTER MIX (+10% overage)\nCondition,Wells,Target,Culture total (µL),Compound total (µL),Grand total (µL)\n`;
-  Object.values(groups).forEach(g=>{csv+=`"${g.cond.name}","${g.n}","${appMode==='phage'?g.cond.moi:(g.conc||0)}","${(g.cult*OV).toFixed(1)}","${(g.comp*OV).toFixed(2)}","${(g.final*OV).toFixed(1)}"\n`;});
+  wells.forEach(w=>{if(!groups[w.cond.id])groups[w.cond.id]={cond:w.cond,conc:w.conc,stock:w.stock,n:0,cult:0,comp:0,final:0};const g=groups[w.cond.id];g.n++;g.cult+=w.cultVol;g.comp+=isPhage?w.phageVol:w.indVol;g.final+=w.finalVol;});
+  csv+=`\nMASTER MIX (+10% overage)\nCondition,${isPhage?'Phage,':''}Wells,Target,Culture total (µL),${isPhage?'Neat phage total (µL),Dilution,µL of dilution (+10%),':'Compound total (µL),'}Grand total (µL)\n`;
+  Object.values(groups).forEach(g=>{
+    const pk=isPhage?(planByCond[g.cond.id]&&planByCond[g.cond.id].plan.pick):null;
+    csv+=`"${g.cond.name}",`+(isPhage?`"${g.stock?g.stock.name:''}",`:'')
+      +`"${g.n}","${isPhage?g.cond.moi:(g.conc||0)}","${(g.cult*OV).toFixed(1)}","${(g.comp*OV).toFixed(2)}",`
+      +(isPhage?`"${pk?pk.label:''}","${pk?(pk.vol*g.n*OV).toFixed(1):''}",`:'')
+      +`"${(g.final*OV).toFixed(1)}"\n`;
+  });
+  if(isPhage){
+    const plan=phagePlanExport(p);
+    if(plan.rows.length){
+      csv+=`\nDILUTION & PIPETTING PLAN\n${plan.header.join(',')}\n`;
+      plan.rows.forEach(r=>{csv+=r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')+'\n';});
+    }
+  }
   _dl(csv,`dilution-${(p.expName||'experiment').replace(/\s+/g,'_')}.csv`,'text/csv');
   showToast('✓ CSV downloaded','green');
 }
 
 function downloadMinimalCSV(){
   const p=P(); const wells=getAllWells(p);
+  const isPhage=appMode==='phage';
+  // The Phage/Titer columns are what let importCSV rebuild a multi-phage plate.
+  const pad=isPhage?',"",""':'';
   let csv=`# Dilution Designer — Minimal Export\n# ${p.expName||'Experiment'} | ${p.expDate||new Date().toLocaleDateString()} | ${p.inducerName}\n`;
-  csv+=`Well,Row,Col,Condition,Target (${p.units}),Culture (µL),Compound (µL),Final vol (µL)\n`;
+  csv+=`Well,Row,Col,Condition,${isPhage?'Phage,Titer (PFU/mL),':''}Target (${p.units}),Culture (µL),Compound (µL),Final vol (µL)\n`;
   // Also include every well on the active plate (empty = blank line)
   for(let r=0;r<NR;r++)for(let c=0;c<NC;c++){
     const wellId=`${ROWS[r]}${c+1}`;
     const d=calcWellData(r,c,p);
-    const condId=wellAssignments[r][c];
-    if(d){const cv=appMode==='phage'?d.phageVol:d.indVol;csv+=`${wellId},${ROWS[r]},${c+1},"${d.cond.name}","${appMode==='phage'?d.moi:(d.conc||0)}","${d.cultVol.toFixed(2)}","${cv.toFixed(3)}","${d.finalVol.toFixed(2)}"\n`;}
-    else if(excludedWells.has(`${r},${c}`)){csv+=`${wellId},${ROWS[r]},${c+1},"[EXCLUDED]","","","",""\n`;}
-    else{csv+=`${wellId},${ROWS[r]},${c+1},"","","","",""\n`;}
+    if(d){
+      const cv=isPhage?d.phageVol:d.indVol;
+      csv+=`${wellId},${ROWS[r]},${c+1},"${d.cond.name}",`
+        +(isPhage?`"${d.stock?d.stock.name:''}","${d.titer>0?d.titer.toExponential(3):''}",`:'')
+        +`"${isPhage?d.moi:(d.conc||0)}","${d.cultVol.toFixed(2)}","${cv.toFixed(3)}","${d.finalVol.toFixed(2)}"\n`;
+    }
+    else if(excludedWells.has(`${r},${c}`)){csv+=`${wellId},${ROWS[r]},${c+1},"[EXCLUDED]"${pad},"","","",""\n`;}
+    else{csv+=`${wellId},${ROWS[r]},${c+1},""${pad},"","","",""\n`;}
   }
   _dl(csv,`plate-minimal-${(p.expName||'exp').replace(/\s+/g,'_')}.csv`,'text/csv');
   showToast('✓ Minimal CSV downloaded','green');
@@ -2007,10 +2617,22 @@ function _dl(content,name,type){const a=document.createElement('a');a.href=URL.c
 
 function copyText(){
   const p=P();const wells=getAllWells(p);
+  const isPhage=appMode==='phage';
   let t=`DILUTION EXPERIMENT — ${p.expName||'Unnamed'}\nDate: ${p.expDate||new Date().toLocaleDateString()} | Researcher: ${p.researcher||'—'}\n${p.expNotes}\n${'─'.repeat(50)}\n\n`;
-  t+=`Compound: ${p.inducerName} | Stock: ${p.stockConc} ${p.units} | Culture vol: ${p.cultureVol} µL/well\n\n`;
+  if(isPhage){
+    t+=`Host: ${p.cultureName||'Culture'} at ${p.bacterialConc.toExponential(2)} CFU/mL | ${p.infVol} µL/well\n`;
+    t+=`Phage stocks:\n`;
+    phages.forEach(ph=>{t+=`  ${ph.name}: ${ph.titer>0?ph.titer.toExponential(2)+' PFU/mL':'no titer'}${ph.vol>0?`, ${ph.vol} µL available`:''}${ph.note?` — ${ph.note}`:''}\n`;});
+    t+=`\n`;
+  } else {
+    t+=`Compound: ${p.inducerName} | Stock: ${p.stockConc} ${p.units} | Culture vol: ${p.cultureVol} µL/well\n\n`;
+  }
   t+=`PER-WELL VOLUMES (each well independent)\n`;
-  wells.forEach(w=>{const cv=appMode==='phage'?w.phageVol:w.indVol;t+=`  ${w.wellId}  ${w.cond.name.padEnd(16)} ${appMode==='phage'?`MOI ${w.moi}`:`${w.conc} ${p.units}`}  cult: ${w.cultVol.toFixed(0)} µL  comp: ${cv.toFixed(3)} µL  total: ${w.finalVol.toFixed(2)} µL\n`;});
+  wells.forEach(w=>{const cv=isPhage?w.phageVol:w.indVol;t+=`  ${w.wellId}  ${w.cond.name.padEnd(16)} ${isPhage?`MOI ${w.moi}`.padEnd(10)+(w.stock?w.stock.name.padEnd(12):''):`${w.conc} ${p.units}`}  cult: ${w.cultVol.toFixed(0)} µL  ${isPhage?'neat phage':'comp'}: ${cv.toFixed(3)} µL  total: ${w.finalVol.toFixed(2)} µL\n`;});
+  if(isPhage){
+    const plan=phagePlanExport(p);
+    if(plan.lines.length) t+=`\nDILUTION & PIPETTING PLAN\n`+plan.lines.join('\n')+'\n';
+  }
   navigator.clipboard.writeText(t).then(()=>showToast('✓ Copied to clipboard','green'));
 }
 
@@ -2021,7 +2643,9 @@ function printReport(){
   document.getElementById('pr-researcher').textContent=p.researcher||'—';
   document.getElementById('pr-notes').textContent=p.expNotes||'—';
   document.getElementById('pr-inducer').textContent=p.inducerName;
-  document.getElementById('pr-stock').textContent=appMode==='plasmid'?`${p.stockConc.toLocaleString()} ${p.units}`:`${p.phageTiter.toExponential(2)} PFU/mL`;
+  document.getElementById('pr-stock').textContent=appMode==='plasmid'
+    ? `${p.stockConc.toLocaleString()} ${p.units}`
+    : phages.map(ph=>`${ph.name}: ${ph.titer>0?ph.titer.toExponential(2)+' PFU/mL':'no titer'}`).join(' · ');
   document.getElementById('pr-culture').textContent=`${p.cultureName||'Culture'} — ${p[appMode==='phage'?'infVol':'cultureVol']} µL/well`;
   window.print();
 }
@@ -2050,7 +2674,7 @@ function showToast(msg,variant='',duration=2200){
 // ══════════════════════════════════════════════════════════════════
 // UNDO / REDO
 // ══════════════════════════════════════════════════════════════════
-function _snap(){return{wellAssignments:wellAssignments.map(r=>[...r]),excludedWells:new Set(excludedWells),palette:palette.map(c=>({...c})),_condIdCounter,fmt:_fmtKey()};}
+function _snap(){return{wellAssignments:wellAssignments.map(r=>[...r]),excludedWells:new Set(excludedWells),palette:palette.map(c=>({...c})),phages:phages.map(x=>({...x})),_phageIdCounter,_condIdCounter,fmt:_fmtKey()};}
 function snapshotForUndo(){_undoStack.push(_snap());if(_undoStack.length>UNDO_LIMIT)_undoStack.shift();_redoStack=[];}
 function _restoreSnapshot(snap){
   // Restore the plate dimensions the snapshot was taken at BEFORE swapping in its
@@ -2060,6 +2684,7 @@ function _restoreSnapshot(snap){
   wellAssignments=snap.wellAssignments.map(r=>[...r]);
   excludedWells=new Set(snap.excludedWells);
   palette=snap.palette.map(c=>({...c}));
+  if(Array.isArray(snap.phages)){phages=snap.phages.map(x=>({...x}));_phageIdCounter=snap._phageIdCounter||phages.length;_reconcilePhageRefs();}
   _condIdCounter=snap._condIdCounter;
   flushActive();
   renderPalette();renderExclBar();renderPlateTabs();renderPlate();update();
@@ -2070,10 +2695,14 @@ function redo(){if(!_redoStack.length)return;_undoStack.push(_snap());_restoreSn
 // ══════════════════════════════════════════════════════════════════
 // LOCALSTORAGE SAVE / RESTORE
 // ══════════════════════════════════════════════════════════════════
+// phageTiter/phageVol are gone — that state now lives in the `phages` registry,
+// which is serialised alongside `palette`. Old saved states still carry the two
+// fields; _adoptPhages() migrates them and the loop below simply finds no such
+// element, so nothing breaks.
 const _FIELDS=['stockConc','stockVol','cultureVol','cultureTotal','intmConc','intmPrepVol',
   'expName','researcher','expNotes','expDate','inducerName','cultureName','concUnits',
-  'bacterialConc','phageTiter','phageVol','infVol','infTotal','hostName',
-  'sdTarget','sdFactor','sdMinPip','sdStepVol','fillSelect'];
+  'bacterialConc','infVol','infTotal','hostName',
+  'sdTarget','sdFactor','sdMinPip','sdMaxPip','sdPctCap','sdStepVol','fillSelect'];
 
 function saveToStorage(){
   if(!_ready||_sharedSession)return;
@@ -2081,7 +2710,7 @@ function saveToStorage(){
     const fields=_FIELDS.reduce((a,id)=>{const el=document.getElementById(id);if(el)a[id]=el.value;return a;},{});
     // Autosave is the only thing standing between the user and losing a whole plate layout.
     // It used to fail silently, so a full storage quota looked exactly like a working save.
-    if(!lsSet('dd_state',JSON.stringify({v:2,appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,plates:_serializePlates(),activePlate,wellAssignments,excludedWells:[...excludedWells],palette,_condIdCounter,fields}))) lsWarnOnce();
+    if(!lsSet('dd_state',JSON.stringify({v:2,appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,plates:_serializePlates(),activePlate,wellAssignments,excludedWells:[...excludedWells],palette,phages,_condIdCounter,fields}))) lsWarnOnce();
   }catch(e){ lsWarnOnce(); }
 }
 
@@ -2101,6 +2730,7 @@ function restoreFromStorage(){
     else if(s.wellAssignments){ const wa=s.wellAssignments.map(r=>[...r]); plates=[{fmt:'96',name:'Plate 1',assign:wa,excluded:new Set(s.excludedWells||[])}]; activePlate=0; loadPlate(0); }
     if(s.palette)palette=s.palette;
     if(s._condIdCounter!=null)_condIdCounter=s._condIdCounter;
+    _adoptPhages(s.phages,(s.fields||{}).phageTiter,(s.fields||{}).phageVol);
     if(s.fields)Object.entries(s.fields).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
     return true;
   }catch(e){return false;}
@@ -2130,10 +2760,22 @@ function validateInputs(p){
     }
   }
   if(appMode==='phage'){
-    const rawTiter=parseFloat(document.getElementById('phageTiter')?.value);
-    if(!rawTiter||rawTiter<=0)errors.push({field:'phageTiter',msg:'Phage titer must be > 0'});
     const rawBact=parseFloat(document.getElementById('bacterialConc')?.value);
     if(!rawBact||rawBact<=0)errors.push({field:'bacterialConc',msg:'Bacterial concentration must be > 0'});
+    // A missing titer is now per-stock, and only matters for stocks actually in
+    // use — it must NOT be a hard error, or one unused stock would blank the
+    // whole plate. The affected wells carry their own "no titer set" badge.
+    const missing=phages.filter(ph=>!(ph.titer>0)&&palette.some(c=>c.phageId===ph.id&&(c.moi||0)>0));
+    missing.forEach(ph=>warnings.push({field:'phageList',msg:`"${ph.name}" has no titer — wells using it cannot be calculated`}));
+    if(errors.length===0){
+      const wells=getAllWells(p);
+      phageSeriesByStock(p).forEach(({ph,neatDraw})=>{
+        if(neatDraw>0&&ph.vol>0&&neatDraw>ph.vol)
+          warnings.push({field:'phageList',msg:`"${ph.name}": the plan draws ${neatDraw.toFixed(1)} µL — exceeds the ${ph.vol} µL available`});
+      });
+      const totalCult=wells.filter(w=>w.cultVol>0).reduce((s,w)=>s+w.cultVol,0)*OV;
+      if(totalCult>0&&totalCult>p.infTotal)warnings.push({field:'infTotal',msg:`Need ${(totalCult/1000).toFixed(2)} mL culture — exceeds available`});
+    }
   }
   return{errors,warnings};
 }
@@ -2192,13 +2834,21 @@ function buildCalcBreakdown(ri,ci,p){
     return lines.join('\n');
   } else {
     const moi=cond.moi||0;
-    const phageVol=moi>0?(moi*p.bacterialConc*p.infVol)/p.phageTiter:0;
+    const stock=phageFor(cond), titer=titerFor(cond);
+    const phageVol=phageVolFor(moi,p.bacterialConc,p.infVol,titer);
     const lines=[`${wellId}  ·  ${cond.name}  ·  MOI = ${moi}`,''];
-    if(moi>0){
-      lines.push(`Phage vol:`);
+    if(moi>0&&!(titer>0)){
+      lines.push(`No titer set for ${stock?stock.name:'this stock'} — set one to calculate.`,'');
+    } else if(moi>0){
+      lines.push(`Phage: ${stock?stock.name:'—'} @ ${titer.toExponential(2)} PFU/mL${cond.titer>0?' (condition override)':''}`,'');
+      lines.push(`Neat phage vol:`);
       lines.push(`  (${moi} × ${p.bacterialConc.toExponential(2)} CFU/mL × ${p.infVol} µL)`);
-      lines.push(`  ÷ ${p.phageTiter.toExponential(2)} PFU/mL`);
+      lines.push(`  ÷ ${titer.toExponential(2)} PFU/mL`);
       lines.push(`  = ${phageVol.toFixed(4)} µL phage`,'');
+      const plan=planPipetting(pfuPerWellFor(moi,p.bacterialConc,p.infVol),titer,pipOpts(p));
+      lines.push(plan.pick
+        ? `Pipette ${plan.pick.vol.toFixed(1)} µL of the ${plan.pick.label} dilution (${plan.pick.titer.toExponential(2)} PFU/mL)`
+        : plan.reason,'');
     }
     lines.push(`Culture: ${p.infVol} µL  |  Final: ${(p.infVol+phageVol).toFixed(2)} µL`);
     return lines.join('\n');
@@ -2211,7 +2861,7 @@ function buildCalcBreakdown(ri,ci,p){
 function _mkPayload(){
   const fields=_FIELDS.reduce((a,id)=>{const el=document.getElementById(id);if(el)a[id]=el.value;return a;},{});
   const platesData=_serializePlates();
-  return{version:2,savedAt:new Date().toISOString(),appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,plates:platesData,activePlate,wellAssignments,excludedWells:[...excludedWells],palette,_condIdCounter,fields};
+  return{version:2,savedAt:new Date().toISOString(),appMode,appTheme,intmMode,activeTool,repToolN,repToolDir,autoReps,showReps,plates:platesData,activePlate,wellAssignments,excludedWells:[...excludedWells],palette,phages,_condIdCounter,fields};
 }
 function saveJSON(){
   // Exporting a .json FILE must not touch dd_state. This used to call _claimSharedSession(),
@@ -2243,6 +2893,7 @@ function _applyState(s){
   // palette (fall back to the built-in controls) rather than crashing.
   palette=(Array.isArray(s.palette)&&s.palette.length)?s.palette:(typeof defaultPalette==='function'?defaultPalette():(Array.isArray(palette)?palette:[]));
   _condIdCounter=s._condIdCounter||0;
+  _adoptPhages(s.phages,(s.fields||{}).phageTiter,(s.fields||{}).phageVol);
   if(s.fields)Object.entries(s.fields).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
   setMode(appMode);setTheme(appTheme);setTool(activeTool);setIntm(intmMode);
   document.getElementById('repNDisplay').textContent=repToolN;
@@ -2399,8 +3050,9 @@ function exportPlatePNG(){
 // LISTENERS & INIT
 // ══════════════════════════════════════════════════════════════════
 ['stockConc','stockVol','cultureVol','cultureTotal','intmPrepVol','expName','researcher','expNotes',
- 'expDate','inducerName','cultureName','concUnits','bacterialConc','phageTiter','phageVol','infVol',
- 'infTotal','hostName'].forEach(id=>{const el=document.getElementById(id);if(el){el.addEventListener('input',update);el.addEventListener('change',update);}});
+ 'expDate','inducerName','cultureName','concUnits','bacterialConc','infVol',
+ 'infTotal','hostName','sdFactor','sdStepVol','sdMinPip','sdMaxPip','sdPctCap','sdTarget']
+ .forEach(id=>{const el=document.getElementById(id);if(el){el.addEventListener('input',update);el.addEventListener('change',update);}});
 
 // Keyboard shortcuts
 document.addEventListener('keydown',e=>{
@@ -2997,7 +3649,8 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       ],
       compute:function(v){
         if(!(v.plaques>0&&v.dil>0&&v.plated>0)) return null;
-        var titer=v.plaques*v.dil/v.plated;
+        // Shared with the Plate Planner's phage-stock editor so the two can never disagree.
+        var titer=titerFromPlaques(v.plaques,v.dil,v.plated);
         var rows=[{label:'Titer',value:intc(titer)+' PFU/mL',flag:'ok'}];
         if(v.stockvol>0) rows.push({label:'Total in stock',value:intc(titer*v.stockvol)+' PFU'});
         var warn=[]; if(v.plaques<30||v.plaques>300) warn.push('Count '+v.plaques+' is outside the 30–300 statistically-reliable window — use a plate with 30–300 plaques.');
@@ -3350,6 +4003,65 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       sciCases.forEach(function(c){ n++;
         var got=SCI.parse(c[0]);
         if(!(Math.abs(got-c[1])<=Math.abs(c[1])*1e-9)) fails.push('SCI.parse("'+c[0]+'") = '+got+', want '+c[1]); });
+    }
+    // ── phage math: per-condition titers and the pipettable-dilution solver.
+    // Every expectation below is hand-computed from the stated inputs, never
+    // copied from what the code returns — the RCF test was once "passing" at
+    // 160 601 because the expectation had been lifted from the buggy output.
+    if(window.titerFromPlaques&&window.planPipetting){
+      // 120 plaques from 0.1 mL of a 10^-6 dilution = 1.2e9 PFU/mL.
+      n++; if(!_near(titerFromPlaques(120,1e6,0.1),1.2e9)) fails.push('titerFromPlaques(120,1e6,0.1) = '+titerFromPlaques(120,1e6,0.1)+', want 1.2e9');
+      // Same numbers must come out of the `titer` calculator — one source of truth.
+      n++; try{ var tc=byId['titer'].compute({plaques:120,dil:1e6,plated:0.1});
+        if(!_near(_pnum(_rowVal(tc,'Titer')),1.2e9,1e6)) fails.push('titer calculator disagrees with titerFromPlaques');
+      }catch(e){ fails.push('titer calculator threw — '+e.message); }
+      n++; if(isFinite(titerFromPlaques(0,1e6,0.1))) fails.push('titerFromPlaques must reject a zero plaque count');
+
+      // MOI 0.1 against 5e8 CFU/mL in 200 µL from a 1e10 PFU/mL stock:
+      //   cells = 5e8 × 0.2 mL = 1e8; PFU = 1e7; vol = 1e7/1e10 mL = 1 µL.
+      n++; if(!_near(phageVolFor(0.1,5e8,200,1e10),1,1e-9)) fails.push('phageVolFor(0.1,5e8,200,1e10) = '+phageVolFor(0.1,5e8,200,1e10)+', want 1 µL');
+      // The unpipettable case that motivated the solver: 2e8 CFU/mL → 0.4 µL.
+      n++; if(!_near(phageVolFor(0.1,2e8,200,1e10),0.4,1e-9)) fails.push('phageVolFor(0.1,2e8,200,1e10) = '+phageVolFor(0.1,2e8,200,1e10)+', want 0.4 µL');
+      n++; if(phageVolFor(0.1,2e8,200,0)!==0) fails.push('phageVolFor must return 0 when the titer is unknown, not Infinity');
+      // PFU/well = MOI × cells: 0.1 × (2e8 × 0.2 mL) = 4e6.
+      n++; if(!_near(pfuPerWellFor(0.1,2e8,200),4e6,1)) fails.push('pfuPerWellFor(0.1,2e8,200) = '+pfuPerWellFor(0.1,2e8,200)+', want 4e6');
+
+      // Solver. 1e4 PFU/well from a 1e10 PFU/mL stock:
+      //   neat  1e4/1e10 mL = 0.001 µL   (far below the 2 µL floor)
+      //   10⁻³  → 1 µL   (still below the floor)
+      //   10⁻⁴  → 10 µL  (inside 2–20 µL, and ≤ 10% of a 200 µL well = 20 µL)  ← expected pick
+      var sv={factor:10,minPip:2,maxPip:20,capOn:true,pctCap:10,wellVolUl:200};
+      n++; var pp=planPipetting(1e4,1e10,sv);
+      if(!pp.pick||pp.pick.k!==4) fails.push('planPipetting should pick 10^-4, got '+(pp.pick?('10^-'+pp.pick.k):'nothing'));
+      n++; if(pp.pick&&!_near(pp.pick.vol,10,1e-6)) fails.push('planPipetting 10^-4 volume = '+pp.pick.vol+', want 10 µL');
+      // Tighten the ceiling below that volume and nothing qualifies — it must say
+      // so rather than silently returning a step that breaks the constraint.
+      n++; var pp2=planPipetting(1e4,1e10,{factor:10,minPip:2,maxPip:5,capOn:false,wellVolUl:200});
+      if(pp2.pick) fails.push('planPipetting returned a pick outside the 2–5 µL window');
+      n++; if(pp2.pick===null&&!pp2.reason) fails.push('planPipetting gave no reason when nothing qualified');
+      // The % cap must be able to veto a step the µL window would have accepted:
+      // 10 µL is 20% of a 50 µL well, so a 10% cap rules it out.
+      // 10 µL is 20% of a 50 µL well, so a 10% cap must veto the step the plain
+      // 2–20 µL window would have accepted, leaving nothing (1 µL is too small).
+      n++; var pp3=planPipetting(1e4,1e10,{factor:10,minPip:2,maxPip:20,capOn:true,pctCap:10,wellVolUl:50});
+      if(pp3.pick) fails.push('planPipetting ignored the %-of-well cap and picked 10^-'+pp3.pick.k);
+      // Volumes must scale with the titer: the whole point of the registry.
+      n++; if(!_near(phageVolFor(1,2e8,200,1e9)/phageVolFor(1,2e8,200,1e11),100,1e-6))
+        fails.push('a 100x titer difference must give a 100x volume difference');
+      // …and the solver must land two ten-fold rungs apart for those two stocks:
+      // 1e9 needs 10^-3 (10 µL), 1e11 needs 10^-5 (10 µL).
+      n++; var a=planPipetting(1e4,1e9,sv), b=planPipetting(1e4,1e11,sv);
+      if(!a.pick||!b.pick||a.pick.k!==3||b.pick.k!==5)
+        fails.push('100x titer difference should give 10^-3 vs 10^-5, got '+
+                   (a.pick?('10^-'+a.pick.k):'none')+' vs '+(b.pick?('10^-'+b.pick.k):'none'));
+      n++; if(dilLabel(0,10)!=='neat'||dilLabel(3,10)!=='10⁻³') fails.push('dilLabel wrong: '+dilLabel(3,10));
+      // Series sizing: each tube must hold its own draw PLUS the seed for the next.
+      // demand 100 µL at 10^-2 and 50 µL at 10^-1, factor 10, stepVol 10, minPip 2:
+      //   prep[2] = 100 ; prep[1] = 50 + 100/10 = 60 ; transferIn[1] = 6 ; diluent[1] = 54
+      n++; var ss=sizeDilutionSeries([0,50,100],2,10,2,10);
+      if(!_near(ss.prep[2],100,1e-6)||!_near(ss.prep[1],60,1e-6)||!_near(ss.transferIn[1],6,1e-6)||!_near(ss.diluent[1],54,1e-6))
+        fails.push('sizeDilutionSeries wrong: prep='+ss.prep.join('/')+' transferIn='+ss.transferIn.join('/'));
+      n++; if(!_near(ss.neatDraw,6,1e-6)) fails.push('sizeDilutionSeries neat draw = '+ss.neatDraw+', want 6 µL');
     }
     return {total:n, passed:n-fails.length, failures:fails};
   }
@@ -4746,7 +5458,19 @@ function PLATEBLK(sel){
   if(sel.wells){ var t=_tblFrom('#wbody'); if(!t){ t={cols:['Well','Condition','Target','Culture (µL)','Compound (µL)','Final (µL)'],
       rows:wells.map(function(w){ return [w.wellId,w.cond.name,String(appMode==='phage'?w.moi:(w.conc||0)),w.cultVol.toFixed(2),(appMode==='phage'?w.phageVol:w.indVol).toFixed(3),w.finalVol.toFixed(2)]; })}; }
     out.push({type:'table', title:'Per-well volumes', cols:t.cols, rows:t.rows}); }
-  if(sel.mix){ var m=_tblFrom('#mmbody'); if(m) out.push({type:'table', title:'Master mix (+10% overage)', cols:m.cols, rows:m.rows}); }
+  if(sel.mix){ var m=_tblFrom('#mmbody'); if(m) out.push({type:'table', title:'Master mix (+10% overage)', cols:m.cols, rows:m.rows});
+    // Phage mode: what to actually dilute and pipette. Built from the same
+    // phagePlanExport() the CSV and clipboard use.
+    if(appMode==='phage'&&typeof phagePlanExport==='function'){
+      var pl=phagePlanExport(p);
+      if(pl.rows.length){
+        out.push({type:'kv', title:'Phage stocks', pairs:phages.map(function(ph){
+          return [ph.name,(ph.titer>0?ph.titer.toExponential(2)+' PFU/mL':'no titer')+(ph.vol>0?' · '+ph.vol+' µL available':'')+(ph.note?' · '+ph.note:'')]; })});
+        out.push({type:'table', title:'Dilution & pipetting plan', cols:pl.header, rows:pl.rows.map(function(r){return r.map(String);})});
+        out.push({type:'text', title:'Dilution recipe', md:pl.lines.join('\n')});
+      }
+    }
+  }
   if(sel.bench){ var b=document.getElementById('benchBody');
     if(b){ var chips=[].map.call(b.querySelectorAll('.bchip'),function(c){return [c.querySelector('.bl').textContent.trim(), c.querySelector('.bv').textContent.trim()];});
       var warns=[].map.call(b.querySelectorAll('.bench-warn'),function(w,i){return ['Check '+(i+1), w.textContent.trim()];});
@@ -5081,6 +5805,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   }
   function closeTop(m){
     if(m.id==='condModal'&&typeof closeCondModal==='function'){ closeCondModal(); return; }
+    if(m.id==='phageModal'&&typeof closePhageModal==='function'){ closePhageModal(); return; }
     var cancel=[].slice.call(m.querySelectorAll('button')).filter(function(b){return /cancel|close/i.test(b.textContent);})[0];
     if(cancel) cancel.click(); else m.remove();
   }
