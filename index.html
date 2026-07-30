@@ -355,6 +355,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <button class="mode-tab" id="modeTabDilcalc" onclick="setMode('dilcalc')">Dilution Calc</button>
     <button class="mode-tab" id="modeTabCalc" onclick="setMode('calc')">🧬 Calculators</button>
     <button class="mode-tab" id="modeTabProto" onclick="setMode('proto')">📋 Protocols</button>
+    <button class="mode-tab" id="modeTabPhg" onclick="setMode('phg')">🦠 Phage Planner</button>
     <button class="mode-tab" id="modeTabGel" onclick="setMode('gel')">🧪 Gel Sim</button>
     <button class="mode-tab" id="modeTabNb" onclick="setMode('notebook')">📓 Notebook</button>
   </div>
@@ -572,6 +573,63 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div id="gelControls"></div>
     </aside>
     <section class="mbc-main" id="gelMain"></section>
+  </div>
+</div>
+
+<!-- ══════════ PHAGE PLANNER ══════════ -->
+<div id="phgView" style="display:none;padding:16px 20px 60px;max-width:1180px;margin:0 auto;">
+  <div class="mbc-grid">
+    <aside class="mbc-nav">
+      <div class="sl">Lysate library</div>
+      <button class="btn ac" onclick="PHG.addLysate()" style="width:100%;justify-content:center;">＋ Add lysate</button>
+      <div id="phgList" class="mbc-list" role="listbox" aria-label="Saved phage lysates"></div>
+      <div id="phgLibTools"></div>
+    </aside>
+    <section class="mbc-main" id="phgMain"></section>
+  </div>
+</div>
+
+<!-- ══════════ LYSATE EDITOR ══════════ -->
+<div class="modal-overlay" id="phgEdit" style="display:none;" onclick="if(event.target===this)PHG.closeEdit()">
+  <div class="modal-box">
+    <div class="modal-title" id="phgEditTitle">Add lysate</div>
+    <input type="hidden" id="phgEditId">
+    <div class="f">
+      <label for="phgEditName">Name</label>
+      <input id="phgEditName" placeholder="e.g. T4, N4 lysate 2026-07">
+    </div>
+    <div class="r2">
+      <div class="f"><label for="phgEditTiter">Titer (PFU/mL)</label><input id="phgEditTiter" value="1e10"></div>
+      <div class="f"><label for="phgEditVol">Vol available (µL)</label><input type="number" id="phgEditVol" value="1000" min="0" step="any"></div>
+    </div>
+    <div class="r2">
+      <div class="f"><label for="phgEditHost">Propagating host</label><input id="phgEditHost" placeholder="e.g. E. coli MG1655"></div>
+      <div class="f"><label for="phgEditDate">Titered on</label><input type="date" id="phgEditDate"></div>
+    </div>
+    <div class="f">
+      <label for="phgEditNote">Note (optional)</label>
+      <input id="phgEditNote" placeholder="e.g. CsCl-purified, stored 4 °C">
+    </div>
+    <!-- Same math as the Phage titer calculator and the plate's stock editor. -->
+    <details id="phgEditAssay" style="margin-bottom:11px;">
+      <!-- tabindex is explicit: the modal focus trap selects on [tabindex], and a
+           bare <summary> would fall outside it and become keyboard-unreachable. -->
+      <summary tabindex="0" style="font-family:var(--mono);font-size:11px;color:var(--text2);cursor:pointer;padding:5px 0;">Calculate titer from a plaque assay</summary>
+      <div style="padding-top:7px;">
+        <div class="r2">
+          <div class="f"><label for="phgPaPlaques">Plaques counted</label><input type="number" id="phgPaPlaques" value="120" min="0" step="1" oninput="PHG.assay()"></div>
+          <div class="f"><label for="phgPaDil">Total dilution</label><input id="phgPaDil" value="1e6" oninput="PHG.assay()"></div>
+        </div>
+        <div class="f"><label for="phgPaPlated">Volume plated (mL)</label><input type="number" id="phgPaPlated" value="0.1" min="0" step="any" oninput="PHG.assay()"></div>
+        <div class="ibox" id="phgPaResult" style="font-size:10.5px;">Enter a plate count.</div>
+        <button class="addbtn" type="button" onclick="PHG.applyAssay()" style="width:100%;padding:7px;margin-top:6px;">Use this titer</button>
+      </div>
+    </details>
+    <div class="modal-footer">
+      <button class="modal-btn" id="phgEditDelete" onclick="PHG.deleteFromEdit()" style="margin-right:auto;">Delete</button>
+      <button class="modal-btn" onclick="PHG.closeEdit()">Cancel</button>
+      <button class="modal-btn primary" onclick="PHG.saveEdit()">Save</button>
+    </div>
   </div>
 </div>
 
@@ -889,6 +947,17 @@ body.print-plate-mode .excl-bar{display:none!important;}
   <div class="modal-box">
     <div class="modal-title" id="phageModalTitle">Add phage stock</div>
     <input type="hidden" id="phageModalId">
+    <!-- Pre-fills the fields below from the saved lysate library. It only
+         writes inputs — the stock itself is not touched until you press Save,
+         so undo, autosave and share links are unaffected. Hidden entirely
+         when the library is empty. -->
+    <div class="f" id="phageModalLibRow" style="display:none;">
+      <label for="phageModalLib">Load from lysate library</label>
+      <div style="display:flex;gap:6px;">
+        <select id="phageModalLib" style="flex:1;min-width:0;"></select>
+        <button class="addbtn" type="button" onclick="loadPhageFromLibrary()" style="padding:6px 12px;white-space:nowrap;">Load</button>
+      </div>
+    </div>
     <div class="f">
       <label for="phageModalName">Name</label>
       <input id="phageModalName" placeholder="e.g. T4, N4 lysate 2026-07">
@@ -917,6 +986,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
         <button class="addbtn" type="button" onclick="applyPlaqueAssay()" style="width:100%;padding:7px;margin-top:6px;">Use this titer</button>
       </div>
     </details>
+    <button class="addbtn" type="button" onclick="savePhageToLibrary()" style="width:100%;padding:7px;margin-bottom:4px;">＋ Save to lysate library</button>
     <div class="modal-footer">
       <button class="modal-btn" id="phageModalDelete" onclick="deletePhageFromModal()" style="margin-right:auto;">Delete</button>
       <button class="modal-btn" onclick="closePhageModal()">Cancel</button>
@@ -1041,6 +1111,7 @@ var SCI=(function(){
       else if(appMode==='reagent'&&typeof rpCompute==='function') rpCompute();
       else if(appMode==='dilcalc'&&typeof dcInit==='function'){ dcCalc(); dcSerial(); dcConvert(); dcWeigh(); }
       else if(appMode==='home'&&window.renderHome) renderHome();
+      else if(appMode==='phg'&&window.PHG) PHG.render();
       else if(typeof update==='function') update();
     }catch(e){}
   }
@@ -1115,18 +1186,27 @@ function titerFor(cond){
 // condition points at it, so an old share link opens with identical numbers.
 // Everything here is untrusted input (share links, imported JSON), so each
 // field is coerced rather than trusted.
+// The five fields every phage record carries, coerced from untrusted input.
+// Shared with the lysate library (_coerceLysate) so a stock and a saved
+// lysate can never disagree about what a valid titer or name looks like.
+function _coercePhageFields(x,i){
+  const t=Number(x.titer), v=Number(x.vol);
+  return {
+    id:  String(x.id||'').trim()||('p'+((i||0)+1)),
+    name:String(x.name==null?'Phage':x.name).slice(0,80)||'Phage',
+    titer:isFinite(t)&&t>0?t:0,
+    vol: isFinite(v)&&v>=0?v:0,
+    note:String(x.note==null?'':x.note).slice(0,200)
+  };
+}
+
 function _adoptPhages(raw,legacyTiter,legacyVol){
   const out=[];
   (Array.isArray(raw)?raw:[]).forEach((x,i)=>{
     if(!x||typeof x!=='object')return;
-    const t=Number(x.titer), v=Number(x.vol);
-    out.push({
-      id:  String(x.id||'').trim()||('p'+(i+1)),
-      name:String(x.name==null?'Phage':x.name).slice(0,80)||'Phage',
-      titer:isFinite(t)&&t>0?t:0,
-      vol: isFinite(v)&&v>=0?v:0,
-      note:String(x.note==null?'':x.note).slice(0,200)
-    });
+    // Only the five plate fields — a lysate's host/date must not leak into
+    // plate payloads, which are compared byte-for-byte across versions.
+    out.push(_coercePhageFields(x,i));
   });
   if(!out.length){
     const t=Number(legacyTiter), v=Number(legacyVol);
@@ -1175,11 +1255,13 @@ function setMode(m) {
   var mtP=document.getElementById('modeTabProto'); if(mtP) mtP.classList.toggle('active',m==='proto');
   var mtG=document.getElementById('modeTabGel'); if(mtG) mtG.classList.toggle('active',m==='gel');
   var mtN=document.getElementById('modeTabNb'); if(mtN) mtN.classList.toggle('active',m==='notebook');
+  var mtL=document.getElementById('modeTabPhg'); if(mtL) mtL.classList.toggle('active',m==='phg');
   // Home, Reagent Prep, Dilution Calc and Calculators are self-contained views — hide the plate workspace when active.
   var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView'), dv=document.getElementById('dilcalcView'),
       hv=document.getElementById('homeView'), cv=document.getElementById('calcView'), pv=document.getElementById('protoView'),
-      gv=document.getElementById('gelView'), nv=document.getElementById('notebookView');
-  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto'||m==='gel'||m==='notebook');
+      gv=document.getElementById('gelView'), nv=document.getElementById('notebookView'),
+      lv=document.getElementById('phgView');
+  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto'||m==='gel'||m==='notebook'||m==='phg');
   if(rv) rv.style.display = m==='reagent'?'':'none';
   if(dv) dv.style.display = m==='dilcalc'?'':'none';
   if(hv) hv.style.display = m==='home'?'':'none';
@@ -1187,6 +1269,7 @@ function setMode(m) {
   if(pv) pv.style.display = m==='proto'?'':'none';
   if(gv) gv.style.display = m==='gel'?'':'none';
   if(nv) nv.style.display = m==='notebook'?'':'none';
+  if(lv) lv.style.display = m==='phg'?'':'none';
   if(appEl) appEl.style.display = special?'none':'';
   if(m==='reagent'){ rpInit(); return; }
   if(m==='dilcalc'){ dcInit(); return; }
@@ -1195,6 +1278,7 @@ function setMode(m) {
   if(m==='proto'){ if(window.PROTO) PROTO.init(); return; }
   if(m==='gel'){ if(window.GEL) GEL.init(); return; }
   if(m==='notebook'){ if(window.NB) NB.init(); return; }
+  if(m==='phg'){ if(window.PHG) PHG.init(); return; }
   document.getElementById('sbPlasmid').style.display = m==='plasmid'?'':'none';
   document.getElementById('sbPhage').style.display   = m==='phage'?'':'none';
   document.getElementById('moiPanel').style.display  = m==='phage'?'':'none';
@@ -1384,10 +1468,55 @@ function openPhageModal(id){
   document.getElementById('phageModalDelete').style.display=(id&&phages.length>1)?'':'none';
   document.getElementById('phageModalAssay').open=false;
   updatePlaqueAssay();
+  _fillPhageLibSelect();
   document.getElementById('phageModal').style.display='flex';
   document.getElementById('phageModalName').focus();
 }
 function closePhageModal(){ document.getElementById('phageModal').style.display='none'; }
+
+// ── Lysate library ⇄ phage stock ───────────────────────────────────
+// Both directions copy the five stock fields through the DOM only. The
+// `phages` array, and therefore every payload built from it (undo, autosave,
+// named layouts, the share hash, JSON export), keeps exactly the shape it
+// has always had.
+function _fillPhageLibSelect(){
+  const row=document.getElementById('phageModalLibRow'), sel=document.getElementById('phageModalLib');
+  if(!row||!sel)return;
+  let list=[]; try{ list=lysAll(); }catch(e){}
+  row.style.display=list.length?'':'none';
+  sel.textContent='';
+  // Built as DOM nodes, not markup: lysate names come from imported files.
+  const first=document.createElement('option'); first.value=''; first.textContent='— pick a saved lysate —';
+  sel.appendChild(first);
+  list.forEach(l=>{
+    const o=document.createElement('option');
+    o.value=l.id;
+    o.textContent=l.name+' — '+(l.titer>0?l.titer.toExponential(2):'no titer')+' PFU/mL'+(l.date?' · '+l.date:'');
+    sel.appendChild(o);
+  });
+}
+function loadPhageFromLibrary(){
+  const sel=document.getElementById('phageModalLib'); if(!sel)return;
+  const l=sel.value?lysGet(sel.value):null;
+  if(!l){ showToast('Pick a lysate first','warn'); return; }
+  document.getElementById('phageModalName').value=l.name;
+  document.getElementById('phageModalTiter').value=l.titer>0?l.titer:'';
+  document.getElementById('phageModalVol').value=l.vol;
+  document.getElementById('phageModalNote').value=l.note||'';
+  showToast('Loaded '+l.name+' — press Save to use it');
+}
+function savePhageToLibrary(){
+  const name=document.getElementById('phageModalName').value.trim()||'Phage';
+  const rec=lysUpsert({
+    name,
+    titer:parseFloat(document.getElementById('phageModalTiter').value)||0,
+    vol:parseFloat(document.getElementById('phageModalVol').value)||0,
+    note:document.getElementById('phageModalNote').value.trim()
+  });
+  if(!rec){ showToast('Couldn’t save — browser storage is full or unavailable.','warn',6000); return; }
+  _fillPhageLibSelect();
+  showToast('✓ '+rec.name+' saved to the lysate library','green');
+}
 
 function savePhageModal(){
   snapshotForUndo();
@@ -2051,6 +2180,202 @@ function planPipetting(pfuPerWell,titer,opts){
     else reason=`No dilution between neat and ${dilLabel(maxSteps,factor)} lands in ${minPip}–${maxPip} µL (deepest gives ${fmtUl(last.vol)} µL).`;
   }
   return{steps,pick,reason};
+}
+
+// ══════════════════════════════════════════════════════════════════
+// LYSATE LIBRARY — phage stocks that outlive one experiment.
+//
+// Deliberately its OWN localStorage key rather than part of plate state.
+// `phages` (the plate's stock registry) travels inside every plate payload
+// — dd_state, dd_layouts, the share hash, JSON export, undo snapshots — so
+// putting a library in there would bloat every share link and change every
+// saved file. The library is a separate catalogue you copy values in and
+// out of, exactly like dd_reagent_custom and dd_gel_ladders.
+// ══════════════════════════════════════════════════════════════════
+
+var LYS_KEY='dd_lysates';
+
+// A lysate is a plate stock plus the two things you want to remember about
+// it a month later: what you propagated it on, and when you titered it.
+// Everything here is untrusted (imported files, a hand-edited localStorage).
+function _coerceLysate(x,i){
+  if(!x||typeof x!=='object')return null;
+  var o=_coercePhageFields(x,i);
+  o.id  = String(x.id||'').trim();                      // callers mint one when empty
+  o.host= String(x.host==null?'':x.host).slice(0,80);
+  o.date= String(x.date==null?'':x.date).slice(0,20);
+  return o;
+}
+function _lysId(){ return 'L'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+
+function lysAll(){
+  var raw; try{ raw=JSON.parse(lsGet(LYS_KEY)||'[]'); }catch(e){ raw=[]; }
+  if(!Array.isArray(raw)) raw=[];
+  return raw.map(_coerceLysate).filter(Boolean).map(function(r){ if(!r.id)r.id=_lysId(); return r; });
+}
+function lysSave(list){
+  var clean=(list||[]).map(_coerceLysate).filter(Boolean);
+  clean.forEach(function(r){ if(!r.id)r.id=_lysId(); });
+  var ok=lsSet(LYS_KEY,JSON.stringify(clean));
+  if(!ok) lsWarnOnce();
+  return ok;
+}
+function lysGet(id){ var f=lysAll().filter(function(x){return x.id===id;}); return f.length?f[0]:null; }
+
+// Save or update. Without an id, an existing lysate of the same name is
+// updated rather than duplicated — re-titering a stock is the common case.
+function lysUpsert(o){
+  var list=lysAll(), rec=_coerceLysate(o,list.length);
+  if(!rec)return null;
+  if(!rec.id){
+    var same=list.filter(function(x){return x.name.toLowerCase()===rec.name.toLowerCase();});
+    rec.id = same.length?same[0].id:_lysId();
+  }
+  var i=-1; list.forEach(function(x,j){ if(x.id===rec.id)i=j; });
+  if(i>=0) list[i]=rec; else list.push(rec);
+  return lysSave(list)?rec:null;
+}
+function lysDelete(id){ return lysSave(lysAll().filter(function(x){return x.id!==id;})); }
+
+function lysExportJson(){
+  return JSON.stringify({app:'dilution-designer',kind:'phage-lysates',v:1,lysates:lysAll()},null,2);
+}
+// Accepts a bare array, our own export, or a plate JSON's `phages` block, so
+// you can seed the library straight from a layout you already saved.
+function lysImportJson(text){
+  var d=JSON.parse(text);
+  var arr = Array.isArray(d) ? d
+          : (d&&Array.isArray(d.lysates)) ? d.lysates
+          : (d&&Array.isArray(d.phages))  ? d.phages
+          : (d&&d.ph&&Array.isArray(d.ph))? d.ph : null;
+  if(!arr) throw new Error('no lysates found in that file');
+  var list=lysAll(), byId={}, order=[];
+  list.forEach(function(x){ if(!byId[x.id])order.push(x.id); byId[x.id]=x; });
+  var n=0;
+  arr.forEach(function(x,i){
+    var r=_coerceLysate(x,i); if(!r)return;
+    if(!r.id)r.id=_lysId();
+    if(!byId[r.id])order.push(r.id);
+    byId[r.id]=r; n++;
+  });
+  if(!n) throw new Error('no readable lysates in that file');
+  if(!lysSave(order.map(function(k){return byId[k];}))) throw new Error('browser storage is full');
+  return n;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// INFECTION PLANNER — the whole point: how much lysate goes in, and if
+// that volume is unpipettable, which dilution to make and how much of THAT
+// to use instead.
+//
+// Three ways to say how much phage you want, all normalised to a single
+// PFU demand before anything else happens:
+//   'moi'  a target multiplicity against a known host density
+//   'pfu'  a flat number of PFU (spot tests, plaque assays, spiking)
+//   'conc' a target PFU/mL in the infection
+//
+// `conserveVol` picks the bench convention. OFF (the default, and what the
+// Plate Planner does) the phage goes ON TOP of a full culture aliquot, so
+// the tube finishes at infVol + v. ON, the phage volume comes OUT of the
+// stated volume, so the tube finishes at exactly infVol and the cells you
+// infect are themselves diluted by the phage you add. In MOI mode that is
+// circular — v depends on the cell count, which depends on v — but it
+// solves in closed form, no iteration:
+//     v·titer = MOI·c·(V − v)   ⇒   v = MOI·c·V / (titer + MOI·c)
+//
+// The demand is computed from the NEAT-equivalent volume, but every
+// reported figure (achieved MOI, final PFU/mL, final volume) is computed
+// from the volume you will ACTUALLY pipette — which is larger whenever a
+// dilution is picked. Those two disagree, and quietly reporting the first
+// while the bench does the second is exactly the class of bug this file
+// has been bitten by before.
+//
+// opts: {mode, titer, infVolUl, conserveVol, cellsPerMl, moi, pfuTarget,
+//        finalPfuMl, factor, minPip, maxPip, capOn, pctCap, maxSteps,
+//        stepVol, nReactions, overage, stockVolUl}
+// returns {ok, reason, pfu, neatVolUl, plan, pick, series, …, warn:[]}
+//   ok      = a PFU demand was computed (inputs sufficient)
+//   pick    = the recommended rung, or null — then plan.reason says why
+// ══════════════════════════════════════════════════════════════════
+function planInfection(o){
+  o=o||{};
+  var mode=(o.mode==='pfu'||o.mode==='conc')?o.mode:'moi';
+  var titer=+o.titer||0, V=+o.infVolUl||0, conserve=!!o.conserveVol;
+  var c=+o.cellsPerMl||0, moi=+o.moi||0;
+  var nRxn=(+o.nReactions>0)?+o.nReactions:1;
+  var ov=(+o.overage>0)?+o.overage:1;
+  var out={ok:false,reason:'',mode:mode,conserve:conserve,pfu:0,neatVolUl:0,
+           plan:null,pick:null,series:null,pickVolUl:0,
+           cultureVolUl:0,finalVolUl:0,achievedMoi:0,pctInfected:0,finalPfuMl:0,
+           neatDraw:0,nReactions:nRxn,warn:[]};
+
+  if(!(titer>0)){ out.reason='Set a titer for the lysate first.'; return out; }
+  if(!(V>0)){ out.reason='Set the infection volume first.'; return out; }
+
+  var pfu=0, neat=0;
+  if(mode==='moi'){
+    if(!(c>0&&moi>0)){ out.reason='Set the host density and a target MOI.'; return out; }
+    if(conserve){ neat=(moi*c*V)/(titer+moi*c); pfu=neat*titer/1000; }
+    else        { pfu=pfuPerWellFor(moi,c,V);   neat=pfu/titer*1000; }
+  } else if(mode==='pfu'){
+    pfu=+o.pfuTarget||0;
+    if(!(pfu>0)){ out.reason='Set how many PFU you want to deliver.'; return out; }
+    neat=pfu/titer*1000;
+  } else {
+    var fc=+o.finalPfuMl||0;
+    if(!(fc>0)){ out.reason='Set the phage concentration you want in the infection.'; return out; }
+    if(fc>=titer){ out.reason='That concentration is at or above the neat titer — adding lysate cannot get you there.'; return out; }
+    pfu=fc*V/1000;               // targets PFU/mL across the stated volume V
+    neat=pfu/titer*1000;
+  }
+
+  out.ok=true; out.pfu=pfu; out.neatVolUl=neat;
+
+  var plan=planPipetting(pfu,titer,{
+    factor:o.factor, minPip:o.minPip, maxPip:o.maxPip,
+    capOn:!!o.capOn, pctCap:o.pctCap, wellVolUl:V, maxSteps:o.maxSteps
+  });
+  out.plan=plan; out.pick=plan.pick;
+  if(!plan.pick) out.reason=plan.reason;
+
+  // Everything below is judged on the volume actually pipetted.
+  var vAdd=plan.pick?plan.pick.vol:neat;
+  out.pickVolUl=vAdd;
+  out.cultureVolUl = conserve ? Math.max(0,V-vAdd) : V;
+  out.finalVolUl   = conserve ? V : V+vAdd;
+  out.finalPfuMl   = out.finalVolUl>0 ? pfu/(out.finalVolUl/1000) : 0;
+  if(c>0&&out.cultureVolUl>0){
+    out.achievedMoi = pfu/(c*out.cultureVolUl/1000);
+    out.pctInfected = (1-Math.exp(-out.achievedMoi))*100;
+  }
+
+  // Sizing the dilution ladder is the existing plate solver, unchanged: one
+  // rung of demand, then sizeDilutionSeries works backwards down the ladder.
+  // Same defaults planPipetting applies, and the same #sdStepVol default the
+  // plate sidebar ships with, so the two surfaces size identical ladders.
+  var factor=o.factor>1?o.factor:10, minPip=o.minPip>0?o.minPip:2, stepVol=o.stepVol>0?o.stepVol:10;
+  if(plan.pick&&plan.pick.k>0){
+    var demand=[]; for(var k=0;k<=plan.pick.k;k++)demand[k]=0;
+    demand[plan.pick.k]=plan.pick.vol*nRxn*ov;
+    out.series=sizeDilutionSeries(demand,plan.pick.k,factor,minPip,stepVol);
+    out.neatDraw=out.series.neatDraw;
+  } else {
+    out.neatDraw=vAdd*nRxn*ov;
+  }
+
+  var w=out.warn;
+  var stock=+o.stockVolUl||0;
+  if(stock>0&&out.neatDraw>stock)
+    w.push('The plan draws '+out.neatDraw.toFixed(1)+' µL of neat lysate but only '+stock+' µL is on hand — short by '+(out.neatDraw-stock).toFixed(1)+' µL.');
+  if(mode==='moi'&&moi>0&&out.achievedMoi>0&&Math.abs(out.achievedMoi-moi)/moi>0.02)
+    w.push('Pipetting '+vAdd.toFixed(1)+' µL instead of the '+neat.toFixed(2)+' µL neat equivalent shifts the delivered MOI to '+out.achievedMoi.toPrecision(3)+'. Turn off volume conservation, or use a less dilute rung.');
+  if(!conserve&&vAdd>V*0.5)
+    w.push('The phage volume is more than half the culture volume — the infection is mostly lysate buffer. Consider a higher-titer stock or a larger culture.');
+  if(pfu>0&&pfu<10)
+    w.push('Fewer than 10 PFU per reaction — Poisson noise dominates at this dose and replicates will scatter badly.');
+  if(mode==='moi'&&moi>=100)
+    w.push('MOI ≥ 100 — expect lysis from without rather than a productive infection.');
+  return out;
 }
 
 function fmtSci(n){
@@ -3410,7 +3735,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
 
 /* ══════════════════════════ HOME HUB + MOLBIO CALCULATORS (MBC) ══════════════════════════ */
 (function(){
-  var MB_VERSION='v0.9 (2026-07)';
+  var MB_VERSION='v1.0 (2026-07)';
   // ---------- styles ----------
   var css = `
   #homeView,#calcView{color:var(--text);}
@@ -3676,7 +4001,83 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
           {label:'% cells infected',value:fmt((1-Math.exp(-v.moi))*100,3)+' % (Poisson)'}
         ];
         var warn=[]; if(vmL/1000>vL(v.infvol,'mL')) warn.push('Required phage volume exceeds the infection volume — use a higher-titer stock or a lower MOI.');
-        return {rows:rows, warn:warn, note:'PFU = MOI × cells; volume = PFU ÷ titer; %infected = 1 − e^(−MOI)'};
+        return {rows:rows, warn:warn, note:'PFU = MOI × cells; volume = PFU ÷ titer; %infected = 1 − e^(−MOI). For the dilution to make when that volume is too small to pipette, use “Phage lysate → infection volume”.'};
+      } },
+    { id:'lysate', name:'Phage lysate → infection volume', group:G_CELL,
+      tags:'phage lysate titer pfu moi infection dilution ladder pipette volume plaque library serial',
+      blurb:'Pick a lysate, say what you want to deliver, and get the volume — plus the dilution to make when the neat volume is too small to pipette.',
+      fields:[
+        {k:'lys',label:'Lysate',kind:'select',def:'',hint:'Saved in the Phage Planner',
+         opts:function(){ var o=[{v:'',label:'— type a titer below —'}];
+           try{ lysAll().forEach(function(l){ o.push({v:l.id,label:l.name+' — '+(l.titer>0?fmt(l.titer,3):'no titer')+' PFU/mL'}); }); }catch(e){}
+           return o; }},
+        {k:'titer',label:'Titer (PFU/mL)',kind:'num',def:1e10,hint:'Ignored when a lysate is picked'},
+        {k:'mode',label:'Deliver',kind:'select',def:'moi',
+         opts:[{v:'moi',label:'a target MOI'},{v:'pfu',label:'a total number of PFU'},{v:'conc',label:'a final PFU/mL'}]},
+        {k:'moi',label:'Target MOI',kind:'num',def:0.1,hint:'MOI mode'},
+        {k:'cells',label:'Host cells (CFU/mL)',kind:'num',def:2e8,hint:'MOI mode'},
+        {k:'pfutarget',label:'Total PFU',kind:'num',def:1e6,hint:'Total-PFU mode'},
+        {k:'finalconc',label:'Final PFU/mL',kind:'num',def:1e7,hint:'Final-PFU/mL mode'},
+        {k:'infvol',label:'Infection volume',kind:'num',def:200,units:['µL','mL'],defU:'µL'},
+        {k:'conv',label:'Phage volume',kind:'select',def:'top',
+         opts:[{v:'top',label:'added on top of the culture'},{v:'keep',label:'taken out of the volume'}]},
+        {k:'n',label:'Number of infections',kind:'num',def:1,min:1},
+        {k:'over',label:'Overage (%)',kind:'num',def:10},
+        {k:'factor',label:'Dilution factor',kind:'num',def:10},
+        {k:'minpip',label:'Min pipettable (µL)',kind:'num',def:2},
+        {k:'maxpip',label:'Max pipettable (µL)',kind:'num',def:20},
+        {k:'stepvol',label:'Dilution tube volume (µL)',kind:'num',def:10}
+      ],
+      compute:function(v){
+        // All of the arithmetic is planInfection(), which the Phage Planner and
+        // the plate share — this is only an adapter into the result contract.
+        var lys=null; try{ if(v.lys) lys=lysGet(v.lys); }catch(e){}
+        var titer=lys?lys.titer:v.titer;
+        var infUl=vL(v.infvol,v.infvolU||'µL')*1e6;
+        var r=planInfection({
+          mode:v.mode, titer:titer, infVolUl:infUl, conserveVol:(v.conv==='keep'),
+          cellsPerMl:v.cells, moi:v.moi, pfuTarget:v.pfutarget, finalPfuMl:v.finalconc,
+          factor:v.factor, minPip:v.minpip, maxPip:v.maxpip, stepVol:v.stepvol,
+          nReactions:v.n, overage:1+((v.over>0)?v.over/100:0),
+          stockVolUl:lys?lys.vol:0
+        });
+        if(!r.ok) return {warn:[r.reason||'Check your inputs.']};
+
+        var rows=[];
+        if(lys) rows.push({label:'',value:'Titer '+fmt(titer,4)+' PFU/mL from library: '+lys.name,sub:true});
+        rows.push({label:'Phage needed',value:intc(r.pfu)+' PFU'});
+        rows.push({label:'Neat lysate equivalent',value:fmt(r.neatVolUl,4)+' µL'});
+        if(r.pick){
+          rows.push({label:'Dilution to use',value:r.pick.label+(r.pick.k?'  ('+fmt(r.pick.titer,3)+' PFU/mL)':'')});
+          rows.push({label:'Volume to pipette',value:fmt(r.pick.vol,4)+' µL',flag:'ok'});
+        }
+        if(r.achievedMoi>0){
+          rows.push({label:'Delivered MOI',value:fmt(r.achievedMoi,3)});
+          rows.push({label:'% cells infected',value:fmt(r.pctInfected,3)+' % (Poisson)'});
+        }
+        rows.push({label:'Final volume',value:fmt(r.finalVolUl,4)+' µL'});
+        rows.push({label:'Phage in the infection',value:intc(r.finalPfuMl)+' PFU/mL'});
+        rows.push({label:'Neat lysate to draw',value:fmt(r.neatDraw,4)+' µL'+(r.nReactions>1?'  (for '+r.nReactions+' infections + overage)':'')});
+        if(r.series){
+          for(var k=1;k<=r.series.prep.length-1;k++){
+            if(!(r.series.prep[k]>0))continue;
+            rows.push({label:'',sub:true,value:'Step '+k+': take '+fmt(r.series.transferIn[k],3)+' µL of '+
+              dilLabel(k-1,v.factor>1?v.factor:10)+' + '+fmt(r.series.diluent[k],3)+' µL diluent → '+
+              fmt(r.series.prep[k],3)+' µL at '+fmt(titer/Math.pow(v.factor>1?v.factor:10,k),3)+' PFU/mL'});
+          }
+        }
+
+        var table=null;
+        if(r.plan&&r.plan.steps.length){
+          table={cols:['Dilution','Titer (PFU/mL)','Volume needed','Verdict'],rows:r.plan.steps.map(function(s){
+            return [s.label, fmt(s.titer,3), fmt(s.vol,3)+' µL',
+                    (r.pick&&s.k===r.pick.k)?'✓ use this':(s.ok?'pipettable':s.why)];
+          })};
+        }
+        var warn=r.warn.slice();
+        if(!r.pick&&r.plan&&r.plan.reason) warn.unshift(r.plan.reason);
+        return {rows:rows, table:table, warn:warn,
+                note:'PFU demand comes from the target you chose; the ladder is walked from neat downwards and the first rung inside your pipette window wins. Reported MOI, final volume and PFU/mL are computed from the volume you will actually pipette, not from the neat equivalent.'};
       } },
     { id:'doubling', name:'Growth rate / doubling time', group:G_CELL, tags:'doubling generation time growth rate log phase od cfu',
       blurb:'Doubling time and rate from two readings, plus time to reach a target.',
@@ -3851,7 +4252,10 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   function hint(f){ return f.hint?'<div class="mbc-hint">'+escapeHtml(f.hint)+'</div>':''; }
   function fieldHtml(f){
     var id='mbc_'+f.k;
-    if(f.kind==='select'){ var opts=(f.opts||[]).map(function(o){var val=o.v!=null?o.v:o, lab=o.label!=null?o.label:o; return '<option value="'+escapeHtml(String(val))+'"'+(String(val)===String(f.def)?' selected':'')+'>'+escapeHtml(String(lab))+'</option>';}).join('');
+    // opts may be a function so a list can be built fresh on every open —
+    // the lysate picker reads the library, which changes outside this module.
+    // openCalc re-runs fieldHtml each time, so the list is never stale.
+    if(f.kind==='select'){ var opts=((typeof f.opts==='function'?f.opts():f.opts)||[]).map(function(o){var val=o.v!=null?o.v:o, lab=o.label!=null?o.label:o; return '<option value="'+escapeHtml(String(val))+'"'+(String(val)===String(f.def)?' selected':'')+'>'+escapeHtml(String(lab))+'</option>';}).join('');
       return '<div class="mbc-f"><label for="'+id+'">'+escapeHtml(f.label)+'</label><select id="'+id+'" oninput="MBC.recompute()">'+opts+'</select>'+hint(f)+'</div>'; }
     if(f.kind==='seq'){ return '<div class="mbc-f mbc-wide"><label for="'+id+'">'+escapeHtml(f.label)+'</label><textarea id="'+id+'" rows="3" spellcheck="false" oninput="MBC.recompute()" placeholder="'+escapeHtml(f.ph||'')+'"></textarea>'+hint(f)+'</div>'; }
     if(f.kind==='text'){ return '<div class="mbc-f"><label for="'+id+'">'+escapeHtml(f.label)+'</label><input id="'+id+'" type="text" value="'+escapeHtml(f.def!=null?String(f.def):'')+'" oninput="MBC.recompute()" placeholder="'+escapeHtml(f.ph||'')+'">'+hint(f)+'</div>'; }
@@ -3934,6 +4338,13 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       ['rcf',{r:85,mode:'rcf2rpm',value:16060},[['RPM',13000,25]]],
       ['od600',{od:0.6,factor:8e8,dil:1,targetOD:0.1,fvol:10},[['Density',4.8e8,1e6],['Take culture',1.667,0.01],['Add media',8.333,0.01]]],
       ['moivol',{titer:1e10,cells:5e8,infvol:1,moi:0.1},[['Add phage stock',5,0.05],['% cells infected',9.516,0.1]]],
+      // 2e8 CFU/mL × 0.2 mL = 4e7 cells; × MOI 0.1 = 4e6 PFU. From a 1e10 stock that
+      // is 0.4 µL neat — under the 2 µL floor — so 10⁻¹ at 4.0 µL is the pick, and
+      // adding it on top takes the tube to 204 µL. 1 − e^-0.1 = 9.516 %.
+      ['lysate',{lys:'',titer:1e10,mode:'moi',moi:0.1,cells:2e8,infvol:200,infvolU:'µL',conv:'top',
+                 n:1,over:10,factor:10,minpip:2,maxpip:20,stepvol:10},
+        [['Phage needed',4e6,1],['Volume to pipette',4,0.001],['Delivered MOI',0.1,1e-6],
+         ['% cells infected',9.516,0.01],['Final volume',204,0.001]]],
       ['primer',{nmol:25,stock:100,work:10,wvol:100},[['Resuspend in',250,0.5]]],
       ['doubling',{n0:0.05,n:0.4,t:120,tU:'min'},[['Generations',3,0.01],['Doubling time',40,0.1]]],
       ['tm',{seq:'ATGCATGCATGCATGCATGC',na:50},[['GC content',50,0.1],['Tm (salt-adjusted)',46.65,0.2]]],
@@ -4063,6 +4474,125 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
         fails.push('sizeDilutionSeries wrong: prep='+ss.prep.join('/')+' transferIn='+ss.transferIn.join('/'));
       n++; if(!_near(ss.neatDraw,6,1e-6)) fails.push('sizeDilutionSeries neat draw = '+ss.neatDraw+', want 6 µL');
     }
+
+    // ---- infection planner + lysate library ----
+    // Every expectation below is worked out by hand from the stated inputs.
+    if(window.planInfection&&window._coerceLysate){
+      var W={factor:10,minPip:2,maxPip:20};
+
+      // MOI, phage added on top. T=1e10 PFU/mL, 2e8 CFU/mL, 200 µL, MOI 0.1:
+      //   cells = 2e8 × 0.2 mL = 4e7  →  PFU = 0.1 × 4e7 = 4e6
+      //   neat  = 4e6/1e10 mL = 4e-4 mL = 0.4 µL  → below the 2 µL floor
+      //   10⁻¹  = 4e6/1e9  mL = 4e-3 mL = 4.0 µL  → inside 2–20 ✓
+      n++; var iA=planInfection({titer:1e10,mode:'moi',cellsPerMl:2e8,infVolUl:200,moi:0.1,
+                                 factor:W.factor,minPip:W.minPip,maxPip:W.maxPip});
+      if(!_near(iA.pfu,4e6,1)||!iA.pick||iA.pick.k!==1||!_near(iA.pick.vol,4,1e-6))
+        fails.push('planInfection MOI: pfu='+iA.pfu+' pick='+(iA.pick?('10^-'+iA.pick.k+' @ '+iA.pick.vol+' µL'):'none')+', want 4e6 PFU and 4 µL of 10^-1');
+      // Added on top the tube finishes at 204 µL, so 4e6 PFU / 0.204 mL = 1.9608e7 PFU/mL,
+      // while the MOI is untouched (the cells were never diluted).
+      n++; if(!_near(iA.finalVolUl,204,1e-9)||!_near(iA.finalPfuMl,1.9607843e7,1e3)||!_near(iA.achievedMoi,0.1,1e-9))
+        fails.push('planInfection on-top reporting: final '+iA.finalVolUl+' µL, '+iA.finalPfuMl+' PFU/mL, MOI '+iA.achievedMoi);
+      n++; if(!_near(iA.pctInfected,9.516,0.01)) fails.push('% infected at MOI 0.1 = '+iA.pctInfected+', want 9.516 (1 − e^-0.1)');
+
+      // The neat-equivalent volume must be the number the plate already computes.
+      n++; if(!_near(iA.neatVolUl,phageVolFor(0.1,2e8,200,1e10),1e-9))
+        fails.push('planInfection neat volume disagrees with phageVolFor');
+
+      // MOI, volume-conserving. The phage displaces culture, so the cell count
+      // depends on the phage volume and vice versa. Closed form:
+      //   v = MOI·c·V/(titer + MOI·c) = 0.1·5e8·1000/(1e10 + 5e7)
+      //     = 5e10/1.005e10 = 4.975124 µL
+      // and the delivered MOI must come back out at exactly 0.1.
+      n++; var iB=planInfection({titer:1e10,mode:'moi',cellsPerMl:5e8,infVolUl:1000,moi:0.1,
+                                 conserveVol:true,factor:10,minPip:0.5,maxPip:20});
+      if(!_near(iB.neatVolUl,4.975124,1e-4)||!_near(iB.cultureVolUl,995.0249,1e-3)||!_near(iB.achievedMoi,0.1,1e-9))
+        fails.push('planInfection conserving: v='+iB.neatVolUl+' culture='+iB.cultureVolUl+' MOI='+iB.achievedMoi+', want 4.975124 µL / 995.0249 µL / 0.1');
+      n++; if(!_near(iB.finalVolUl,1000,1e-9)) fails.push('conserving mode must finish at the stated volume, got '+iB.finalVolUl);
+
+      // Total-PFU mode, sitting exactly on the pipette floor. 1e7 PFU from
+      // 5e9 PFU/mL = 2e-3 mL = exactly 2.0 µL. planPipetting rejects on
+      // `vol < minPip`, so 2.0 µL is accepted neat — this pins that boundary.
+      n++; var iC=planInfection({titer:5e9,mode:'pfu',pfuTarget:1e7,infVolUl:1000,factor:10,minPip:2,maxPip:20});
+      if(!iC.pick||iC.pick.k!==0||!_near(iC.pick.vol,2,1e-9))
+        fails.push('planInfection total-PFU boundary: want neat @ 2.0 µL, got '+(iC.pick?('10^-'+iC.pick.k+' @ '+iC.pick.vol):'nothing'));
+
+      // Total-PFU needing two dilution steps. 1e6 PFU from 1e10 = 0.1 µL neat;
+      // 10⁻¹ gives 1 µL (below 2), 10⁻² gives 10 µL ✓.
+      // Sizing that one rung with stepVol 10, minPip 2, factor 10:
+      //   k=2: prep = max(10,10) = 10, but 10/10 = 1 µL in — below minPip, so
+      //        the tube scales to minPip×factor = 20 µL
+      //   k=1: prep = max(20/10, 10) = 10 → same rescue → 20 µL
+      //   transferIn = 2 µL each, diluent = 18 µL each, neat drawn = 2 µL
+      n++; var iD=planInfection({titer:1e10,mode:'pfu',pfuTarget:1e6,infVolUl:1000,
+                                 factor:10,minPip:2,maxPip:20,stepVol:10});
+      if(!iD.pick||iD.pick.k!==2||!_near(iD.pick.vol,10,1e-6))
+        fails.push('planInfection 1e6 PFU: want 10 µL of 10^-2, got '+(iD.pick?('10^-'+iD.pick.k+' @ '+iD.pick.vol):'nothing'));
+      n++; if(!iD.series||!_near(iD.series.prep[1],20,1e-6)||!_near(iD.series.transferIn[2],2,1e-6)||
+              !_near(iD.series.diluent[2],18,1e-6)||!_near(iD.neatDraw,2,1e-6))
+        fails.push('planInfection ladder sizing wrong: '+JSON.stringify(iD.series));
+
+      // Final-PFU/mL mode. 1e8 PFU/mL across 1000 µL from a 2e10 stock:
+      //   PFU = 1e8 × 1 mL = 1e8 ; neat = 1e8/2e10 mL = 5.0 µL
+      // Conserving, the aliquot is 995 µL and the concentration lands exactly.
+      n++; var iE=planInfection({titer:2e10,mode:'conc',finalPfuMl:1e8,infVolUl:1000,
+                                 conserveVol:true,factor:10,minPip:2,maxPip:20});
+      if(!_near(iE.pfu,1e8,1)||!iE.pick||iE.pick.k!==0||!_near(iE.pick.vol,5,1e-6)||
+         !_near(iE.cultureVolUl,995,1e-9)||!_near(iE.finalPfuMl,1e8,1))
+        fails.push('planInfection conc/conserving: pfu='+iE.pfu+' vol='+(iE.pick&&iE.pick.vol)+' culture='+iE.cultureVolUl+' achieved='+iE.finalPfuMl);
+
+      // Same target, the two conventions diverge. 1e7 PFU/mL in 200 µL from
+      // 1e10 → 2e6 PFU, 0.2 µL neat, so with a 1 µL floor you pipette 2 µL of
+      // 10⁻¹. Conserving that is exactly 1e7 PFU/mL; added on top the tube is
+      // 202 µL and you get 2e6/0.202 = 9.90099e6 PFU/mL. Both are correct —
+      // the point is that the tool must not report the first while you do the second.
+      n++; var iF1=planInfection({titer:1e10,mode:'conc',finalPfuMl:1e7,infVolUl:200,conserveVol:true, factor:10,minPip:1,maxPip:20}),
+               iF2=planInfection({titer:1e10,mode:'conc',finalPfuMl:1e7,infVolUl:200,conserveVol:false,factor:10,minPip:1,maxPip:20});
+      if(!iF1.pick||iF1.pick.k!==1||!_near(iF1.pick.vol,2,1e-6)||!_near(iF1.finalPfuMl,1e7,1)||
+         !_near(iF2.finalVolUl,202,1e-9)||!_near(iF2.finalPfuMl,9.9009901e6,1e2))
+        fails.push('planInfection conc conventions: conserving '+iF1.finalPfuMl+' vs on-top '+iF2.finalPfuMl+' (want 1e7 and 9.90099e6)');
+
+      // Poisson, against published values of 1 − e^(−MOI).
+      // titer 1e12 keeps the volumes pipettable so the MOI is delivered intact.
+      n++; var iG1=planInfection({titer:1e12,mode:'moi',cellsPerMl:2e8,infVolUl:200,moi:1,factor:10,minPip:2,maxPip:20}),
+               iG2=planInfection({titer:1e12,mode:'moi',cellsPerMl:2e8,infVolUl:200,moi:5,factor:10,minPip:2,maxPip:20});
+      if(!_near(iG1.pctInfected,63.212,0.01)||!_near(iG2.pctInfected,99.326,0.01))
+        fails.push('Poisson % infected: MOI 1 → '+iG1.pctInfected+' (want 63.212), MOI 5 → '+iG2.pctInfected+' (want 99.326)');
+
+      // An impossible ask must say so, not silently return zero.
+      // T=1e6, MOI 1, 2e8 cells/mL, 200 µL → 4e7 PFU → 40 mL of neat lysate.
+      n++; var iH=planInfection({titer:1e6,mode:'moi',cellsPerMl:2e8,infVolUl:200,moi:1,factor:10,minPip:2,maxPip:20});
+      if(iH.pick!==null||!/Even neat stock/.test(iH.reason||''))
+        fails.push('planInfection should refuse an impossible dose with a reason, got pick='+iH.pick+' reason='+iH.reason);
+      n++; if(!planInfection({mode:'moi',cellsPerMl:2e8,infVolUl:200,moi:1}).reason)
+        fails.push('planInfection must explain itself when the titer is missing');
+
+      // Library sanitisation. A phage record has exactly five keys and a
+      // lysate exactly those plus host/date — if this drifts, extra keys start
+      // riding along inside share links and undo snapshots.
+      n++; if(Object.keys(_coercePhageFields({},0)).sort().join(',')!=='id,name,note,titer,vol')
+        fails.push('phage record key set drifted: '+Object.keys(_coercePhageFields({},0)).sort().join(','));
+      n++; if(Object.keys(_coerceLysate({},0)).sort().join(',')!=='date,host,id,name,note,titer,vol')
+        fails.push('lysate record key set drifted: '+Object.keys(_coerceLysate({},0)).sort().join(','));
+      n++; var bad=_coerceLysate({name:new Array(300).join('x'),titer:'abc',vol:-3,note:new Array(500).join('z'),host:1},0);
+      if(bad.name.length!==80||bad.titer!==0||bad.vol!==0||bad.note.length!==200)
+        fails.push('hostile lysate not clamped: name '+bad.name.length+', titer '+bad.titer+', vol '+bad.vol+', note '+bad.note.length);
+      n++; if(_coerceLysate(null,0)!==null||_coerceLysate('nope',0)!==null)
+        fails.push('_coerceLysate must reject non-objects');
+
+      // Round-trip through localStorage, then put the real library back.
+      n++; var _keep=lsGet(LYS_KEY);
+      try{
+        lsDel(LYS_KEY);
+        lysUpsert({name:'Selftest λ',titer:2.5e9,vol:500,host:'MG1655'});
+        lysUpsert({name:'selftest λ',titer:7e9,vol:250});   // same name → update, not a duplicate
+        var lst=lysAll();
+        if(lst.length!==1||!_near(lst[0].titer,7e9,1)) fails.push('lysUpsert should update by name, got '+lst.length+' entries');
+        lysDelete(lst[0].id);
+        if(lysAll().length!==0) fails.push('lysDelete left the entry behind');
+      }catch(e){ fails.push('lysate library round-trip threw '+e.message); }
+      finally{ if(_keep!=null) lsSet(LYS_KEY,_keep); else lsDel(LYS_KEY); }
+      n++; if(!Array.isArray(lysAll())) fails.push('lysAll must return an array even with no stored library');
+    }
     return {total:n, passed:n-fails.length, failures:fails};
   }
 
@@ -4086,10 +4616,11 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       {m:'reagent',icon:'⚗️',title:'Reagent Prep',desc:nRec+' verified buffer / media / stock recipes — including miniprep P1/P2/P3, Buffer PE, CTAB — scaled to any volume.'},
       {m:'calc',icon:'🧬',title:'Molbio Calculators',desc:CALCS.length+' bench calculators: ng↔pmol, A260, ligation, primer Tm, OD→cells, phage titer/MOI, %↔molarity & more.'},
       {m:'proto',icon:'📋',title:'Protocols',desc:(window.PROTO?PROTO.list.length:21)+' step-by-step protocols — miniprep, CTAB gDNA, gels, transformation, plaque assay — that rescale as you change the numbers.'},
+      {m:'phg',icon:'🦠',title:'Phage Planner',desc:'Keep your lysates and their titers, then work out the volume for an infection — by MOI, total PFU or final PFU/mL — and the dilution to make when that volume is too small to pipette.'},
       {m:'gel',icon:'🧪',title:'Gel Simulator',desc:'Predict an agarose or SDS-PAGE run before you pour it — '+nLad+' vendor ladders, band-resolution warnings and a best-% suggestion.'},
       {m:'notebook',icon:'📓',title:'Lab Notebook',desc:'Pull results from any module into a dated entry, add your own notes, and export to Markdown, HTML, PDF, Word, CSV or JSON.'}
     ];
-    var featured=['namass','a260','pctmolar','tm','od600','titer','ligation','moivol','doubling','rcf'];
+    var featured=['namass','a260','pctmolar','tm','od600','titer','moivol','lysate','ligation','doubling','rcf'];
     el.innerHTML='<div class="home-hero"><h1>Molecular Biology Bench Toolkit</h1><p>One place for dilutions, reagents, plate layouts, protocols and the everyday molecular-biology math. Everything is computed on your own machine — visit once and it keeps working with no network, so it is usable in a cold room or a BSL suite.</p></div>'+
       '<div class="home-cards">'+mods.map(function(x){return '<button class="home-card" onclick="setMode(\''+x.m+'\')"><div class="home-ico" aria-hidden="true">'+x.icon+'</div><div class="home-ct"><div class="home-ctitle">'+escapeHtml(x.title)+'</div><div class="home-cdesc">'+escapeHtml(x.desc)+'</div></div></button>';}).join('')+'</div>'+
       '<div class="home-sub">Jump to a calculator</div><div class="home-chips">'+featured.filter(function(id){return byId[id];}).map(function(id){return '<button class="home-chip" onclick="MBC._cur=\''+id+'\';setMode(\'calc\')">'+escapeHtml(byId[id].name)+'</button>';}).join('')+'</div>'+
@@ -5149,6 +5680,374 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   };
 })();
 
+/* ══════════════════════════ PHAGE PLANNER ══════════════════════════ */
+/* Pick a lysate, say what you want to deliver, get the volume — and the
+   dilution to make when that volume is too small to pipette. All the
+   arithmetic is planInfection(), shared with the Calculators entry and
+   built on the same planPipetting/sizeDilutionSeries the plate uses, so
+   the three surfaces cannot drift apart. */
+(function(){
+  var css=`
+  .phg-lys{display:block;width:100%;text-align:left;padding:9px 11px;border:1px solid transparent;border-radius:7px;background:none;color:var(--text);cursor:pointer;font-size:12.5px;line-height:1.4;}
+  .phg-lys:hover{background:var(--surface2);}
+  .phg-lys.active{background:var(--surface2);border-color:var(--accent2);}
+  .phg-lys .n{font-weight:700;display:block;}
+  .phg-lys .t{font-family:var(--mono);font-size:10.5px;color:var(--text3);}
+  .phg-sec{margin-top:18px;margin-bottom:10px;font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);padding-bottom:5px;}
+  .phg-sec:first-child{margin-top:0;}
+  .phg-tools{margin-top:12px;display:flex;flex-direction:column;gap:6px;}
+  .phg-tools .btn{width:100%;justify-content:center;}
+  .phg-file{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;}
+  .mbc-tbl tr.phg-pick td{background:rgba(61,138,85,.12);font-weight:700;}
+  .phg-recipe{margin-top:10px;padding:11px 13px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);font-size:12px;line-height:1.65;}
+  .phg-recipe b{font-family:var(--mono);font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--text3);display:block;margin-bottom:5px;}
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  var DEF={lysId:'',mode:'moi',titer:1e10,stockVol:0,moi:0.1,cells:2e8,pfuTarget:1e6,finalConc:1e7,
+           infVol:200,infVolU:'µL',conv:'top',n:1,over:10,factor:10,minPip:2,maxPip:20,stepVol:10};
+  var S=null;
+  var _last=null;                       // last {r,titer,name} — read by PHGBLK
+
+  function load(){ try{ var j=JSON.parse(lsGet('dd_phg')||'null');
+      if(j&&typeof j==='object') return Object.assign({},DEF,j); }catch(e){} return Object.assign({},DEF); }
+  function persist(){ try{ lsSet('dd_phg',JSON.stringify(S)); }catch(e){} }
+  function el(id){ return document.getElementById(id); }
+  function n(x){ return SCI.parse(x); }
+  function f(x,p){ return SCI.fmt(x,p||4); }
+  function ul(x,p){ return f(x,p||4)+' µL'; }
+
+  // ---------- library rail ----------
+  function renderList(){
+    var host=el('phgList'); if(!host)return;
+    var list=lysAll();
+    host.innerHTML = list.length
+      ? list.map(function(l){
+          var bits=[l.titer>0?f(l.titer,3)+' PFU/mL':'no titer'];
+          if(l.vol>0) bits.push(l.vol+' µL left');
+          if(l.date)  bits.push(l.date);
+          return '<button class="phg-lys'+(l.id===S.lysId?' active':'')+'" role="option" aria-selected="'+(l.id===S.lysId)+'"'+
+                 ' onclick="PHG.pick(\''+jsAttr(l.id)+'\')">'+
+                 '<span class="n">'+escapeHtml(l.name)+'</span>'+
+                 '<span class="t">'+escapeHtml(bits.join(' · '))+'</span></button>';
+        }).join('')
+      : '<div class="mbc-empty" style="padding:10px 2px;font-size:12px;">No saved lysates yet. Add one, or pull the stocks off your current plate.</div>';
+
+    var tools=el('phgLibTools');
+    if(tools) tools.innerHTML='<div class="phg-tools">'+
+      (S.lysId?'<button class="btn" onclick="PHG.editLysate(\''+jsAttr(S.lysId)+'\')">✎ Edit selected</button>':'')+
+      '<button class="btn" onclick="PHG.pullFromPlate()" title="Copy the phage stocks on your current plate into the library">⇩ Pull from plate</button>'+
+      '<button class="btn" onclick="PHG.exportLib()">⬇ Export JSON</button>'+
+      '<label class="btn" style="justify-content:center;cursor:pointer;">⬆ Import JSON'+
+        '<input type="file" accept="application/json,.json" class="phg-file" onchange="PHG.importLib(event)"></label>'+
+      (S.lysId?'<button class="btn" onclick="PHG.toPlate()" title="Add the selected lysate to the Plate Planner as a phage stock">→ Send to Plate Planner</button>':'')+
+      '</div>';
+  }
+
+  // ---------- main form ----------
+  function fRow(id,label,val,hint){
+    return '<div class="mbc-f" id="'+id+'_row"><label for="'+id+'">'+escapeHtml(label)+'</label>'+
+      '<input id="'+id+'" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" value="'+
+      escapeHtml(String(val))+'" oninput="PHG.recompute()">'+
+      (hint?'<div class="mbc-hint">'+escapeHtml(hint)+'</div>':'')+'</div>';
+  }
+  function sRow(id,label,val,opts,handler){
+    return '<div class="mbc-f" id="'+id+'_row"><label for="'+id+'">'+escapeHtml(label)+'</label>'+
+      '<select id="'+id+'" oninput="'+(handler||'PHG.recompute()')+'">'+
+      opts.map(function(o){ return '<option value="'+escapeHtml(o.v)+'"'+(o.v===String(val)?' selected':'')+'>'+escapeHtml(o.label)+'</option>'; }).join('')+
+      '</select></div>';
+  }
+
+  function renderMain(){
+    var m=el('phgMain'); if(!m)return;
+    var lys=S.lysId?lysGet(S.lysId):null;
+    if(S.lysId&&!lys) S.lysId='';                     // deleted out from under us
+    var title=lys?escapeHtml(lys.name):'Infection planner';
+    var sub=lys
+      ? 'Titer '+f(lys.titer,4)+' PFU/mL'+(lys.vol>0?' · '+lys.vol+' µL on hand':'')+(lys.host?' · on '+escapeHtml(lys.host):'')+(lys.date?' · titered '+escapeHtml(lys.date):'')
+      : 'Pick a lysate on the left, or just type a titer below.';
+
+    m.innerHTML=
+      '<div class="mbc-head"><h2>'+title+'</h2><p>'+sub+'</p></div>'+
+      '<div class="phg-sec">Lysate</div>'+
+      '<div class="mbc-form">'+
+        fRow('phgTiter','Titer (PFU/mL)',lys?lys.titer:S.titer, lys?'From the library — edit the lysate to change it':'')+
+        fRow('phgStockVol','Volume on hand (µL)',lys?lys.vol:S.stockVol,'0 = do not check')+
+      '</div>'+
+      '<div class="phg-sec">What to deliver</div>'+
+      '<div class="mbc-form">'+
+        sRow('phgMode','Target',S.mode,[{v:'moi',label:'a target MOI'},{v:'pfu',label:'a total number of PFU'},{v:'conc',label:'a final PFU/mL'}],'PHG.modeChanged()')+
+        fRow('phgMoi','Target MOI',S.moi)+
+        fRow('phgCells','Host cells (CFU/mL)',S.cells)+
+        fRow('phgPfu','Total PFU per infection',S.pfuTarget)+
+        fRow('phgConc','Final PFU/mL',S.finalConc)+
+      '</div>'+
+      '<div class="phg-sec">The infection</div>'+
+      '<div class="mbc-form">'+
+        '<div class="mbc-f"><label for="phgVol">Volume per infection</label><div class="mbc-cu">'+
+          '<input id="phgVol" type="text" inputmode="decimal" autocomplete="off" value="'+escapeHtml(String(S.infVol))+'" oninput="PHG.recompute()">'+
+          '<select id="phgVolU" oninput="PHG.recompute()">'+['µL','mL'].map(function(u){return '<option'+(u===S.infVolU?' selected':'')+'>'+u+'</option>';}).join('')+'</select>'+
+        '</div></div>'+
+        sRow('phgConv','Phage volume',S.conv,[{v:'top',label:'added on top of the culture'},{v:'keep',label:'taken out of the volume'}])+
+        fRow('phgN','Number of infections',S.n)+
+        fRow('phgOver','Overage (%)',S.over)+
+      '</div>'+
+      '<div class="phg-sec">Pipetting window</div>'+
+      '<div class="mbc-form">'+
+        fRow('phgFactor','Dilution factor',S.factor)+
+        fRow('phgMinPip','Min pipettable (µL)',S.minPip)+
+        fRow('phgMaxPip','Max pipettable (µL)',S.maxPip)+
+        fRow('phgStepVol','Dilution tube volume (µL)',S.stepVol)+
+      '</div>'+
+      '<div class="mbc-actions">'+
+        '<button class="btn" onclick="NB.capture(\'phg\')" title="Add this plan to a notebook entry">📓 Notebook</button>'+
+        '<button class="btn" onclick="PHG.copy()">Copy plan</button>'+
+      '</div>'+
+      '<div id="phgResult" class="mbc-result"></div>';
+    syncModeRows();
+    recompute();
+  }
+
+  function syncModeRows(){
+    var mode=(el('phgMode')||{}).value||S.mode;
+    var show={moi:['phgMoi_row','phgCells_row'],pfu:['phgPfu_row'],conc:['phgConc_row','phgCells_row']};
+    ['phgMoi_row','phgCells_row','phgPfu_row','phgConc_row'].forEach(function(id){
+      var e=el(id); if(e) e.style.display=(show[mode]||[]).indexOf(id)>=0?'':'none';
+    });
+    // Cells are optional outside MOI mode — they only add the delivered-MOI readout.
+    var c=el('phgCells_row'); if(c&&mode==='conc') c.style.display='';
+    var ch=el('phgCells'); if(ch) ch.parentNode.querySelector('label').textContent =
+      mode==='moi'?'Host cells (CFU/mL)':'Host cells (CFU/mL, optional)';
+  }
+
+  function gather(){
+    S.titer=n(el('phgTiter').value); S.stockVol=n(el('phgStockVol').value)||0;
+    S.mode=el('phgMode').value;
+    S.moi=n(el('phgMoi').value); S.cells=n(el('phgCells').value);
+    S.pfuTarget=n(el('phgPfu').value); S.finalConc=n(el('phgConc').value);
+    S.infVol=n(el('phgVol').value); S.infVolU=el('phgVolU').value;
+    S.conv=el('phgConv').value; S.n=n(el('phgN').value); S.over=n(el('phgOver').value);
+    S.factor=n(el('phgFactor').value); S.minPip=n(el('phgMinPip').value);
+    S.maxPip=n(el('phgMaxPip').value); S.stepVol=n(el('phgStepVol').value);
+    persist();
+  }
+
+  function recompute(){
+    if(!el('phgTiter'))return;
+    gather();
+    var lys=S.lysId?lysGet(S.lysId):null;
+    var titer=lys?lys.titer:S.titer;
+    var stockVol=lys?lys.vol:S.stockVol;
+    var infUl=S.infVolU==='mL'?S.infVol*1000:S.infVol;
+    var r=planInfection({
+      mode:S.mode, titer:titer, infVolUl:infUl, conserveVol:(S.conv==='keep'),
+      cellsPerMl:S.cells, moi:S.moi, pfuTarget:S.pfuTarget, finalPfuMl:S.finalConc,
+      factor:S.factor, minPip:S.minPip, maxPip:S.maxPip, stepVol:S.stepVol,
+      nReactions:S.n, overage:1+((S.over>0)?S.over/100:0), stockVolUl:stockVol
+    });
+    _last={r:r,titer:titer,name:lys?lys.name:'(unsaved lysate)',infUl:infUl,mode:S.mode};
+    render(r,titer,lys);
+  }
+
+  function render(r,titer,lys){
+    var host=el('phgResult'); if(!host)return;
+    var txt=['Phage infection plan'], html='';
+    if(!r.ok){ host.innerHTML='<div class="mbc-warn">⚠ '+escapeHtml(r.reason)+'</div>'; PHG._txt=r.reason; return; }
+
+    var factor=S.factor>1?S.factor:10;
+    var rows=[];
+    function row(label,val,flag){ rows.push('<div class="mbc-row"><span class="mbc-rl">'+escapeHtml(label)+
+      '</span><span class="mbc-rv'+(flag?' '+flag:'')+'">'+escapeHtml(val)+'</span></div>'); txt.push(label+': '+val); }
+
+    row('Phage needed', f(r.pfu,4)+' PFU');
+    row('Neat lysate equivalent', ul(r.neatVolUl));
+    if(r.pick){
+      row('Dilution to use', r.pick.label+(r.pick.k?'  ('+f(r.pick.titer,3)+' PFU/mL)':''));
+      row('Volume to pipette', ul(r.pick.vol), 'ok');
+    }
+    if(r.achievedMoi>0){
+      row('Delivered MOI', f(r.achievedMoi,3));
+      row('% cells infected', f(r.pctInfected,3)+' % (Poisson)');
+    }
+    row(S.conv==='keep'?'Culture aliquot':'Culture per infection', ul(r.cultureVolUl));
+    row('Final volume', ul(r.finalVolUl));
+    row('Phage in the infection', f(r.finalPfuMl,4)+' PFU/mL');
+    row('Neat lysate to draw', ul(r.neatDraw)+(r.nReactions>1?'  (for '+r.nReactions+' infections + overage)':''));
+    html+='<div class="mbc-rows">'+rows.join('')+'</div>';
+
+    if(!r.pick&&r.plan&&r.plan.reason){ html+='<div class="mbc-warn">⚠ '+escapeHtml(r.plan.reason)+'</div>'; txt.push('! '+r.plan.reason); }
+
+    if(r.plan&&r.plan.steps.length){
+      html+='<div class="phg-sec" style="margin-top:16px;">Every rung of the ladder</div>'+
+        '<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Dilution</th><th>Titer (PFU/mL)</th><th>Volume needed</th><th>Verdict</th></tr></thead><tbody>'+
+        r.plan.steps.map(function(s){
+          var picked=r.pick&&s.k===r.pick.k;
+          var verdict=picked?'✓ use this':(s.ok?'pipettable':s.why);
+          txt.push('  '+s.label+'  '+f(s.titer,3)+' PFU/mL  '+f(s.vol,3)+' µL  '+verdict);
+          return '<tr'+(picked?' class="phg-pick"':'')+'><td>'+escapeHtml(s.label)+'</td><td>'+escapeHtml(f(s.titer,3))+
+                 '</td><td>'+escapeHtml(f(s.vol,3)+' µL')+'</td><td>'+escapeHtml(verdict)+'</td></tr>';
+        }).join('')+'</tbody></table></div>';
+    }
+
+    if(r.series){
+      var steps=[];
+      for(var k=1;k<r.series.prep.length;k++){
+        if(!(r.series.prep[k]>0))continue;
+        steps.push('Step '+k+' — take '+f(r.series.transferIn[k],3)+' µL of '+dilLabel(k-1,factor)+
+                   ' + '+f(r.series.diluent[k],3)+' µL diluent → '+f(r.series.prep[k],3)+' µL at '+
+                   f(titer/Math.pow(factor,k),3)+' PFU/mL');
+      }
+      if(r.pick) steps.push('Then pipette '+f(r.pick.vol,4)+' µL of '+r.pick.label+' into each infection.');
+      html+='<div class="phg-recipe"><b>Dilution to make</b>'+steps.map(function(s){ txt.push(s); return escapeHtml(s); }).join('<br>')+'</div>';
+    } else if(r.pick&&r.pick.k===0){
+      var line='Pipette '+f(r.pick.vol,4)+' µL of neat lysate into each infection — no dilution needed.';
+      html+='<div class="phg-recipe"><b>Dilution to make</b>'+escapeHtml(line)+'</div>'; txt.push(line);
+    }
+
+    if(r.warn.length){ html+=r.warn.map(function(w){ txt.push('! '+w); return '<div class="mbc-warn">⚠ '+escapeHtml(w)+'</div>'; }).join(''); }
+    html+='<div class="mbc-note">The PFU demand comes from the target you chose. The ladder is walked from neat downwards and the first rung inside your pipette window wins. Delivered MOI, final volume and PFU/mL are computed from the volume you will actually pipette, not from the neat equivalent.</div>';
+    host.innerHTML=html;
+    PHG._txt=txt.join('\n');
+  }
+
+  // ---------- library editing ----------
+  function openEdit(id){
+    var l=id?lysGet(id):null;
+    el('phgEditId').value=l?l.id:'';
+    el('phgEditTitle').textContent=l?'Edit lysate':'Add lysate';
+    el('phgEditName').value=l?l.name:'';
+    el('phgEditTiter').value=l?l.titer:'1e10';
+    el('phgEditVol').value=l?l.vol:1000;
+    el('phgEditHost').value=l?l.host:'';
+    el('phgEditDate').value=l&&/^\d{4}-\d{2}-\d{2}$/.test(l.date)?l.date:'';
+    el('phgEditNote').value=l?l.note:'';
+    el('phgEditDelete').style.display=l?'':'none';
+    el('phgEdit').style.display='flex';
+    setTimeout(function(){ try{ el('phgEditName').focus(); }catch(e){} },0);
+  }
+
+  window.PHG={
+    init:function(){ if(!S)S=load(); renderList(); renderMain(); },
+    render:function(){ if(!S)return; renderList(); renderMain(); },
+    recompute:recompute,
+    copy:function(){ dcCopyText(PHG._txt||''); },
+    pick:function(id){ S.lysId=(S.lysId===id)?'':id; persist(); renderList(); renderMain(); },
+    addLysate:function(){ openEdit(''); },
+    editLysate:function(id){ openEdit(id); },
+    closeEdit:function(){ el('phgEdit').style.display='none'; },
+    saveEdit:function(){
+      var rec=lysUpsert({
+        id:el('phgEditId').value,
+        name:el('phgEditName').value.trim()||'Lysate',
+        titer:SCI.parse(el('phgEditTiter').value),
+        vol:parseFloat(el('phgEditVol').value)||0,
+        host:el('phgEditHost').value.trim(),
+        date:el('phgEditDate').value,
+        note:el('phgEditNote').value.trim()
+      });
+      if(!rec){ showToast('Couldn’t save — browser storage is full or unavailable.','warn',6000); return; }
+      S.lysId=rec.id; persist();
+      PHG.closeEdit(); renderList(); renderMain(); showToast('✓ Saved '+rec.name,'green');
+    },
+    deleteFromEdit:function(){
+      var id=el('phgEditId').value; if(!id){ PHG.closeEdit(); return; }
+      var l=lysGet(id);
+      if(!confirm('Delete "'+(l?l.name:'this lysate')+'" from the library?'))return;
+      lysDelete(id); if(S.lysId===id)S.lysId=''; persist();
+      PHG.closeEdit(); renderList(); renderMain(); showToast('Deleted');
+    },
+    assay:function(){
+      var t=titerFromPlaques(parseFloat(el('phgPaPlaques').value),SCI.parse(el('phgPaDil').value),parseFloat(el('phgPaPlated').value));
+      var out=el('phgPaResult');
+      if(!isFinite(t)){ out.textContent='Enter a plate count, a dilution and a plated volume.'; return; }
+      var c=parseFloat(el('phgPaPlaques').value);
+      out.textContent=f(t,4)+' PFU/mL'+((c<30||c>300)?' — outside the 30–300 countable window':'');
+    },
+    applyAssay:function(){
+      var t=titerFromPlaques(parseFloat(el('phgPaPlaques').value),SCI.parse(el('phgPaDil').value),parseFloat(el('phgPaPlated').value));
+      if(!isFinite(t)){ showToast('Enter a plate count first','warn'); return; }
+      el('phgEditTiter').value=t.toExponential(3); showToast('✓ Titer set','green');
+    },
+    exportLib:function(){
+      var list=lysAll();
+      if(!list.length){ showToast('Nothing to export yet','warn'); return; }
+      _dl(lysExportJson(),'phage-lysates.json','application/json');
+      showToast('✓ '+list.length+' lysate(s) exported','green');
+    },
+    importLib:function(ev){
+      var file=ev.target.files&&ev.target.files[0]; if(!file)return;
+      var rd=new FileReader();
+      rd.onload=function(){
+        try{ var c=lysImportJson(rd.result); renderList(); renderMain(); showToast('✓ Imported '+c+' lysate(s)','green'); }
+        catch(e){ showToast('Import failed: '+e.message,'warn',6000); }
+      };
+      rd.readAsText(file); ev.target.value='';
+    },
+    // Copy the current plate's stocks into the library — same five fields, no
+    // reference kept: editing a lysate later must not rewrite a saved plate.
+    pullFromPlate:function(){
+      if(typeof phages==='undefined'||!phages.length){ showToast('No phage stocks on the plate','warn'); return; }
+      var c=0; phages.forEach(function(ph){
+        if(lysUpsert({name:ph.name,titer:ph.titer,vol:ph.vol,note:ph.note})) c++;
+      });
+      renderList(); renderMain();
+      showToast(c?('✓ '+c+' stock(s) in the library'):'Nothing copied', c?'green':'warn');
+    },
+    // …and the other direction. Mints a plate id (p<n>), never the library id:
+    // _adoptPhages derives _phageIdCounter from /^p(\d+)$/, so an L… id would
+    // drop out of that max and the next Add could collide.
+    toPlate:function(){
+      var l=S.lysId?lysGet(S.lysId):null;
+      if(!l){ showToast('Pick a lysate first','warn'); return; }
+      snapshotForUndo();
+      _phageIdCounter++;
+      phages.push({id:'p'+_phageIdCounter,name:l.name,titer:l.titer,vol:l.vol,note:l.note});
+      _reconcilePhageRefs(); renderPhageList(); renderPalette(); update();
+      setMode('phage'); showToast('✓ '+l.name+' added to the plate','green');
+    },
+    modeChanged:function(){ syncModeRows(); recompute(); },
+    _state:function(){ return S; }, _last:function(){ return _last; }
+  };
+
+  // Notebook capture. Reads the last computed plan rather than scraping the
+  // DOM, so the blocks carry numbers, not rendered strings.
+  window.PHGBLK=function(sel){
+    var out=[]; if(!_last||!_last.r||!_last.r.ok) return out;
+    var r=_last.r, factor=(S&&S.factor>1)?S.factor:10;
+    if(sel.plan){
+      var pairs=[['Lysate',_last.name],['Titer',SCI.fmt(_last.titer,4)+' PFU/mL'],
+                 ['Target',_last.mode==='moi'?('MOI '+SCI.fmt(S.moi,3)):(_last.mode==='pfu'?(SCI.fmt(S.pfuTarget,4)+' PFU'):(SCI.fmt(S.finalConc,4)+' PFU/mL final'))],
+                 ['Phage needed',SCI.fmt(r.pfu,4)+' PFU'],
+                 ['Neat equivalent',SCI.fmt(r.neatVolUl,4)+' µL']];
+      if(r.pick) pairs.push(['Pipette',SCI.fmt(r.pick.vol,4)+' µL of '+r.pick.label]);
+      if(r.achievedMoi>0) pairs.push(['Delivered MOI',SCI.fmt(r.achievedMoi,3)],['% infected',SCI.fmt(r.pctInfected,3)+' %']);
+      pairs.push(['Final volume',SCI.fmt(r.finalVolUl,4)+' µL'],
+                 ['Phage in the infection',SCI.fmt(r.finalPfuMl,4)+' PFU/mL'],
+                 ['Neat lysate to draw',SCI.fmt(r.neatDraw,4)+' µL']);
+      out.push({type:'kv',title:'Infection plan',pairs:pairs});
+    }
+    if(sel.ladder&&r.plan&&r.plan.steps.length){
+      out.push({type:'table',title:'Dilution ladder',cols:['Dilution','Titer (PFU/mL)','Volume needed','Verdict'],
+        rows:r.plan.steps.map(function(s){
+          return [s.label,SCI.fmt(s.titer,3),SCI.fmt(s.vol,3)+' µL',(r.pick&&s.k===r.pick.k)?'use this':(s.ok?'pipettable':s.why)];
+        })});
+    }
+    if(sel.recipe&&r.series){
+      var items=[];
+      for(var k=1;k<r.series.prep.length;k++){
+        if(!(r.series.prep[k]>0))continue;
+        items.push({t:'Make '+dilLabel(k,factor),
+                    d:'Take '+SCI.fmt(r.series.transferIn[k],3)+' µL of '+dilLabel(k-1,factor)+' + '+
+                      SCI.fmt(r.series.diluent[k],3)+' µL diluent → '+SCI.fmt(r.series.prep[k],3)+' µL at '+
+                      SCI.fmt(_last.titer/Math.pow(factor,k),3)+' PFU/mL',done:false});
+      }
+      if(r.pick) items.push({t:'Infect',d:'Pipette '+SCI.fmt(r.pick.vol,4)+' µL of '+r.pick.label+' into each infection.',done:false});
+      if(items.length) out.push({type:'steps',title:'Dilution recipe',items:items});
+    }
+    return out;
+  };
+})();
+
 /* ══════════════════════════ LAB NOTEBOOK ══════════════════════════ */
 (function(){
   var css=`
@@ -5243,7 +6142,8 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     dilcalc: {label:'Dilution Calc', mod:'DCBLK',    items:[['result','Result + worked math']]},
     calc:    {label:'Calculators',   mod:'MBCBLK',   items:[['result','Inputs + results'],['table','Result table']]},
     proto:   {label:'Protocols',     mod:'PROTOBLK', items:[['reagents','Reagents needed'],['steps','Steps (with ticks)']]},
-    gel:     {label:'Gel Sim',       mod:'GELBLK',   items:[['image','Gel image'],['table','Band table'],['warn','Gel check notes']]}
+    gel:     {label:'Gel Sim',       mod:'GELBLK',   items:[['image','Gel image'],['table','Band table'],['warn','Gel check notes']]},
+    phg:     {label:'Phage Planner', mod:'PHGBLK',   items:[['plan','Infection plan'],['ladder','Dilution ladder'],['recipe','Dilution recipe']]}
   };
   function providerFn(src){
     if(src==='gel'&&window.GEL&&GEL.blocks) return GEL.blocks;
