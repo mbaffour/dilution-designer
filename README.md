@@ -9,15 +9,16 @@ A free, single-file, browser-based toolkit for everyday molecular-biology bench 
 
 ---
 
-## The eight modules
+## The nine modules
 
 | Module | What it does |
 |---|---|
 | **Home hub** | Launcher for everything below |
 | **Plate Planner** | 96- and 384-well, multi-plate. Plasmid/induction and phage/MOI modes, master mix with overage, replicates, randomization, exclusions, bench-reality checks |
+| **Phage Planner** | A saved library of lysates and their titers, then the volume for an infection — by MOI, total PFU or final PFU/mL — plus the dilution to make when that volume is too small to pipette |
 | **Reagent Prep** | 216 verified recipes across 13 categories — media, buffers, antibiotics, miniprep P1/P2/P3 and Buffer PE, CTAB, gel and protein reagents — scaled to whatever volume you need, with sources |
 | **Dilution & Molarity** | C1V1 across molar and mass units, serial dilutions, molarity ⇄ mass, and weigh-outs |
-| **Calculators** | 14 bench calculators: ng ⇄ pmol, A260 quant, ligation ratios, primer Tm and resuspension, OD₆₀₀ → cells, phage titer and MOI, % ⇄ molarity, RCF ⇄ RPM, doubling time, PCR/qPCR master mix |
+| **Calculators** | 15 bench calculators: ng ⇄ pmol, A260 quant, ligation ratios, primer Tm and resuspension, OD₆₀₀ → cells, phage titer, MOI, lysate → infection volume, % ⇄ molarity, RCF ⇄ RPM, doubling time, PCR/qPCR master mix |
 | **Protocols** | 21 protocols — miniprep, CTAB gDNA, transformation, plaque assay, gels, MIC, Gibson and more — that **rescale as you change the numbers** |
 | **Gel Simulator** | Predict an agarose or SDS-PAGE run before you pour it: 16 vendor ladders plus your own, band-resolution warnings, and a best-percentage suggestion |
 | **Lab Notebook** | Pull results from any module into a dated entry, add your own notes, export to Markdown, HTML, PDF, Word (.docx), CSV or JSON |
@@ -28,7 +29,7 @@ A free, single-file, browser-based toolkit for everyday molecular-biology bench 
 
 - **Everything is local.** Every calculation runs in your browser. Nothing is uploaded, so it is fine for unpublished work.
 - **It works offline.** Visit once and it keeps working with no network — usable in a cold room, a BSL suite, or on a plane. It is a PWA, so you can install it like an app.
-- **The maths is checked.** A self-test harness (`?selftest=1`) asserts every formula — 43 assertions, anchored to published references rather than to the code's own output.
+- **The maths is checked.** A self-test harness (`?selftest=1`) asserts every formula — 102 assertions, anchored to published references rather than to the code's own output.
 - **It is one file.** `index.html` plus a recipe library. No build step, no dependencies, no CDN.
 
 ---
@@ -62,6 +63,19 @@ Then open `http://localhost:8000`. Opening `index.html` straight off disk mostly
 2. Enter bacterial concentration (CFU/mL), phage titer (PFU/mL), and infection volume per well
 3. Use the **Serial Dilution Planner** to get from stock to working titer
 4. Add MOI conditions, paint, and check the MOI panel for per-well and total phage volumes
+
+### Phage Planner
+
+1. **＋ Add lysate** — name, titer, volume on hand, propagating host and the date you titered it. If you only have a plate count, open *Calculate titer from a plaque assay* and it fills the titer in for you. Lysates are saved in your browser and survive reloads; **Export / Import JSON** moves them between machines, and **Pull from plate** copies the stocks off your current plate layout
+2. Pick a lysate on the left — or skip that and just type a titer
+3. Choose what you want to deliver: **a target MOI** (with the host density), **a total number of PFU**, or **a final PFU/mL** in the infection
+4. Set the volume per infection, how many infections, and whether the phage goes *on top of* the culture or *comes out of* the stated volume
+5. Read off the volume to pipette. If the neat volume is too small for your pipettes, it tells you which dilution to make, gives you the recipe (take X µL + Y µL diluent), and shows every rung of the ladder with its verdict so you can override the choice
+6. **→ Send to Plate Planner** turns the selected lysate into a phage stock for a plate layout
+
+The same solver is available as a calculator (*Calculators → Phage lysate → infection volume*) and the Plate Planner's phage-stock editor can load from and save to the same library.
+
+> Delivered MOI, final volume and PFU/mL are computed from the volume you will **actually pipette**, not from the neat-equivalent volume — those two differ whenever a dilution is involved.
 
 ### Gel Simulator
 
