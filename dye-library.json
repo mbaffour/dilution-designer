@@ -105,7 +105,8 @@
      "notes": [
       "DAPI is excited well at 355/405 nm but very poorly at 488 nm — if it looks dim on a confocal, check you are not on the wrong line.",
       "It bleeds into the green channel when overstained. If your GFP looks blue-tinged, halve the DAPI.",
-      "Hoechst 33342 is the live-cell substitute; DAPI enters intact cells only slowly and unevenly."
+      "Hoechst 33342 is the live-cell substitute; DAPI enters intact cells only slowly and unevenly.",
+      "The 300 nM / 5 min figure is long-standing convention across published protocols, not a number Thermo states on the D1306 datasheet. Titrate if your background is high."
      ],
      "sources": [
       {
@@ -135,7 +136,7 @@
       "tissue"
      ],
      "mw": 615.99,
-     "mwSource": "Trihydrochloride trihydrate, C27H28N6O·3HCl·3H2O; free base is 452.55 (PubChem CID 1464)",
+     "mwSource": "PubChem CID 1464 is the free base (MW 452.55); the trihydrochloride trihydrate sold for staining is MW 615.99, confirmed against Thermo Molecular Probes manual MP21486",
      "spectra": {
       "ex": 350,
       "em": 461,
@@ -245,7 +246,7 @@
       "tissue"
      ],
      "mw": 623.96,
-     "mwSource": "Trihydrochloride pentahydrate; free base 424.50 (PubChem CID 3563)",
+     "mwSource": "PubChem CID 2392 is the free base (MW 424.50); the pentahydrate sold for staining is MW 623.96, confirmed against Thermo Molecular Probes manual MP21486",
      "spectra": {
       "ex": 352,
       "em": 461,
@@ -607,7 +608,8 @@
      "notes": [
       "The live/dead ratio is a comparative readout, not an absolute viability number. Always run a killed control (70% isopropanol, 1 h) alongside.",
       "SYTO 9 also stains extracellular DNA, which will inflate the 'live' signal in a biofilm.",
-      "Rich medium is the single most common cause of a useless BacLight result — wash into saline."
+      "Rich medium is the single most common cause of a useless BacLight result — wash into saline.",
+      "3 µL of dye mix per mL and the 0.85% NaCl wash come from the BacLight kit literature rather than a datasheet we could verify directly — treat the timing as a starting point."
      ],
      "sources": [
       {
@@ -826,7 +828,7 @@
       "fixed-cell"
      ],
      "mw": 394.29,
-     "mwSource": "PubChem CID 3624",
+     "mwSource": "PubChem CID 14710 — ethidium bromide, MW 394.29",
      "spectra": {
       "ex": 518,
       "em": 605,
@@ -1231,7 +1233,7 @@
       "live-cell"
      ],
      "mw": 994.87,
-     "mwSource": "PubChem CID 65079",
+     "mwSource": "PubChem CID 390986 — calcein AM, MW 994.87",
      "spectra": {
       "ex": 494,
       "em": 517,
@@ -1259,7 +1261,7 @@
      "working": {
       "conc": 1,
       "unit": "µM",
-      "range": "0.1–5 µM",
+      "range": "0.1–5 µM — titrate; MP03224 says to use the lowest concentration that labels live cells distinctly",
       "time": "15–30 min",
       "temp": "37 °C",
       "buffer": "serum-free medium or HBSS",
@@ -1270,7 +1272,7 @@
       {
        "assay": "Live/dead with ethidium homodimer-1",
        "conc": "1 µM calcein AM + 4 µM EthD-1, 30 min",
-       "note": "The LIVE/DEAD Viability/Cytotoxicity kit. Green = live, red = dead."
+       "note": "The LIVE/DEAD Viability/Cytotoxicity kit. Green = live, red = dead. These are the common adherent-cell figures, not a vendor-fixed pair — MP03224 gives 2 µL of 50 µM calcein AM and 4 µL of 2 mM EthD-1 per mL for cell suspensions, and tells you to titrate both against your own cells and filters."
       },
       {
        "assay": "Cytotoxicity in a plate reader",
@@ -1362,7 +1364,7 @@
      "working": {
       "conc": 4,
       "unit": "µM",
-      "range": "1–8 µM",
+      "range": "1–8 µM — titrate against a killed control (MP03224)",
       "time": "30 min",
       "temp": "room temperature",
       "buffer": "PBS or HBSS",
@@ -1511,7 +1513,7 @@
       "flow"
      ],
      "mw": 1270.43,
-     "mwSource": "PubChem CID 4632",
+     "mwSource": "PubChem CID 14924508 — 7-aminoactinomycin D, MW 1270.43",
      "spectra": {
       "ex": 546,
       "em": 647,
@@ -1607,7 +1609,7 @@
       "plant"
      ],
      "mw": 416.38,
-     "mwSource": "PubChem CID 21100",
+     "mwSource": "PubChem CID 65047 — fluorescein diacetate, MW 416.38",
      "spectra": {
       "ex": 490,
       "em": 514,
@@ -1704,7 +1706,7 @@
       "live-cell"
      ],
      "mw": 960.81,
-     "mwSource": "PubChem CID 5904 (tetrasodium salt)",
+     "mwSource": "PubChem CID 6296 — trypan blue (C.I. Direct Blue 14), MW 960.81",
      "spectra": null,
      "absMax": 607,
      "lasers": [],
@@ -2093,7 +2095,7 @@
       "neurons"
      ],
      "mw": 933.88,
-     "mwSource": "PubChem CID 6438393",
+     "mwSource": "PubChem CID 2762626 — DiIC18(3) perchlorate, MW 933.88",
      "spectra": {
       "ex": 549,
       "em": 565,
@@ -2193,7 +2195,7 @@
       "tissue"
      ],
      "mw": 881.72,
-     "mwSource": "PubChem CID 5462291",
+     "mwSource": "PubChem CID 5706734 — DiOC18(3) perchlorate, MW 881.72",
      "spectra": {
       "ex": 484,
       "em": 501,
@@ -2691,10 +2693,10 @@
      "working": {
       "conc": 100,
       "unit": "nM",
-      "range": "20–200 nM",
+      "range": "20–200 nM (Thermo MP07510 for the Green FM probes)",
       "time": "15–45 min",
       "temp": "37 °C",
-      "buffer": "serum-free medium or HBSS",
+      "buffer": "growth medium or buffer (serum only matters for the reduced probe forms)",
       "wash": "1 × medium exchange",
       "dark": true
      },
@@ -2731,7 +2733,8 @@
      "hazards": "Low hazard; standard DMSO precautions.",
      "notes": [
       "Over-loading gives non-specific cytoplasmic staining. If the whole cell is green, halve the concentration.",
-      "It is not strictly potential-independent — very heavily depolarised mitochondria still load less."
+      "It is not strictly potential-independent — very heavily depolarised mitochondria still load less.",
+      "Thermo’s advice against complete medium (MP07510) is specific to the reduced MitoTracker probes, which serum oxidases attack. This one is not a reduced probe, so growth medium is acceptable — serum-free simply keeps the background lower."
      ],
      "sources": [
       {
@@ -2782,7 +2785,7 @@
      "working": {
       "conc": 100,
       "unit": "nM",
-      "range": "25–500 nM",
+      "range": "25–500 nM; 100–500 nM if the cells will be fixed and permeabilised (Thermo MP07510)",
       "time": "15–45 min",
       "temp": "37 °C",
       "buffer": "serum-free medium",
@@ -2872,10 +2875,10 @@
      "working": {
       "conc": 100,
       "unit": "nM",
-      "range": "25–200 nM",
+      "range": "25–500 nM (Thermo MP07510 general guidance)",
       "time": "15–45 min",
       "temp": "37 °C",
-      "buffer": "serum-free medium",
+      "buffer": "growth medium or buffer (serum only matters for the reduced probe forms)",
       "wash": "1 × medium exchange",
       "dark": true
      },
@@ -2907,7 +2910,8 @@
      ],
      "hazards": "Low hazard; standard DMSO precautions.",
      "notes": [
-      "Clashes with Cy5, Alexa Fluor 647, DRAQ5 and DiD — only one of them gets the far-red channel."
+      "Clashes with Cy5, Alexa Fluor 647, DRAQ5 and DiD — only one of them gets the far-red channel.",
+      "Thermo’s advice against complete medium (MP07510) is specific to the reduced MitoTracker probes, which serum oxidases attack. This one is not a reduced probe, so growth medium is acceptable — serum-free simply keeps the background lower."
      ],
      "sources": [
       {
@@ -2930,7 +2934,7 @@
       "live-cell"
      ],
      "mw": 500.93,
-     "mwSource": "PubChem CID 5479406 (TMRM perchlorate)",
+     "mwSource": "PubChem CID 11755725 — tetramethylrhodamine methyl ester perchlorate, MW 500.93",
      "spectra": {
       "ex": 548,
       "em": 574,
@@ -3026,7 +3030,7 @@
       "live-cell"
      ],
      "mw": 652.23,
-     "mwSource": "PubChem CID 5497144",
+     "mwSource": "PubChem CID 5492929 — JC-1, MW 652.23",
      "spectra": {
       "ex": 514,
       "em": 529,
@@ -3148,7 +3152,7 @@
      "working": {
       "conc": 75,
       "unit": "nM",
-      "range": "50–200 nM",
+      "range": "50–75 nM (Thermo MP07525 recommended range)",
       "time": "30 min",
       "temp": "37 °C",
       "buffer": "complete medium",
@@ -3233,7 +3237,7 @@
      "working": {
       "conc": 75,
       "unit": "nM",
-      "range": "50–200 nM",
+      "range": "50–75 nM (Thermo MP07525 recommended range)",
       "time": "30 min",
       "temp": "37 °C",
       "buffer": "complete medium",
@@ -3476,7 +3480,7 @@
       "tissue"
      ],
      "mw": 789.19,
-     "mwSource": "Phalloidin itself is 789.19 (PubChem CID 4753); the conjugate is heavier by the dye",
+     "mwSource": "PubChem CID 441542 — phalloidin, MW 789.19 (the conjugate is heavier by the dye)",
      "spectra": {
       "ex": 495,
       "em": 519,
@@ -3583,7 +3587,7 @@
       "tissue"
      ],
      "mw": 789.19,
-     "mwSource": "Phalloidin core, PubChem CID 4753; conjugate is heavier by the TRITC label",
+     "mwSource": "PubChem CID 441542 — phalloidin, MW 789.19 (the conjugate is heavier by the TRITC label)",
      "spectra": {
       "ex": 550,
       "em": 573,
@@ -3681,7 +3685,7 @@
       "super-resolution"
      ],
      "mw": 789.19,
-     "mwSource": "Phalloidin core, PubChem CID 4753",
+     "mwSource": "PubChem CID 441542 — phalloidin, MW 789.19 (the conjugate is heavier by the dye)",
      "spectra": {
       "ex": 650,
       "em": 668,
@@ -3968,7 +3972,7 @@
       "bacteria"
      ],
      "mw": 916.96,
-     "mwSource": "PubChem CID 2724304 (calcofluor white M2R, disodium salt)",
+     "mwSource": "PubChem CID 43031 — calcofluor white M2R (stilbene disulfonate), MW 916.96",
      "spectra": {
       "ex": 355,
       "em": 433,
@@ -4265,7 +4269,7 @@
       "live-cell"
      ],
      "mw": 516.63,
-     "mwSource": "PubChem CID 5216 (DiBAC4(3))",
+     "mwSource": "PubChem CID 6438341 — bis(1,3-dibutylbarbiturate)trimethine oxonol, MW 516.63",
      "spectra": {
       "ex": 493,
       "em": 516,
@@ -7193,7 +7197,7 @@
       "phage"
      ],
      "mw": 424.15,
-     "mwSource": "PubChem CID 10231 (uranyl acetate dihydrate)",
+     "mwSource": "PubChem CID 21226249 is the anhydrous salt (MW 388.12); the dihydrate used for staining is MW 424.15",
      "spectra": null,
      "absMax": null,
      "lasers": [],

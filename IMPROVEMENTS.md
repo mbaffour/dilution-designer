@@ -192,3 +192,98 @@ number is now pinned by an assertion.
   flags a deliberate FITC + Alexa Fluor 488 collision, and notebook capture returns blocks.
 - `sw.js` `CACHE` bumped to `dd-v1.7.0` and `./dye-library.json` added to `CORE`, so the new module
   works offline.
+
+---
+
+# Citation audit: 20 wrong PubChem accessions, and a guard against the next one
+
+## What went wrong
+
+The dye and microscopy-recipe records shipped with molecular weights that were
+right and PubChem accessions that frequently were not. Cross-checking every
+asserted CID against PUG-REST found **16 of 26 wrong in `dye-library.json`** and
+**4 more in the microscopy recipes**. They did not point at a near neighbour or a
+different salt — they pointed at unrelated molecules:
+
+| Cited for | CID | What that CID actually is |
+|---|---|---|
+| 7-AAD | 4632 | oxybenzone (a sunscreen) |
+| DiBAC4(3) | 5216 | simazine (a herbicide) |
+| Phalloidin (×3) | 4753 | phenacemide (an anticonvulsant) |
+| JC-1 | 5497144 | bilirubin |
+| Fluorescein diacetate | 21100 | metanephrine |
+| DiI | 6438393 | 24,25-dihydroxyvitamin D2 |
+| Trypan blue | 5904 | penicillin G |
+| Calcofluor white | 2724304 | 4-maleimido-TEMPO |
+| DABCO | 9270 | ethynodiol diacetate (a progestin) |
+
+The cause was straightforward: the records were written from memory and cited
+generic landing pages, and no individual accession was ever fetched to confirm
+it. A wrong CID is worse than no CID — it wears the appearance of provenance.
+
+## What held up
+
+Everything a user actually pipettes with:
+
+- **Molecular weights** — all 20 checkable values confirmed against PubChem,
+  including the salt and hydrate forms (DAPI dihydrochloride 350.25, Hoechst
+  33342 trihydrochloride trihydrate 615.99, acridine orange HCl, resazurin
+  sodium salt).
+- **Fluorescent protein spectra** — 6/6 exact against the FPbase API: excitation,
+  emission, extinction coefficient and quantum yield.
+- **Dye spectra** — 9/9 exact against Thermo's own product pages, wherever the
+  vendor publishes Ex/Em.
+- **Vendor catalogue numbers** — all 14 resolve to the product claimed.
+- **Stock concentrations** — confirmed verbatim from the Molecular Probes
+  manuals, e.g. MP21486 states "Hoechst 33342 ... (MW 615.99) ... 10 mg/mL
+  (16.2 mM)" and MP07510 states the 1 mM anhydrous DMSO stock.
+
+## Corrections made
+
+1. **20 accessions replaced** with CIDs re-queried by name and confirmed by both
+   returned title and molecular weight. Where PubChem indexes a different form
+   from the one sold, the citation now says so explicitly rather than implying
+   the accession matches the stated mass (uranyl acetate, Hoechst 33258, sodium
+   citrate dihydrate, potash alum dodecahydrate).
+2. **Three working concentrations corrected against the vendor manuals:**
+   - LysoTracker range 50–200 nM → **50–75 nM** (MP07525's recommendation).
+   - MitoTracker Green FM / Deep Red no longer carry a blanket "serum-free"
+     instruction — MP07510's serum caution applies to the *reduced* probe forms,
+     which these are not.
+   - Calcein AM / EthD-1 are presented as figures to titrate rather than as
+     vendor-fixed numbers, since MP03224 gives different values for suspensions
+     and says to use the lowest concentration that labels distinctly.
+3. **Provenance marked where it is convention, not vendor guidance** — the
+   300 nM / 5 min DAPI counterstain and the BacLight 3 µL/mL timing.
+
+## The guard
+
+`tools/verify-citations.py` re-queries PubChem for every accession either library
+asserts and compares the returned molecular weight with the one stated beside the
+CID. Molecular weight is the discriminating test: a wrong accession nearly always
+carries a different mass, whereas a correct one often has a systematic title that
+does not textually resemble the common name. It exits non-zero on disagreement so
+it can gate a release, and exits 0 when PubChem is unreachable so it never fails a
+build for the wrong reason.
+
+    $ python3 tools/verify-citations.py --quiet
+    211 accessions verified, 496 stated without a molecular weight, 0 WRONG
+
+It found the four recipe-side errors on its first run, which is the point of it.
+
+## Still unverified
+
+Working concentrations for DAPI and the BacLight kit could not be confirmed from
+a primary vendor document — the DAPI manual is image-based and the BacLight PDF
+is access-restricted. Sigma-Aldrich blocks automated access entirely, so the
+vendor cross-check is single-sourced to Thermo. Those figures are conventional and
+now labelled as such.
+
+## Verification
+
+- `tools/verify-citations.py` — 211 accessions verified, 0 wrong, exit 0.
+- `?selftest=1` — still **126/126**; this was a data and provenance change with no
+  effect on any formula.
+- Headless Chromium run: 79 dyes load, filter chips narrow 79 → 5, protocols
+  rescale, 243 recipes load, the shared dilution maths still agrees across the
+  module and the calculator, and the module still works offline.

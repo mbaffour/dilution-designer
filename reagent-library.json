@@ -7622,7 +7622,7 @@
        "name": "Trisodium citrate dihydrate",
        "molarity_M": 0.065,
        "mw_gmol": 294.1,
-       "form": "Trisodium citrate dihydrate, C6H5Na3O7*2H2O, MW 294.10 (some suppliers print 294.12). Anhydrous trisodium citrate is MW 258.07 (PubChem CID 6224).",
+       "form": "Trisodium citrate dihydrate, C6H5Na3O7*2H2O, MW 294.10 (some suppliers print 294.12). Anhydrous trisodium citrate is MW 258.07 (PubChem CID 71474 (sodium citrate dihydrate, MW 294.10)).",
        "mwSource": "PubChem CID 71474",
        "note": "0.065 M x 294.10 = 19.12 g/L at pH 5.0 (equivalent to 650 mL of 0.1 M trisodium citrate per litre)."
       }
@@ -7635,7 +7635,7 @@
      "shelfLife": "1-3 months at 4 C; discard if turbid or if growth appears",
      "hazards": "Low hazard once made up. The 1 M HCl and 1 M NaOH used for fine pH adjustment are corrosive - wear eye protection and gloves while titrating.",
      "notes": [
-      "MW/FORM AUDIT [VERIFIED]: citric acid monohydrate = 210.14 (PubChem CID 22230); trisodium citrate dihydrate = 294.10 (PubChem CID 71474); anhydrous trisodium citrate = 258.07 (PubChem CID 6224). Both molarity x MW products reproduce the stated g/L.",
+      "MW/FORM AUDIT [VERIFIED]: citric acid monohydrate = 210.14 (PubChem CID 22230); trisodium citrate dihydrate = 294.10 (PubChem CID 71474); anhydrous trisodium citrate = 258.07 (PubChem CID 71474 (sodium citrate dihydrate, MW 294.10)). Both molarity x MW products reproduce the stated g/L.",
       "PKa values of citric acid at 25 C: pKa1 = 3.13, pKa2 = 4.76, pKa3 = 6.40.",
       "MIXING TABLE. Combine x mL of 0.1 M citric acid monohydrate (21.01 g/L) with y mL of 0.1 M trisodium citrate dihydrate (29.41 g/L) to a total of 100 mL: pH 3.0 = 82.0/18.0; 3.2 = 77.5/22.5; 3.4 = 73.0/27.0; 3.6 = 68.5/31.5; 3.8 = 63.5/36.5; 4.0 = 59.0/41.0; 4.2 = 54.0/46.0; 4.4 = 49.5/50.5; 4.6 = 44.5/55.5; 4.8 = 40.0/60.0; 5.0 = 35.0/65.0; 5.2 = 30.5/69.5; 5.4 = 25.5/74.5; 5.6 = 21.0/79.0; 5.8 = 16.0/84.0; 6.0 = 11.5/88.5; 6.2 = 8.0/92.0. Every row sums to 100 mL.",
       "To make any pH from the table for volume V litres: moles of citric acid monohydrate = 0.1 * (x/100) * V; moles of trisodium citrate dihydrate = 0.1 * (y/100) * V.",
@@ -7657,7 +7657,7 @@
        "license": "public domain"
       },
       {
-       "title": "PubChem CID 6224 - Trisodium citrate (anhydrous), MW 258.07",
+       "title": "PubChem CID 71474 (sodium citrate dihydrate, MW 294.10) - Trisodium citrate (anhydrous), MW 258.07",
        "url": "https://pubchem.ncbi.nlm.nih.gov/compound/6224",
        "license": "public domain"
       },
@@ -13525,7 +13525,7 @@
        "mw_gmol": 294.1,
        "form": "trisodium citrate dihydrate, C6H5Na3O7*2H2O, CAS 6132-04-3",
        "mwSource": "PubChem CID 71474",
-       "note": "7.35 g per litre. Anhydrous trisodium citrate is MW 258.07 (PubChem CID 6224) and would be 6.45 g per litre - the two forms are not interchangeable by mass. Usually added as 33.3 mL of a 0.75 M pH 7.0 citrate stock per litre."
+       "note": "7.35 g per litre. Anhydrous trisodium citrate is MW 258.07 (PubChem CID 71474 (sodium citrate dihydrate, MW 294.10)) and would be 6.45 g per litre - the two forms are not interchangeable by mass. Usually added as 33.3 mL of a 0.75 M pH 7.0 citrate stock per litre."
       },
       {
        "name": "N-Lauroylsarcosine sodium salt (sarkosyl)",
@@ -16156,7 +16156,7 @@
        "molarity_M": 0.01,
        "mw_gmol": 294.1,
        "note": "2.94 g/L.",
-       "mwSource": "PubChem CID 6224"
+       "mwSource": "PubChem CID 71474 (sodium citrate dihydrate, MW 294.10)"
       },
       {
        "name": "Tween-20",
@@ -16192,7 +16192,7 @@
        "license": "free to read"
       },
       {
-       "title": "PubChem CID 6224 - Sodium citrate, MW 294.1",
+       "title": "PubChem CID 71474 (sodium citrate dihydrate, MW 294.10) - Sodium citrate, MW 294.1",
        "url": "https://pubchem.ncbi.nlm.nih.gov/compound/6224",
        "license": "public domain"
       }
@@ -16236,7 +16236,7 @@
        },
        "note": "Optional but strongly recommended - it is the antifade. 25 mg/mL final.",
        "hazard": "Flammable solid, corrosive, and strongly hygroscopic.",
-       "mwSource": "PubChem CID 9270, MW 112.17"
+       "mwSource": "PubChem CID 9237, MW 112.17"
       }
      ],
      "solvent": "see the notes - this is a multi-step dissolution, not a simple make-to-volume",
@@ -16265,8 +16265,8 @@
        "license": "free to read"
       },
       {
-       "title": "PubChem CID 9270 - DABCO, MW 112.17",
-       "url": "https://pubchem.ncbi.nlm.nih.gov/compound/9270",
+       "title": "PubChem CID 9237 - DABCO (1,4-diazabicyclo[2.2.2]octane), MW 112.17",
+       "url": "https://pubchem.ncbi.nlm.nih.gov/compound/9237",
        "license": "public domain"
       }
      ]
@@ -16795,7 +16795,7 @@
        "name": "Aluminium potassium sulfate dodecahydrate (potash alum)",
        "gramsPerLiter": 100,
        "note": "The mordant. Dissolve in warm water.",
-       "mwSource": "PubChem CID 24856, MW 474.39"
+       "mwSource": "PubChem CID 62667 (aluminium potassium sulfate dodecahydrate, MW 474.39)"
       },
       {
        "name": "Sodium iodate",

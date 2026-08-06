@@ -31,6 +31,7 @@ A free, single-file, browser-based toolkit for everyday molecular-biology bench 
 - **Everything is local.** Every calculation runs in your browser. Nothing is uploaded, so it is fine for unpublished work.
 - **It works offline.** Visit once and it keeps working with no network — usable in a cold room, a BSL suite, or on a plane. It is a PWA, so you can install it like an app.
 - **The maths is checked.** A self-test harness (`?selftest=1`) asserts every formula — 126 assertions, anchored to published references rather than to the code's own output.
+- **The citations are checked too.** `python3 tools/verify-citations.py` re-queries PubChem for every accession the libraries cite and fails if the molecular weight beside it disagrees. It caught 20 wrong accessions on its first run.
 - **It is one file.** `index.html` plus a recipe library and a dye library. No build step, no dependencies, no CDN.
 
 ---
