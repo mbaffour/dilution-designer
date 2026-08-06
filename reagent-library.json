@@ -1,6 +1,6 @@
 {
  "version": "2.0",
- "generated": "2026-07-21",
+ "generated": "2026-08-06",
  "categories": [
   {
    "key": "media-bacterial",
@@ -15763,6 +15763,1459 @@
        "title": "PubChem CID 5959, Chloramphenicol - molecular weight 323.13; PubChem CID 6197, Cycloheximide - molecular weight 281.35 (toxicity data)",
        "url": "https://pubchem.ncbi.nlm.nih.gov/compound/6197",
        "license": "public domain"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "microscopy",
+   "title": "Microscopy, staining & mounting",
+   "recipes": [
+    {
+     "id": "pbs-t-005",
+     "name": "PBS-T (PBS + 0.05% Tween-20)",
+     "aka": [
+      "PBST",
+      "PBS-Tween"
+     ],
+     "summary": "The wash buffer for immunofluorescence and plate-based immunoassays. Tween-20 keeps antibody off surfaces it is not supposed to stick to.",
+     "components": [
+      {
+       "name": "PBS, 1x pH 7.4",
+       "note": "make from the 10x stock in this library (pbs-10x-ph74), or use 1x directly",
+       "fromStock": null
+      },
+      {
+       "name": "Tween-20",
+       "percent": {
+        "value": 0.05,
+        "type": "v/v"
+       },
+       "note": "Viscous - cut the pipette tip and pipette slowly, or weigh it. 0.5 mL/L."
+      }
+     ],
+     "solvent": "1x PBS (bring to final volume)",
+     "finalPH": 7.4,
+     "adjustPHWith": null,
+     "sterilization": "0.22 um filter if it will contact cells; not required for washes",
+     "storage": "Room temperature, or 4 C to slow microbial growth",
+     "shelfLife": "1 month at room temperature; discard if it goes cloudy",
+     "hazards": "Low hazard. Tween-20 is an eye irritant.",
+     "notes": [
+      "TBS-T is already in this library (tbst-1x) - use that one if your target is phospho-specific, since phosphate buffer interferes with some phospho-antibodies.",
+      "0.1% Tween is common for Westerns; 0.05% is gentler and is the usual choice for immunofluorescence, where too much detergent strips the sample off the coverslip.",
+      "Tween-20 goes rancid slowly. A bottle that smells odd is worth replacing - oxidised polysorbate raises background."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      }
+     ]
+    },
+    {
+     "id": "perm-triton-01",
+     "name": "Permeabilisation Buffer, 0.1% Triton X-100 in PBS",
+     "aka": [
+      "Triton perm buffer"
+     ],
+     "summary": "The standard permeabilisation step for intracellular immunofluorescence - it puts holes in both the plasma and nuclear membranes so antibody can reach the target.",
+     "components": [
+      {
+       "name": "PBS, 1x pH 7.4",
+       "note": "from the 10x stock in this library",
+       "fromStock": null
+      },
+      {
+       "name": "Triton X-100",
+       "percent": {
+        "value": 0.1,
+        "type": "v/v"
+       },
+       "note": "Extremely viscous. Make a 10% (v/v) stock in water first and take 10 mL/L of that - trying to pipette neat Triton accurately does not work.",
+       "hazard": "Eye irritant and harmful to aquatic life."
+      }
+     ],
+     "solvent": "1x PBS (bring to final volume)",
+     "finalPH": 7.4,
+     "adjustPHWith": null,
+     "sterilization": "not required",
+     "storage": "Room temperature",
+     "shelfLife": "~1 month",
+     "hazards": "Triton X-100 is a serious eye irritant and is toxic to aquatic organisms - do not pour concentrated stock down the drain.",
+     "notes": [
+      "0.1% for 10 min is the usual starting point. 0.5% is harsher and appropriate for nuclear antigens; 0.01-0.05% for membrane-proximal targets you do not want to extract.",
+      "Do NOT use Triton before phalloidin if you have methanol-fixed - and do not use methanol at all if you intend to stain F-actin.",
+      "For membrane-protein epitopes, use saponin instead: it permeabilises cholesterol-containing membranes reversibly and leaves the plasma membrane more intact.",
+      "Triton destroys the labelling from lipophilic tracers (DiI, DiO, DiD) and most membrane dyes."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      }
+     ]
+    },
+    {
+     "id": "perm-saponin-01",
+     "name": "Saponin Permeabilisation / Staining Buffer, 0.1%",
+     "aka": [
+      "saponin buffer"
+     ],
+     "summary": "A gentle, reversible permeabilisation for membrane and Golgi antigens. Because it is reversible, saponin has to stay in every buffer for the rest of the stain.",
+     "components": [
+      {
+       "name": "PBS, 1x pH 7.4",
+       "note": "from the 10x stock in this library",
+       "fromStock": null
+      },
+      {
+       "name": "Saponin",
+       "percent": {
+        "value": 0.1,
+        "type": "w/v"
+       },
+       "note": "Plant-derived and batch-variable - re-titrate when you open a new lot.",
+       "hazard": "Harmful if inhaled; haemolytic. Weigh in a fume hood or a balance enclosure."
+      },
+      {
+       "name": "Bovine serum albumin (BSA)",
+       "percent": {
+        "value": 1,
+        "type": "w/v"
+       },
+       "note": "Blocks and carries the antibody."
+      }
+     ],
+     "solvent": "1x PBS (bring to final volume)",
+     "finalPH": 7.4,
+     "adjustPHWith": null,
+     "sterilization": "0.22 um filter",
+     "storage": "4 C",
+     "shelfLife": "1 week at 4 C - make it fresh for anything quantitative",
+     "hazards": "Saponin is haemolytic and harmful by inhalation. Weigh the powder carefully and avoid raising dust.",
+     "notes": [
+      "Saponin permeabilisation is REVERSIBLE. It must be present in the blocking, antibody and wash buffers or the membranes reseal and the antibody washes out.",
+      "It works by extracting cholesterol, so it permeabilises the plasma membrane and Golgi but leaves the nuclear envelope largely intact - which is exactly why it is the right choice for membrane antigens and the wrong one for nuclear ones.",
+      "Batch-to-batch variability is real. Saponin is a crude plant extract, not a defined chemical."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Bio-protocol / protocols.io open method repositories",
+       "url": "https://www.protocols.io/",
+       "license": "CC-BY"
+      }
+     ]
+    },
+    {
+     "id": "if-block-serum",
+     "name": "Immunofluorescence Blocking Buffer (5% normal serum + 0.3% Triton)",
+     "aka": [
+      "IF block",
+      "serum block"
+     ],
+     "summary": "Blocks non-specific antibody binding and permeabilises in one step. The serum must come from the species the secondary antibody was raised in.",
+     "components": [
+      {
+       "name": "PBS, 1x pH 7.4",
+       "note": "from the 10x stock in this library",
+       "fromStock": null
+      },
+      {
+       "name": "Normal serum (goat, donkey or horse)",
+       "percent": {
+        "value": 5,
+        "type": "v/v"
+       },
+       "note": "Match the species the SECONDARY antibody was raised in - that is what determines which non-specific binding you need to block."
+      },
+      {
+       "name": "Triton X-100",
+       "percent": {
+        "value": 0.3,
+        "type": "v/v"
+       },
+       "note": "From a 10% (v/v) stock: 30 mL/L.",
+       "hazard": "Eye irritant."
+      }
+     ],
+     "solvent": "1x PBS (bring to final volume)",
+     "finalPH": 7.4,
+     "adjustPHWith": null,
+     "sterilization": "not required",
+     "storage": "4 C; freeze aliquots at -20 C for longer",
+     "shelfLife": "2 weeks at 4 C",
+     "hazards": "Triton X-100 is an eye irritant. Serum is a biological material - handle per your local rules.",
+     "notes": [
+      "If your secondary is goat anti-rabbit, block with normal GOAT serum. Blocking with serum from the primary's species does nothing useful.",
+      "5% BSA in PBS-T is the animal-free alternative and is already in this library as a TBS-T version (blocking-buffer-bsa-tbst).",
+      "Never block with normal serum from the same species as the primary antibody - it competes with the primary.",
+      "For a mouse primary on mouse tissue you need a dedicated mouse-on-mouse blocking kit; no serum block solves that."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Bio-protocol / protocols.io open method repositories",
+       "url": "https://www.protocols.io/",
+       "license": "CC-BY"
+      }
+     ]
+    },
+    {
+     "id": "if-ab-diluent",
+     "name": "Antibody Diluent, 1% BSA in PBS-T",
+     "aka": [
+      "antibody dilution buffer"
+     ],
+     "summary": "What you dilute primary and secondary antibodies into. Low enough protein to keep background down, high enough to stop the antibody adsorbing to plastic.",
+     "components": [
+      {
+       "name": "PBS, 1x pH 7.4",
+       "note": "from the 10x stock in this library",
+       "fromStock": null
+      },
+      {
+       "name": "Bovine serum albumin (BSA), fraction V",
+       "percent": {
+        "value": 1,
+        "type": "w/v"
+       },
+       "note": "Dissolve by gentle inversion - vortexing BSA makes a foam that never clears."
+      },
+      {
+       "name": "Tween-20",
+       "percent": {
+        "value": 0.05,
+        "type": "v/v"
+       },
+       "note": "0.5 mL/L."
+      },
+      {
+       "name": "Sodium azide (optional preservative)",
+       "percent": {
+        "value": 0.02,
+        "type": "w/v"
+       },
+       "note": "Only for buffers that never touch live cells.",
+       "hazard": "Acutely toxic. Forms explosive metal azides in copper and lead plumbing - never pour down a drain."
+      }
+     ],
+     "solvent": "1x PBS (bring to final volume)",
+     "finalPH": 7.4,
+     "adjustPHWith": null,
+     "sterilization": "0.22 um filter",
+     "storage": "4 C",
+     "shelfLife": "1 month at 4 C with azide; 1 week without",
+     "hazards": "Sodium azide is acutely toxic and forms explosive metal azides in old plumbing. Omit it entirely if the buffer will contact live cells or HRP conjugates - azide inhibits HRP.",
+     "notes": [
+      "Azide inhibits horseradish peroxidase. Leave it out of any buffer used with an HRP-conjugated antibody.",
+      "Spin diluted antibody at 14,000 x g for 5 min before use. Aggregates are the usual cause of uniform bright specks across the whole coverslip.",
+      "Use the same diluent for primary and secondary so you are only changing one variable when you troubleshoot."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      }
+     ]
+    },
+    {
+     "id": "glycine-quench-100mm",
+     "name": "Glycine Quench, 100 mM in PBS",
+     "aka": [
+      "aldehyde quench"
+     ],
+     "summary": "Mops up unreacted aldehyde after formaldehyde fixation. A cheap step that visibly cuts background haze, especially with bright secondaries.",
+     "components": [
+      {
+       "name": "Glycine",
+       "molarity_M": 0.1,
+       "mw_gmol": 75.07,
+       "note": "7.51 g/L."
+      },
+      {
+       "name": "PBS, 1x pH 7.4",
+       "note": "from the 10x stock in this library",
+       "fromStock": null
+      }
+     ],
+     "solvent": "1x PBS (bring to final volume)",
+     "finalPH": 7.4,
+     "adjustPHWith": "1 M NaOH if the glycine drops it below 7.2",
+     "sterilization": "0.22 um filter optional",
+     "storage": "4 C",
+     "shelfLife": "1 month at 4 C",
+     "hazards": "Low hazard.",
+     "notes": [
+      "10 min at room temperature after fixation is enough. It costs nothing and reduces the aldehyde-induced autofluorescence that otherwise sits under a weak signal.",
+      "For strong glutaraldehyde fixation, use 0.1% sodium borohydride in PBS instead - glycine alone will not cope, though borohydride fizzes and lifts sections.",
+      "50 mM ammonium chloride works equivalently and is the more common choice in some labs."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      },
+      {
+       "title": "PubChem CID 750 - Glycine, MW 75.07",
+       "url": "https://pubchem.ncbi.nlm.nih.gov/compound/750",
+       "license": "public domain"
+      }
+     ]
+    },
+    {
+     "id": "methanol-fixative-cold",
+     "name": "Methanol Fixative, ice-cold 100%",
+     "aka": [
+      "methanol fixation"
+     ],
+     "summary": "Fixes and permeabilises in one step by precipitating protein. Better than formaldehyde for some cytoskeletal and nuclear epitopes - and fatal to F-actin staining.",
+     "components": [
+      {
+       "name": "Methanol, 100% (analytical grade)",
+       "percent": {
+        "value": 100,
+        "type": "v/v"
+       },
+       "note": "Pre-chill to -20 C for at least an hour before use. Room-temperature methanol gives poor morphology.",
+       "hazard": "Highly flammable, acutely toxic and causes irreversible optic-nerve damage. Fume hood, no ignition sources."
+      }
+     ],
+     "solvent": "none - used neat",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "not applicable",
+     "storage": "-20 C in a flammables-rated freezer",
+     "shelfLife": "Indefinite if kept dry and capped",
+     "hazards": "Methanol is highly flammable and acutely toxic - it causes blindness and death by ingestion and is absorbed through skin. Fume hood, nitrile gloves, no flames. Store only in a flammables-rated freezer, never a domestic one.",
+     "notes": [
+      "DESTROYS F-ACTIN. Never methanol-fix a sample you intend to stain with phalloidin - there will be no filaments left to bind.",
+      "It also destroys most fluorescent proteins and removes lipophilic membrane tracers.",
+      "It permeabilises as it fixes, so no separate Triton step is needed.",
+      "Typical use: 5-10 min at -20 C, then rehydrate through PBS. Some protocols use methanol:acetone 1:1.",
+      "4% PFA in PBS is already in this library (paraformaldehyde-4-percent-pbs) and is the default choice for most immunofluorescence."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      }
+     ]
+    },
+    {
+     "id": "citrate-retrieval-ph6",
+     "name": "Antigen Retrieval Buffer, 10 mM Sodium Citrate pH 6.0",
+     "aka": [
+      "HIER buffer",
+      "citrate retrieval"
+     ],
+     "summary": "Heat-induced epitope retrieval for formalin-fixed paraffin sections. Fixation cross-links epitopes shut; heat in citrate opens them again.",
+     "components": [
+      {
+       "name": "Sodium citrate tribasic dihydrate",
+       "molarity_M": 0.01,
+       "mw_gmol": 294.1,
+       "note": "2.94 g/L.",
+       "mwSource": "PubChem CID 6224"
+      },
+      {
+       "name": "Tween-20",
+       "percent": {
+        "value": 0.05,
+        "type": "v/v"
+       },
+       "note": "0.5 mL/L - improves wetting and section adherence."
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": 6.0,
+     "adjustPHWith": "1 M HCl to bring down from ~8.3; check the pH at room temperature, not hot",
+     "sterilization": "not required",
+     "storage": "Room temperature; 4 C for longer",
+     "shelfLife": "3 months at room temperature, 6 months at 4 C",
+     "hazards": "Low hazard as a solution. The retrieval step itself uses a pressure cooker or microwave at near-boiling - a serious scald and superheating risk.",
+     "notes": [
+      "pH matters more than anything else here. pH 6.0 citrate and pH 9.0 EDTA/Tris retrieve different epitope sets - if an antibody will not work in citrate, try the alkaline buffer before giving up on it.",
+      "Standard conditions: 20 min at 95-100 C, then cool in the buffer for 20 min. Cooling slowly in the buffer matters as much as the heating.",
+      "Never let the sections dry out during retrieval - top up the buffer.",
+      "Retrieval is for formalin-fixed paraffin sections. Cultured cells fixed in 4% PFA for 15 min rarely need it."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      },
+      {
+       "title": "PubChem CID 6224 - Sodium citrate, MW 294.1",
+       "url": "https://pubchem.ncbi.nlm.nih.gov/compound/6224",
+       "license": "public domain"
+      }
+     ]
+    },
+    {
+     "id": "mowiol-dabco",
+     "name": "Mowiol 4-88 / DABCO Antifade Mounting Medium",
+     "aka": [
+      "Mowiol mountant",
+      "Mowiol-DABCO"
+     ],
+     "summary": "The classic home-made hard-setting antifade mountant. Cheap, sets solid, and preserves fluorescence for months.",
+     "components": [
+      {
+       "name": "Mowiol 4-88",
+       "gramsPerLiter": 96,
+       "note": "2.4 g per 10 mL of final mountant. Polyvinyl alcohol - it dissolves only slowly and only with heat."
+      },
+      {
+       "name": "Glycerol",
+       "percent": {
+        "value": 60,
+        "type": "v/v"
+       },
+       "note": "6 mL per 10 mL - added first, to wet the Mowiol powder before the aqueous phase."
+      },
+      {
+       "name": "Tris-HCl pH 8.5, 0.2 M",
+       "percent": {
+        "value": 120,
+        "type": "v/v"
+       },
+       "note": "12 mL per 10 mL of final mountant, added during the dissolution steps. See the Tris recipes in this library."
+      },
+      {
+       "name": "DABCO (1,4-diazabicyclo[2.2.2]octane)",
+       "percent": {
+        "value": 2.5,
+        "type": "w/v"
+       },
+       "note": "Optional but strongly recommended - it is the antifade. 25 mg/mL final.",
+       "hazard": "Flammable solid, corrosive, and strongly hygroscopic.",
+       "mwSource": "PubChem CID 9270, MW 112.17"
+      }
+     ],
+     "solvent": "see the notes - this is a multi-step dissolution, not a simple make-to-volume",
+     "finalPH": 8.5,
+     "adjustPHWith": "the 0.2 M Tris-HCl pH 8.5 component sets the pH",
+     "sterilization": "not applicable; centrifuge to clarify instead of filtering",
+     "storage": "-20 C in single-use aliquots; it is workable at 4 C for a few weeks",
+     "shelfLife": "1 year at -20 C. Discard when it yellows.",
+     "hazards": "DABCO is corrosive and flammable. Mowiol dust is a nuisance irritant. The preparation involves prolonged stirring and gentle heating - do not boil.",
+     "notes": [
+      "Preparation: stir 2.4 g Mowiol 4-88 into 6 mL glycerol for 1 h at room temperature, add 6 mL water and stir 2 h, add 12 mL 0.2 M Tris-HCl pH 8.5, then heat to 50 C for 10 min with occasional stirring until dissolved. Clarify at 5,000 x g for 15 min. Add DABCO to 2.5% (w/v). Aliquot and freeze.",
+      "It sets hard overnight, so no nail varnish sealing is needed.",
+      "DABCO protects fluorescein and the Alexa 488 class well; it does much less for cyanines. For Cy5 and Alexa 647 a commercial mountant or an oxygen-scavenging system works better.",
+      "The refractive index of set Mowiol is about 1.49, close enough to immersion oil for high-NA work.",
+      "Do not filter it - it is far too viscous. Centrifuge to clarify."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      },
+      {
+       "title": "PubChem CID 9270 - DABCO, MW 112.17",
+       "url": "https://pubchem.ncbi.nlm.nih.gov/compound/9270",
+       "license": "public domain"
+      }
+     ]
+    },
+    {
+     "id": "glycerol-npg-antifade",
+     "name": "Glycerol / n-Propyl Gallate Antifade Mountant",
+     "aka": [
+      "NPG mountant",
+      "glycerol-NPG"
+     ],
+     "summary": "A soft, non-setting antifade mountant you can make in ten minutes. Excellent bleach protection, but the coverslip has to be sealed.",
+     "components": [
+      {
+       "name": "Glycerol",
+       "percent": {
+        "value": 90,
+        "type": "v/v"
+       },
+       "note": "9 mL per 10 mL."
+      },
+      {
+       "name": "PBS, 1x pH 7.4",
+       "percent": {
+        "value": 10,
+        "type": "v/v"
+       },
+       "note": "1 mL per 10 mL."
+      },
+      {
+       "name": "n-Propyl gallate",
+       "percent": {
+        "value": 1,
+        "type": "w/v"
+       },
+       "note": "10 mg/mL. Dissolve in the PBS with warming and vortexing before adding the glycerol - it goes into glycerol very reluctantly.",
+       "hazard": "Irritant.",
+       "mwSource": "PubChem CID 4947, MW 212.20"
+      }
+     ],
+     "solvent": "see the notes",
+     "finalPH": 7.4,
+     "adjustPHWith": "1 M NaOH to pH 8.0 if you want maximum fluorescein brightness",
+     "sterilization": "not applicable",
+     "storage": "-20 C in the dark, in single-use aliquots",
+     "shelfLife": "6 months at -20 C. It oxidises to a brown colour - discard when it darkens.",
+     "hazards": "n-Propyl gallate is an irritant. The mountant does not set, so a sealed coverslip is a spill risk if it is dropped.",
+     "notes": [
+      "It never sets. Seal the coverslip edges with nail varnish or VALAP or the sample slides around under the objective.",
+      "n-Propyl gallate is one of the better antifades for fluorescein and rhodamine; it is less effective for the far-red cyanines.",
+      "Raising the pH to 8.0 makes fluorescein noticeably brighter, since fluorescein fluorescence is strongly pH-dependent.",
+      "It oxidises and browns with time and light exposure - keep it frozen, dark and aliquoted."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      },
+      {
+       "title": "PubChem CID 4947 - Propyl gallate, MW 212.2",
+       "url": "https://pubchem.ncbi.nlm.nih.gov/compound/4947",
+       "license": "public domain"
+      }
+     ]
+    },
+    {
+     "id": "pbs-glycerol-mountant",
+     "name": "PBS-Glycerol Mountant, 90%",
+     "aka": [
+      "glycerol mountant"
+     ],
+     "summary": "The simplest possible mountant - glycerol and buffer. No antifade, so use it only when you are imaging straight away.",
+     "components": [
+      {
+       "name": "Glycerol",
+       "percent": {
+        "value": 90,
+        "type": "v/v"
+       },
+       "note": "9 mL per 10 mL."
+      },
+      {
+       "name": "PBS, 1x pH 7.4",
+       "percent": {
+        "value": 10,
+        "type": "v/v"
+       },
+       "note": "1 mL per 10 mL."
+      }
+     ],
+     "solvent": "see the components",
+     "finalPH": 7.4,
+     "adjustPHWith": "1 M NaOH to pH 8.0-8.5 to brighten fluorescein",
+     "sterilization": "0.22 um filter (slow - dilute, filter, then concentrate is easier)",
+     "storage": "4 C",
+     "shelfLife": "6 months at 4 C",
+     "hazards": "Low hazard.",
+     "notes": [
+      "No antifade at all - the sample will bleach noticeably faster than in Mowiol-DABCO or a commercial mountant. Fine for a quick look, poor for anything you want to re-image.",
+      "Refractive index of 90% glycerol is about 1.46, near enough to immersion oil for most work.",
+      "Seal the edges - it does not set."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      }
+     ]
+    },
+    {
+     "id": "poly-l-lysine-001",
+     "name": "Poly-L-Lysine Coating Solution, 0.01% (w/v)",
+     "aka": [
+      "PLL coating"
+     ],
+     "summary": "Coats glass with a positive charge so cells, bacteria and tissue sections stick to it instead of washing off.",
+     "components": [
+      {
+       "name": "Poly-L-lysine hydrobromide (MW 70,000-150,000)",
+       "percent": {
+        "value": 0.01,
+        "type": "w/v"
+       },
+       "note": "0.1 g/L. Usually bought as a ready-made 0.01% sterile solution - that is the sensible option."
+      }
+     ],
+     "solvent": "sterile deionized water (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "0.22 um filter",
+     "storage": "4 C; -20 C for the concentrated stock",
+     "shelfLife": "3 months at 4 C",
+     "hazards": "Low hazard. Poly-L-lysine is cytotoxic at high concentration - rinse coated surfaces thoroughly before plating cells.",
+     "notes": [
+      "Coating: cover the glass for 30-60 min at room temperature, aspirate, rinse twice with sterile water, and air-dry completely. Drying the coated surface is what makes the coating durable.",
+      "Rinse well. Residual poly-L-lysine is cytotoxic and will make cells look unwell for no obvious reason.",
+      "Higher molecular weight (>300 kDa) gives stronger adhesion; 70-150 kDa is the usual compromise.",
+      "Poly-D-lysine is the alternative for long cultures - cells cannot degrade the D-isomer with their proteases.",
+      "For bacteria on an imaging slide, poly-L-lysine works but often immobilises them so hard they stop growing. An agarose pad is better for time-lapse."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Bio-protocol / protocols.io open method repositories",
+       "url": "https://www.protocols.io/",
+       "license": "CC-BY"
+      }
+     ]
+    },
+    {
+     "id": "dapi-stock-1mgml",
+     "name": "DAPI Stock, 1 mg/mL",
+     "aka": [
+      "DAPI stock solution"
+     ],
+     "summary": "The concentrated nuclear counterstain stock. One vial makes enough for years of routine staining.",
+     "components": [
+      {
+       "name": "DAPI dihydrochloride",
+       "gramsPerLiter": 1,
+       "note": "1 mg/mL = 2.86 mM (MW 350.25). Dissolves slowly - warm to 37 C and vortex; do not assume it went in.",
+       "hazard": "DNA-binding and a possible mutagen. Gloves; chemical waste stream.",
+       "mwSource": "PubChem CID 2954 (free base, MW 277.32); the dihydrochloride is MW 350.25"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "0.22 um filter if it will go onto live cells",
+     "storage": "-20 C in the dark, in small aliquots; a 4 C working aliquot keeps about a month",
+     "shelfLife": "At least 6 months at -20 C protected from light",
+     "hazards": "DAPI binds DNA and should be treated as a possible mutagen. Gloves, and collect the waste as chemical waste rather than pouring it down the sink.",
+     "notes": [
+      "1 mg/mL = 2.86 mM. To reach the usual 300 nM working concentration you dilute 1:10,000 - which for a single coverslip is far too small to pipette. Make a 1:100 intermediate first.",
+      "The Microscopy module will compute the exact stock and diluent volumes for your sample count.",
+      "Hoechst 33342 is the cell-permeant equivalent for live cells; DAPI enters intact cells only slowly and unevenly.",
+      "DMF is an alternative solvent for the free base, but the dihydrochloride sold for staining dissolves in water."
+     ],
+     "sources": [
+      {
+       "title": "Thermo Fisher product datasheets & fluorescence resources",
+       "url": "https://www.thermofisher.com/order/fluorescence-spectraviewer",
+       "license": "free technical sheet"
+      },
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "PubChem CID 2954 - DAPI, MW 277.32",
+       "url": "https://pubchem.ncbi.nlm.nih.gov/compound/2954",
+       "license": "public domain"
+      }
+     ]
+    },
+    {
+     "id": "dapi-working-300nm",
+     "name": "DAPI Working Solution, 300 nM",
+     "aka": [
+      "DAPI counterstain"
+     ],
+     "summary": "The ready-to-use nuclear counterstain, at the concentration every immunofluorescence protocol means when it says 300 nM DAPI.",
+     "components": [
+      {
+       "name": "DAPI",
+       "fromStock": {
+        "stockConc": 1,
+        "stockUnit": "mg/mL",
+        "finalConc": 0.105,
+        "finalUnit": "ug/mL"
+       },
+       "note": "300 nM = 0.105 ug/mL = a 1:9500 dilution. In practice protocols dilute the 1 mg/mL stock 1:10,000, giving 0.1 ug/mL (286 nM) - that is what '300 nM DAPI' means at the bench.",
+       "hazard": "Possible mutagen - gloves, chemical waste."
+      },
+      {
+       "name": "PBS, 1x pH 7.4",
+       "note": "the diluent",
+       "fromStock": null
+      }
+     ],
+     "solvent": "1x PBS (bring to final volume)",
+     "finalPH": 7.4,
+     "adjustPHWith": null,
+     "sterilization": "not required",
+     "storage": "4 C in the dark",
+     "shelfLife": "Make fresh on the day - a dilute solution loses signal within a week",
+     "hazards": "Possible mutagen. Gloves; chemical waste.",
+     "notes": [
+      "The direct dilution from stock is not pipettable at small volumes. Make a 1:100 intermediate (10 ug/mL) and take 10 uL of that per mL of PBS.",
+      "5 min at room temperature is enough on fixed cells. Longer mostly adds cytoplasmic background.",
+      "Bacteria need roughly 10x more - 1 ug/mL for 10 min - because DAPI crosses the Gram-negative envelope poorly.",
+      "Overstained DAPI bleeds into the green channel. If GFP looks blue-tinged, halve the DAPI."
+     ],
+     "sources": [
+      {
+       "title": "Thermo Fisher product datasheets & fluorescence resources",
+       "url": "https://www.thermofisher.com/order/fluorescence-spectraviewer",
+       "license": "free technical sheet"
+      },
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      }
+     ]
+    },
+    {
+     "id": "hoechst-33342-stock",
+     "name": "Hoechst 33342 Stock, 10 mg/mL",
+     "aka": [
+      "Hoechst stock"
+     ],
+     "summary": "The live-cell nuclear stain stock. Same channel as DAPI, but cell-permeant.",
+     "components": [
+      {
+       "name": "Hoechst 33342, trihydrochloride trihydrate",
+       "gramsPerLiter": 10,
+       "note": "10 mg/mL = 16.2 mM (MW 615.99). Dissolves readily, unlike DAPI.",
+       "hazard": "Binds DNA; suspected mutagen. Gloves, chemical waste.",
+       "mwSource": "Trihydrochloride trihydrate, MW 615.99; free base is PubChem CID 1464, MW 452.55"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "0.22 um filter - this goes onto live cells",
+     "storage": "-20 C in the dark, aliquoted",
+     "shelfLife": "At least 6 months at -20 C protected from light",
+     "hazards": "Hoechst binds DNA and is a suspected mutagen. Gloves; chemical waste.",
+     "notes": [
+      "1 ug/mL (a 1:10,000 dilution) for 10-15 min at 37 C is the standard live-cell condition.",
+      "33342 is the cell-permeant one; 33258 is not. The two are otherwise near-identical and very easy to confuse.",
+      "Hoechst plus 405 nm illumination is genuinely phototoxic. If cells stop dividing part-way through a time-lapse, suspect this first.",
+      "Cells with active ABC transporters pump Hoechst out - the basis of the side-population assay, and a quiet way to ruin a counterstain."
+     ],
+     "sources": [
+      {
+       "title": "Thermo Fisher product datasheets & fluorescence resources",
+       "url": "https://www.thermofisher.com/order/fluorescence-spectraviewer",
+       "license": "free technical sheet"
+      },
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      }
+     ]
+    },
+    {
+     "id": "pi-stock-1mgml",
+     "name": "Propidium Iodide Stock, 1 mg/mL",
+     "aka": [
+      "PI stock"
+     ],
+     "summary": "The dead-cell marker stock. Buy it as a solution if you can - the powder is the highest-exposure step and there is no reason to handle it.",
+     "components": [
+      {
+       "name": "Propidium iodide",
+       "gramsPerLiter": 1,
+       "note": "1 mg/mL = 1.50 mM (MW 668.39).",
+       "hazard": "Mutagenic DNA intercalator. Gloves, chemical waste. Do not weigh the powder if a ready-made solution is available.",
+       "mwSource": "PubChem CID 104981, MW 668.39"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "0.22 um filter",
+     "storage": "4 C in the dark - do NOT freeze",
+     "shelfLife": "About 1 year at 4 C in the dark",
+     "hazards": "Propidium iodide is a mutagenic intercalating agent. Gloves, chemical waste stream, and avoid handling the powder.",
+     "notes": [
+      "Mammalian cells: 1 ug/mL (1:1000) for 5-15 min. Bacteria need far more - 20 ug/mL (1:50) is the BacLight level.",
+      "Do not exceed about 15 min on live cells. PI leaks into intact cells over time and inflates the dead count.",
+      "For cell-cycle work you must add RNase A to 100 ug/mL - PI stains RNA too, and without RNase the histogram is meaningless.",
+      "PI has a broad emission tail that bleeds into the far-red channel. Check the panel builder before pairing it with Cy5 or Alexa 647.",
+      "Fixation permeabilises cells, so PI stains everything after fixation. It only reports viability on unfixed samples."
+     ],
+     "sources": [
+      {
+       "title": "Thermo Fisher product datasheets & fluorescence resources",
+       "url": "https://www.thermofisher.com/order/fluorescence-spectraviewer",
+       "license": "free technical sheet"
+      },
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "PubChem CID 104981 - Propidium iodide, MW 668.39",
+       "url": "https://pubchem.ncbi.nlm.nih.gov/compound/104981",
+       "license": "public domain"
+      }
+     ]
+    },
+    {
+     "id": "livedead-syto9-pi",
+     "name": "Bacterial Live/Dead Staining Mix (SYTO 9 + PI)",
+     "aka": [
+      "BacLight mix",
+      "live/dead mix"
+     ],
+     "summary": "The two-dye membrane-integrity stain for bacteria. Green marks every cell, red marks the ones that have lost membrane integrity.",
+     "components": [
+      {
+       "name": "SYTO 9, 3.34 mM in DMSO",
+       "percent": {
+        "value": 50,
+        "type": "v/v"
+       },
+       "note": "Equal volume with the PI. Mix the two dyes together BEFORE adding to cells.",
+       "hazard": "Nucleic-acid binder in DMSO - DMSO carries dyes through skin. Nitrile gloves."
+      },
+      {
+       "name": "Propidium iodide, 20 mM in DMSO",
+       "percent": {
+        "value": 50,
+        "type": "v/v"
+       },
+       "note": "Equal volume with the SYTO 9.",
+       "hazard": "Mutagenic intercalator."
+      }
+     ],
+     "solvent": "none - the two stocks are combined 1:1 and used as the mix",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "not required",
+     "storage": "-20 C in the dark, desiccated; make the 1:1 mix fresh on the day",
+     "shelfLife": "Stocks at least 1 year at -20 C; the combined mix is a same-day reagent",
+     "hazards": "Propidium iodide is a mutagen and both dyes are in DMSO, which carries them through skin. Nitrile gloves, chemical waste.",
+     "notes": [
+      "Use 3 uL of the combined mix per mL of bacterial suspension, 15 min in the dark.",
+      "Wash the cells into 0.85% NaCl first. Rich medium quenches SYTO 9 and raises background badly - it is the single most common cause of a useless result.",
+      "Always run a killed control (70% isopropanol, 1 h) in parallel. Without it the green:red ratio has no reference point.",
+      "The two dyes compete for the same sites, so the ratio depends on the dye-to-cell ratio. Keep cell density and dye volume fixed across a comparison.",
+      "SYTO 9 also stains extracellular DNA, which inflates the apparent live fraction in a biofilm."
+     ],
+     "sources": [
+      {
+       "title": "Thermo Fisher product datasheets & fluorescence resources",
+       "url": "https://www.thermofisher.com/order/fluorescence-spectraviewer",
+       "license": "free technical sheet"
+      },
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      }
+     ]
+    },
+    {
+     "id": "fm4-64-stock",
+     "name": "FM 4-64 Stock, 1 mg/mL",
+     "aka": [
+      "FM4-64 stock"
+     ],
+     "summary": "The bacterial membrane stain stock. It is non-fluorescent in water and lights up only once it inserts into a bilayer, so the background is essentially zero.",
+     "components": [
+      {
+       "name": "FM 4-64",
+       "gramsPerLiter": 1,
+       "note": "1 mg/mL = 1.65 mM (MW 607.53). Water stocks are fine and avoid loading the cells with DMSO.",
+       "mwSource": "Vendor datasheet (Thermo T13320), dibromide salt, MW 607.53"
+      }
+     ],
+     "solvent": "deionized water or DMSO (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "0.22 um filter",
+     "storage": "-20 C in the dark, in small aliquots",
+     "shelfLife": "At least 1 year at -20 C protected from light",
+     "hazards": "Low hazard. Standard gloves.",
+     "notes": [
+      "1 ug/mL (a 1:1000 dilution) for 1-5 min is plenty for bacteria. Longer and the dye internalises, turning a crisp membrane outline into blobs.",
+      "Do not wash - unbound FM 4-64 is non-fluorescent, so washing gains nothing and costs cells.",
+      "A weak signal almost always means the dye never reached the membrane, not that the stock went bad.",
+      "FM 1-43 is the green-emitting equivalent, used identically.",
+      "It can be included in an agarose imaging pad at 1 ug/mL to outline cells throughout a time-lapse."
+     ],
+     "sources": [
+      {
+       "title": "Thermo Fisher product datasheets & fluorescence resources",
+       "url": "https://www.thermofisher.com/order/fluorescence-spectraviewer",
+       "license": "free technical sheet"
+      },
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      }
+     ]
+    },
+    {
+     "id": "phalloidin-stock-methanolic",
+     "name": "Fluorescent Phalloidin Stock (methanolic)",
+     "aka": [
+      "phalloidin conjugate stock"
+     ],
+     "summary": "The F-actin stain stock, supplied in methanol. The methanol is the point of failure - carry it into the staining solution and you depolymerise the actin you are trying to stain.",
+     "components": [
+      {
+       "name": "Fluorescent phalloidin conjugate",
+       "note": "Supplied as ~300 units (approximately 400 uM) in 1.5 mL methanol. Do not dry it down and do not dilute the stock itself.",
+       "hazard": "Phalloidin is a potent toxin from Amanita phalloides and is lethal by ingestion. Gloves, never mouth-pipette, chemical waste.",
+       "fromStock": null
+      },
+      {
+       "name": "Methanol (the supplied solvent)",
+       "percent": {
+        "value": 100,
+        "type": "v/v"
+       },
+       "note": "Keep the vial tightly capped - methanol evaporation concentrates the stock and is what usually ruins it.",
+       "hazard": "Highly flammable and acutely toxic."
+      }
+     ],
+     "solvent": "methanol - as supplied",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "not applicable",
+     "storage": "-20 C in the dark, tightly capped",
+     "shelfLife": "At least 1 year at -20 C if the vial stays sealed",
+     "hazards": "Phalloidin is acutely toxic by ingestion - it is the toxin that makes the death cap lethal. Gloves at all times, never mouth-pipette, dispose of as chemical waste. The methanol solvent is flammable and toxic.",
+     "notes": [
+      "Working dilution is typically 1:400 in PBS + 1% BSA for 20-30 min.",
+      "Before diluting, either let the methanol evaporate from the aliquot or make sure the final methanol is under 1%. Methanol depolymerises F-actin.",
+      "Fix with formaldehyde only. Methanol fixation destroys F-actin and there will be nothing left for phalloidin to bind.",
+      "Conjugates exist in every Alexa colour - check the Microscopy module's panel builder before committing."
+     ],
+     "sources": [
+      {
+       "title": "Thermo Fisher product datasheets & fluorescence resources",
+       "url": "https://www.thermofisher.com/order/fluorescence-spectraviewer",
+       "license": "free technical sheet"
+      },
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      }
+     ]
+    },
+    {
+     "id": "harris-haematoxylin",
+     "name": "Haematoxylin, Harris (mercury-free)",
+     "aka": [
+      "Harris's haematoxylin",
+      "hematoxylin"
+     ],
+     "summary": "The nuclear stain in H&E. Haematoxylin is oxidised to haematein and complexed with an aluminium mordant, which is what actually binds chromatin.",
+     "components": [
+      {
+       "name": "Haematoxylin",
+       "gramsPerLiter": 5,
+       "note": "Dissolve in the ethanol first - it will not go into water.",
+       "mwSource": "PubChem CID 442514, MW 302.28"
+      },
+      {
+       "name": "Ethanol, 100%",
+       "percent": {
+        "value": 5,
+        "type": "v/v"
+       },
+       "note": "50 mL/L, to dissolve the haematoxylin.",
+       "hazard": "Highly flammable."
+      },
+      {
+       "name": "Aluminium potassium sulfate dodecahydrate (potash alum)",
+       "gramsPerLiter": 100,
+       "note": "The mordant. Dissolve in warm water.",
+       "mwSource": "PubChem CID 24856, MW 474.39"
+      },
+      {
+       "name": "Sodium iodate",
+       "gramsPerLiter": 0.5,
+       "note": "The oxidant, replacing the mercuric oxide of the original formulation.",
+       "hazard": "Oxidiser; harmful if swallowed."
+      },
+      {
+       "name": "Glacial acetic acid",
+       "percent": {
+        "value": 4,
+        "type": "v/v"
+       },
+       "note": "40 mL/L, added last. It sharpens the nuclear staining.",
+       "hazard": "Corrosive; flammable."
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "not applicable - filter through paper before every use",
+     "storage": "Room temperature in a stoppered bottle",
+     "shelfLife": "6 months. Filter before each use; discard when staining goes weak.",
+     "hazards": "The ORIGINAL Harris formulation uses mercuric oxide as the oxidant - a serious toxic and environmental hazard. This recipe uses sodium iodate instead. Glacial acetic acid is corrosive, ethanol is flammable.",
+     "notes": [
+      "Preparation: dissolve the haematoxylin in the ethanol; separately dissolve the alum in warm water; combine, bring to the boil, remove from heat and add the sodium iodate; cool rapidly, then add the acetic acid.",
+      "Filter before EVERY use. Haematoxylin oxidises in the bottle and forms a metallic surface scum that transfers straight onto the section.",
+      "Haematoxylin itself is colourless - the dye is haematein, its oxidation product. An over-oxidised old bottle stains weakly.",
+      "This is a regressive stain: you deliberately overstain and then differentiate back in acid alcohol. Mayer's is the progressive alternative and needs no differentiation.",
+      "Always follow with bluing in Scott's tap water substitute - the colour change from red-purple to blue is a pH effect, not another stain."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      }
+     ]
+    },
+    {
+     "id": "eosin-y-1pct-alcoholic",
+     "name": "Eosin Y, 1% Alcoholic",
+     "aka": [
+      "alcoholic eosin",
+      "eosin Y working solution"
+     ],
+     "summary": "The counterstain in H&E. An acidic dye that binds basic proteins, colouring cytoplasm, collagen and muscle in graded pinks.",
+     "components": [
+      {
+       "name": "Eosin Y, disodium salt",
+       "gramsPerLiter": 10,
+       "note": "1% (w/v).",
+       "mwSource": "PubChem CID 11048, MW 691.85"
+      },
+      {
+       "name": "Ethanol, 70%",
+       "percent": {
+        "value": 100,
+        "type": "v/v"
+       },
+       "note": "The solvent - alcoholic eosin differentiates during dehydration, which is why H&E uses it rather than the aqueous version.",
+       "hazard": "Highly flammable."
+      },
+      {
+       "name": "Glacial acetic acid",
+       "percent": {
+        "value": 0.05,
+        "type": "v/v"
+       },
+       "note": "0.5 mL/L - a few drops. It sharpens the differentiation.",
+       "hazard": "Corrosive."
+      }
+     ],
+     "solvent": "70% ethanol (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "not applicable",
+     "storage": "Room temperature in a stoppered bottle",
+     "shelfLife": "At least 1 year",
+     "hazards": "Ethanol is highly flammable. Glacial acetic acid is corrosive. Eosin itself is low hazard but stains everything.",
+     "notes": [
+      "Staining time is largely aesthetic - 30 s to 2 min. Be consistent across a set or you cannot compare sections.",
+      "The real control over the final pink is the 95% ethanol rinse afterwards, not the staining time. Watch the section rather than timing it.",
+      "Eosin Y is itself fluorescent (roughly Ex 524 / Em 544), so an H&E section cannot afterwards be used for green-channel fluorescence.",
+      "Phloxine B is often added at 0.05% to deepen the red."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      },
+      {
+       "title": "PubChem CID 11048 - Eosin Y, MW 691.85",
+       "url": "https://pubchem.ncbi.nlm.nih.gov/compound/11048",
+       "license": "public domain"
+      }
+     ]
+    },
+    {
+     "id": "scotts-tap-water",
+     "name": "Scott's Tap Water Substitute (bluing reagent)",
+     "aka": [
+      "Scott's bluing solution",
+      "STWS"
+     ],
+     "summary": "The alkaline rinse that converts haematoxylin-stained nuclei from red-purple to crisp blue. A pH change, not a stain.",
+     "components": [
+      {
+       "name": "Sodium bicarbonate",
+       "gramsPerLiter": 2,
+       "note": "Sets the alkaline pH that does the bluing.",
+       "mwSource": "PubChem CID 516892, MW 84.01"
+      },
+      {
+       "name": "Magnesium sulfate heptahydrate",
+       "gramsPerLiter": 20,
+       "note": "Provides the divalent cation.",
+       "mwSource": "PubChem CID 24843, MW 246.48"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": 8.0,
+     "adjustPHWith": "not normally adjusted - the bicarbonate sets it at about pH 8",
+     "sterilization": "not required",
+     "storage": "Room temperature",
+     "shelfLife": "6 months; a mould bloom is common in an open dish - remake it then",
+     "hazards": "Low hazard.",
+     "notes": [
+      "1 minute is enough. The nuclei visibly shift from red-purple to blue as you watch.",
+      "In hard-water regions plain running tap water does the same job, which is where the name comes from. Scott's substitute works everywhere and is reproducible.",
+      "Always rinse in water after bluing and before eosin - carrying alkali into the eosin ruins it.",
+      "Adding a crystal of thymol suppresses the mould growth that otherwise appears in an open staining dish."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      },
+      {
+       "title": "PubChem CID 24843 - Magnesium sulfate heptahydrate, MW 246.48",
+       "url": "https://pubchem.ncbi.nlm.nih.gov/compound/24843",
+       "license": "public domain"
+      }
+     ]
+    },
+    {
+     "id": "acid-alcohol-1pct",
+     "name": "Acid Alcohol, 1% (differentiator)",
+     "aka": [
+      "1% acid alcohol",
+      "HCl-ethanol"
+     ],
+     "summary": "The differentiation reagent in H&E. It strips excess haematoxylin out of cytoplasm and leaves it in the nuclei - and two seconds too long ruins the slide.",
+     "components": [
+      {
+       "name": "Hydrochloric acid, concentrated (37%)",
+       "percent": {
+        "value": 1,
+        "type": "v/v"
+       },
+       "note": "10 mL/L. ALWAYS add acid to the alcohol, never the reverse.",
+       "hazard": "Corrosive and produces harmful fumes. Fume hood, eye protection."
+      },
+      {
+       "name": "Ethanol, 70%",
+       "percent": {
+        "value": 99,
+        "type": "v/v"
+       },
+       "note": "990 mL/L.",
+       "hazard": "Highly flammable."
+      }
+     ],
+     "solvent": "70% ethanol (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "not applicable",
+     "storage": "Room temperature in a stoppered, acid-resistant bottle",
+     "shelfLife": "At least 1 year",
+     "hazards": "Concentrated HCl is corrosive and fumes - work in a fume hood with eye protection, and always add the acid to the alcohol rather than the other way round. Ethanol is flammable.",
+     "notes": [
+      "2-5 SECONDS is the usual dip. This is not a step you walk away from.",
+      "Check one slide under the microscope before differentiating the rest of the rack. Over-differentiation is not recoverable - the nuclei are pale and stay pale.",
+      "Rinse immediately in water to stop the reaction, then blue in Scott's tap water substitute.",
+      "A 3% version is used as the decolouriser in the Ziehl-Neelsen acid-fast stain, where the contact time is minutes rather than seconds."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      }
+     ]
+    },
+    {
+     "id": "nigrosin-10pct",
+     "name": "Nigrosin, 10% (negative stain)",
+     "aka": [
+      "nigrosine negative stain"
+     ],
+     "summary": "A negative stain. It does not colour the cells at all - it darkens the background, so cells and capsules show as clear shapes with no heat fixation and no shrinkage.",
+     "components": [
+      {
+       "name": "Nigrosin (water-soluble)",
+       "percent": {
+        "value": 10,
+        "type": "w/v"
+       },
+       "note": "A dye mixture rather than a defined compound - treat as an irritant and expect batch variation."
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "Autoclave 121 C 15 min, or 0.22 um filter - it is worth keeping sterile since it sits around for years",
+     "storage": "Room temperature",
+     "shelfLife": "Indefinite. Filter if it throws a sediment.",
+     "hazards": "Nigrosin is an irritant and an undefined dye mixture. It stains skin, clothing and bench indelibly.",
+     "notes": [
+      "Never heat-fix a negative stain. Heat collapses capsules, which is precisely why this method exists.",
+      "Mix a loopful of culture into a small drop, then draw a thin film with the edge of a second slide - the same motion as a blood smear. Air-dry only; no rinse.",
+      "A too-thick smear is the usual failure. The dried film should be a barely visible grey wash, not a black stripe.",
+      "India ink is used identically and is the traditional choice for Cryptococcus in cerebrospinal fluid.",
+      "Because nothing shrinks, negative staining gives an honest cell size - heat-fixed cells are measurably smaller."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      }
+     ]
+    },
+    {
+     "id": "malachite-green-5pct",
+     "name": "Malachite Green, 5% (endospore stain)",
+     "aka": [
+      "Schaeffer-Fulton primary stain"
+     ],
+     "summary": "The primary stain in the Schaeffer-Fulton endospore procedure. It only enters the spore coat under steam, and that is what makes the stain specific.",
+     "components": [
+      {
+       "name": "Malachite green (oxalate or chloride)",
+       "percent": {
+        "value": 5,
+        "type": "w/v"
+       },
+       "note": "5 g per 100 mL.",
+       "hazard": "Toxic; suspected carcinogen and mutagen. Gloves and eye protection; weigh carefully.",
+       "mwSource": "Malachite green chloride, MW 364.91"
+      }
+     ],
+     "solvent": "deionized water (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "not required",
+     "storage": "Room temperature in a dark bottle",
+     "shelfLife": "At least 1 year. Filter if it sediments.",
+     "hazards": "Malachite green is toxic and a suspected carcinogen and mutagen. Gloves and eye protection; steam it in a fume hood if you have one. The steaming step is a scald hazard.",
+     "notes": [
+      "The heat is not optional. Without steaming, the dye does not enter the spore and the stain simply fails.",
+      "Keep the slide wet during the 5 min of steaming - top up the stain as it evaporates. Letting it bake dry is the classic failure.",
+      "Counterstain with 0.5% safranin for 30 s. Safranin is already in this library as the Gram counterstain (gram-safranin-counterstain).",
+      "Check by phase contrast first: if the culture has not sporulated, spores are absent and the stain will look like a failure when it is not."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Cold Spring Harbor Protocols - recipes",
+       "url": "http://cshprotocols.cshlp.org/",
+       "license": "free to read"
+      }
+     ]
+    },
+    {
+     "id": "agarose-imaging-pad",
+     "name": "Agarose Imaging Pad, 1.5%",
+     "aka": [
+      "agar pad",
+      "agarose pad"
+     ],
+     "summary": "A flat, nutrient-containing pad that holds bacteria in a single focal plane so single cells can be followed for hours.",
+     "components": [
+      {
+       "name": "Agarose (low-melt or standard, molecular biology grade)",
+       "percent": {
+        "value": 1.5,
+        "type": "w/v"
+       },
+       "note": "Low-melt sets softer and cuts more cleanly; standard agarose gives a firmer pad that holds focus better over a long run."
+      },
+      {
+       "name": "Growth medium (filtered)",
+       "percent": {
+        "value": 100,
+        "type": "v/v"
+       },
+       "note": "Use a defined low-fluorescence medium (M9 + carbon source) if you are imaging a weak green reporter - rich broth autofluoresces strongly."
+      },
+      {
+       "name": "Inducer / antibiotic / membrane dye (optional)",
+       "note": "Add below 50 C. FM 4-64 at 1 ug/mL in the pad outlines cells for the whole movie.",
+       "fromStock": null
+      }
+     ],
+     "solvent": "growth medium (bring to final volume)",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "Melt in a microwave in short bursts with swirling; that also sterilises it",
+     "storage": "Make fresh - a stored pad dries and cracks",
+     "shelfLife": "Same day. Pads are a make-and-use reagent.",
+     "hazards": "Molten agarose superheats in a microwave and is a scald hazard - swirl gently and use a heat-resistant glove.",
+     "notes": [
+      "Cool to about 50 C before adding anything heat-labile. Above that you destroy it; below about 45 C the agarose sets while you pipette.",
+      "Cast between slides: two slides as spacers, one as a base, and a fourth laid flat on top. The spacers set the thickness.",
+      "Dry the pad surface for 2-5 min before applying cells. Too wet and the cells swim; too dry and the pad cracks and growth stops. This is the step that takes practice.",
+      "Seal the coverslip with VALAP or silicone grease or the pad dries within an hour.",
+      "1.5-2% is right for E. coli and B. subtilis; softer 1% pads suit larger or more fragile cells."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Bio-protocol / protocols.io open method repositories",
+       "url": "https://www.protocols.io/",
+       "license": "CC-BY"
+      }
+     ]
+    },
+    {
+     "id": "valap-sealant",
+     "name": "VALAP Coverslip Sealant",
+     "aka": [
+      "vaseline-lanolin-paraffin",
+      "Valap"
+     ],
+     "summary": "The standard home-made coverslip sealant for live imaging. It melts at about 60 C, sets instantly on glass, and is not toxic to cells.",
+     "components": [
+      {
+       "name": "Petroleum jelly (Vaseline)",
+       "percent": {
+        "value": 33.3,
+        "type": "w/v"
+       },
+       "note": "Equal parts by mass."
+      },
+      {
+       "name": "Lanolin (anhydrous)",
+       "percent": {
+        "value": 33.3,
+        "type": "w/v"
+       },
+       "note": "Equal parts by mass."
+      },
+      {
+       "name": "Paraffin wax",
+       "percent": {
+        "value": 33.3,
+        "type": "w/v"
+       },
+       "note": "Equal parts by mass. Raising the paraffin fraction makes a harder, higher-melting sealant."
+      }
+     ],
+     "solvent": "none - the three components are melted together",
+     "finalPH": null,
+     "adjustPHWith": null,
+     "sterilization": "the melting step effectively sterilises it",
+     "storage": "Room temperature in a small beaker or tin, remelted on a hotplate as needed",
+     "shelfLife": "Indefinite - remelt as often as you like",
+     "hazards": "Melt gently on a hotplate at about 70 C. Paraffin is flammable - never melt it over an open flame or in a microwave.",
+     "notes": [
+      "Melt equal parts by mass together at ~70 C, stir, and let it set. Remelt to use.",
+      "Apply with a cotton bud or a small brush around the four edges of the coverslip. It sets on contact with cool glass.",
+      "Non-toxic to cells at these temperatures, unlike nail varnish, whose solvents kill live samples and quench some fluorophores.",
+      "Use nail varnish only on fixed, mounted samples - never on live cells."
+     ],
+     "sources": [
+      {
+       "title": "OpenWetWare - open lab protocol wiki",
+       "url": "https://openwetware.org/wiki/Protocols",
+       "license": "free protocol wiki"
+      },
+      {
+       "title": "Bio-protocol / protocols.io open method repositories",
+       "url": "https://www.protocols.io/",
+       "license": "CC-BY"
       }
      ]
     }

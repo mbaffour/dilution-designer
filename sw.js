@@ -1,12 +1,13 @@
 /* Dilution Designer — service worker.
    Precaches the whole app so it works with no network (bench / cold room / BSL suite).
    Bump CACHE on every release so clients pick the new version up. */
-const CACHE = 'dd-v1.6.0';   // BUMP THIS ON EVERY RELEASE or clients keep the old build
+const CACHE = 'dd-v1.7.0';   // BUMP THIS ON EVERY RELEASE or clients keep the old build
 
 const CORE = [
   './',
   './index.html',
   './reagent-library.json',
+  './dye-library.json',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
