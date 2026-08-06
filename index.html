@@ -356,6 +356,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <button class="mode-tab" id="modeTabCalc" onclick="setMode('calc')">🧬 Calculators</button>
     <button class="mode-tab" id="modeTabProto" onclick="setMode('proto')">📋 Protocols</button>
     <button class="mode-tab" id="modeTabPhg" onclick="setMode('phg')">🦠 Phage Planner</button>
+    <button class="mode-tab" id="modeTabMic" onclick="setMode('mic')">🔬 Microscopy</button>
     <button class="mode-tab" id="modeTabGel" onclick="setMode('gel')">🧪 Gel Sim</button>
     <button class="mode-tab" id="modeTabNb" onclick="setMode('notebook')">📓 Notebook</button>
   </div>
@@ -550,6 +551,22 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div id="mbcList" class="mbc-list" role="listbox" aria-label="Calculators"></div>
     </aside>
     <section class="mbc-main" id="mbcMain"></section>
+  </div>
+</div>
+
+<!-- ══════════ MICROSCOPY MODULE ══════════ -->
+<div id="micView" style="display:none;padding:16px 20px 60px;max-width:1180px;margin:0 auto;">
+  <div class="mbc-grid">
+    <aside class="mbc-nav">
+      <div class="sl">Dye &amp; stain library</div>
+      <button class="btn ac" onclick="MIC.panel()" style="width:100%;justify-content:center;">🎛 Panel builder</button>
+      <input id="micSearch" placeholder="Search (e.g. DAPI, actin, lysosome)…" oninput="MIC.filter()" autocomplete="off" aria-label="Search dyes and stains">
+      <div id="micChips"></div>
+      <div id="micList" class="mbc-list" role="listbox" aria-label="Dyes and stains"></div>
+      <button class="btn" onclick="MIC.add()" style="width:100%;justify-content:center;">＋ Add a dye</button>
+      <div id="micLibStatus" class="mbc-hint" aria-live="polite"></div>
+    </aside>
+    <section class="mbc-main" id="micMain"></section>
   </div>
 </div>
 
@@ -1112,6 +1129,7 @@ var SCI=(function(){
       else if(appMode==='dilcalc'&&typeof dcInit==='function'){ dcCalc(); dcSerial(); dcConvert(); dcWeigh(); }
       else if(appMode==='home'&&window.renderHome) renderHome();
       else if(appMode==='phg'&&window.PHG) PHG.render();
+      else if(appMode==='mic'&&window.MIC) MIC.recompute();
       else if(typeof update==='function') update();
     }catch(e){}
   }
@@ -1256,12 +1274,13 @@ function setMode(m) {
   var mtG=document.getElementById('modeTabGel'); if(mtG) mtG.classList.toggle('active',m==='gel');
   var mtN=document.getElementById('modeTabNb'); if(mtN) mtN.classList.toggle('active',m==='notebook');
   var mtL=document.getElementById('modeTabPhg'); if(mtL) mtL.classList.toggle('active',m==='phg');
+  var mtM=document.getElementById('modeTabMic'); if(mtM) mtM.classList.toggle('active',m==='mic');
   // Home, Reagent Prep, Dilution Calc and Calculators are self-contained views — hide the plate workspace when active.
   var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView'), dv=document.getElementById('dilcalcView'),
       hv=document.getElementById('homeView'), cv=document.getElementById('calcView'), pv=document.getElementById('protoView'),
       gv=document.getElementById('gelView'), nv=document.getElementById('notebookView'),
-      lv=document.getElementById('phgView');
-  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto'||m==='gel'||m==='notebook'||m==='phg');
+      lv=document.getElementById('phgView'), mv=document.getElementById('micView');
+  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto'||m==='gel'||m==='notebook'||m==='phg'||m==='mic');
   if(rv) rv.style.display = m==='reagent'?'':'none';
   if(dv) dv.style.display = m==='dilcalc'?'':'none';
   if(hv) hv.style.display = m==='home'?'':'none';
@@ -1270,6 +1289,7 @@ function setMode(m) {
   if(gv) gv.style.display = m==='gel'?'':'none';
   if(nv) nv.style.display = m==='notebook'?'':'none';
   if(lv) lv.style.display = m==='phg'?'':'none';
+  if(mv) mv.style.display = m==='mic'?'':'none';
   if(appEl) appEl.style.display = special?'none':'';
   if(m==='reagent'){ rpInit(); return; }
   if(m==='dilcalc'){ dcInit(); return; }
@@ -1279,6 +1299,7 @@ function setMode(m) {
   if(m==='gel'){ if(window.GEL) GEL.init(); return; }
   if(m==='notebook'){ if(window.NB) NB.init(); return; }
   if(m==='phg'){ if(window.PHG) PHG.init(); return; }
+  if(m==='mic'){ if(window.MIC) MIC.init(); return; }
   document.getElementById('sbPlasmid').style.display = m==='plasmid'?'':'none';
   document.getElementById('sbPhage').style.display   = m==='phage'?'':'none';
   document.getElementById('moiPanel').style.display  = m==='phage'?'':'none';
@@ -3735,7 +3756,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
 
 /* ══════════════════════════ HOME HUB + MOLBIO CALCULATORS (MBC) ══════════════════════════ */
 (function(){
-  var MB_VERSION='v1.0 (2026-07)';
+  var MB_VERSION='v1.1 (2026-08)';
   // ---------- styles ----------
   var css = `
   #homeView,#calcView{color:var(--text);}
@@ -4138,6 +4159,50 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
         var warn=[], proto='';
         if(v.vol>0){ var g=M*MW*vL(v.vol,'mL')/pur; rows.push({label:'Weigh out',value:mass(g),flag:'ok'}); proto='For '+fmt(v.vol)+' mL: weigh '+mass(g)+', dissolve and bring to '+fmt(v.vol)+' mL.'; if(g<1e-3) warn.push(mass(g)+' is below a typical balance — make a concentrated stock and dilute.'); }
         return {rows:rows, warn:warn, protocol:proto, note:'M = 10·%w/v ÷ MW; mg/mL = M·MW; grams = M·MW·V·(100/purity)'};
+      } },
+    // Same dyeWorking() the Microscopy module calls, so the two surfaces cannot
+    // disagree about a volume — the arrangement planInfection() already uses.
+    { id:'dyedil', name:'Fluorophore / stain working dilution', group:G_CONC,
+      tags:'dye stain fluorophore dapi hoechst working dilution stock nM µg/mL fold antibody conjugate microscopy',
+      blurb:'Stock to working solution for any dye, stain or conjugated antibody — including the intermediate dilution when the neat volume is too small to pipette.',
+      fields:[
+        {k:'stock',label:'Stock concentration',kind:'num',def:1},
+        {k:'stockU',label:'Stock unit',kind:'select',def:'mg/mL',opts:['nM','µM','mM','ng/mL','µg/mL','mg/mL']},
+        {k:'mw',label:'Molecular weight (g/mol)',kind:'num',def:350.25,hint:'needed only to cross between molar and mass units'},
+        {k:'target',label:'Target working concentration',kind:'num',def:300},
+        {k:'targetU',label:'Target unit',kind:'select',def:'nM',opts:[{v:'nM',label:'nM'},{v:'µM',label:'µM'},{v:'mM',label:'mM'},{v:'ng/mL',label:'ng/mL'},{v:'µg/mL',label:'µg/mL'},{v:'mg/mL',label:'mg/mL'},{v:'fold',label:'1:X (fold)'}]},
+        {k:'n',label:'Number of samples',kind:'num',def:6,min:1},
+        {k:'volPer',label:'Volume per sample (µL)',kind:'num',def:200,min:0},
+        {k:'over',label:'Overage (%)',kind:'num',def:10,min:0},
+        {k:'minpip',label:'Smallest reliable pipette (µL)',kind:'num',def:2,min:0.1},
+        {k:'factor',label:'Intermediate dilution factor',kind:'num',def:10,min:2}
+      ],
+      compute:function(v){
+        if(!(v.stock>0&&v.volPer>0)) return null;
+        var r=dyeWorking({stockConc:v.stock,stockUnit:v.stockU,mw:v.mw,
+                          targetConc:v.target,targetUnit:v.targetU,
+                          n:v.n,volPer:v.volPer,over:v.over,minPip:v.minpip,factor:v.factor});
+        if(!(r.total>0)) return {warn:r.warn.length?r.warn:['Enter a stock, a target and a volume per sample.']};
+        function uL(x){ return fmt(x,3)+' µL'; }
+        var rows=[{label:'Dilution needed',value:'1 : '+fmt(r.fold,4),flag:'ok'},
+                  {label:'Working solution',value:uL(r.total),flag:'ok'},
+                  {label:'',value:v.n+' × '+fmt(v.volPer,3)+' µL + '+fmt(v.over)+'% overage',sub:true}];
+        var proto;
+        if(r.series){
+          rows.push({label:'Intermediate',value:'1 : '+fmt(r.interFold,4)});
+          rows.push({label:'Take intermediate',value:uL(r.interDraw),flag:'ok'});
+          rows.push({label:'Add diluent',value:uL(r.diluent),flag:'ok'});
+          var lad=[];
+          for(var k=1;k<=r.k;k++) lad.push(['1 : '+fmt(Math.pow(v.factor,k),4),uL(r.series.prep[k]),uL(r.series.transferIn[k]),uL(r.series.diluent[k])]);
+          proto='Make a 1:'+fmt(r.interFold,4)+' intermediate, then '+uL(r.interDraw)+' of it + '+uL(r.diluent)+' diluent → '+uL(r.total)+'.';
+          return {rows:rows, warn:r.warn, protocol:proto,
+                  table:{cols:['Intermediate','Make','Transfer in','Diluent'],rows:lad},
+                  note:'fold = stock ÷ target; the ladder is sized so every transfer stays pipettable'};
+        }
+        rows.push({label:'Take stock',value:uL(r.stockDraw),flag:'ok'});
+        rows.push({label:'Add diluent',value:uL(r.diluent),flag:'ok'});
+        proto=uL(r.stockDraw)+' stock + '+uL(r.diluent)+' diluent → '+uL(r.total)+' at '+fmt(v.target)+' '+v.targetU+'.';
+        return {rows:rows, warn:r.warn, protocol:proto, note:'fold = stock ÷ target concentration'};
       } },
     { id:'rcf', name:'Centrifuge RCF ↔ RPM', group:G_CONC, tags:'centrifuge rcf rpm g-force rotor radius spin',
       blurb:'Convert between relative centrifugal force (×g) and rotor speed.',
@@ -4593,6 +4658,106 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       finally{ if(_keep!=null) lsSet(LYS_KEY,_keep); else lsDel(LYS_KEY); }
       n++; if(!Array.isArray(lysAll())) fails.push('lysAll must return an array even with no stored library');
     }
+
+    // ── microscopy: dilution math, channel assignment and panel conflicts.
+    // Dye objects are written out inline rather than read from dye-library.json, so
+    // these assertions test the MATH and do not depend on a fetch having resolved.
+    // Spectral maxima below are the published vendor values.
+    if(window.dyeWorking&&window.micChannelFor){
+      var _dapi ={name:'DAPI',       mw:350.25, spectra:{ex:358,em:461,fwhmEx:80,fwhmEm:90}},
+          _fitc ={name:'FITC',       mw:389.38, spectra:{ex:495,em:519,fwhmEx:70,fwhmEm:65}},
+          _af488={name:'AF488',      mw:643.41, spectra:{ex:495,em:519,fwhmEx:70,fwhmEm:65}},
+          _tritc={name:'TRITC',      mw:443.52, spectra:{ex:550,em:573,fwhmEx:70,fwhmEm:65}},
+          _cy5  ={name:'Cy5',        mw:792,    spectra:{ex:649,em:670,fwhmEx:70,fwhmEm:65}};
+
+      // 1 mg/mL DAPI is 1/350.25 mol/L = 2.855 mM. 300 nM is therefore a 1:9517
+      // dilution — hand-computed, not read off the app.
+      n++; var _fold=micDilutionFold(1,'mg/mL',300,'nM',350.25);
+      if(!_near(_fold,9517.5,5)) fails.push('micDilutionFold(1 mg/mL → 300 nM, MW 350.25) = '+_fold+', want 9517.5');
+      // 300 nM × 350.25 g/mol = 1.0508e-4 g/L = 105.08 ng/mL.
+      n++; var _gpl=micToGPerL(300,'nM',350.25);
+      if(!_near(_gpl*1e6,105.075,0.05)) fails.push('300 nM DAPI should be 105.08 ng/mL, got '+(_gpl*1e6));
+      // Hoechst 33342 trihydrochloride trihydrate, MW 615.99: 1 µg/mL = 1.6234 µM.
+      n++; var _h=micToMolar(1,'µg/mL',615.99);
+      if(!_near(_h*1e6,1.6234,0.002)) fails.push('1 µg/mL Hoechst 33342 should be 1.623 µM, got '+(_h*1e6));
+      // Propidium iodide, MW 668.39: 30 µM = 20.05 µg/mL (the BacLight level).
+      n++; var _pi=micToGPerL(30,'µM',668.39);
+      if(!_near(_pi*1e3,20.052,0.02)) fails.push('30 µM PI should be 20.05 µg/mL, got '+(_pi*1e3));
+
+      // 1 mL of 300 nM working solution from a 1 mg/mL stock needs 1000/9517.5 =
+      // 0.1051 µL neat — under the 2 µL floor, so a 1:100 intermediate is chosen
+      // and the transfer becomes 10.51 µL.
+      n++; var _w=dyeWorking({stockConc:1,stockUnit:'mg/mL',mw:350.25,targetConc:300,targetUnit:'nM',
+                              n:1,volPer:1000,over:0,minPip:2,factor:10});
+      if(!_near(_w.total,1000,0.001)) fails.push('dyeWorking total = '+_w.total+', want 1000 µL');
+      if(!_near(_w.stockDraw,0.10508,1e-4)) fails.push('dyeWorking neat draw = '+_w.stockDraw+', want 0.1051 µL');
+      if(_w.k!==2) fails.push('dyeWorking should pick a 1:100 intermediate (k=2), got k='+_w.k);
+      n++; if(!_near(_w.interDraw,10.508,0.01)) fails.push('dyeWorking intermediate draw = '+_w.interDraw+', want 10.51 µL');
+      // Overage: 6 samples × 200 µL + 10% = 1320 µL.
+      n++; var _w2=dyeWorking({stockConc:1,stockUnit:'mg/mL',mw:350.25,targetConc:300,targetUnit:'nM',
+                               n:6,volPer:200,over:10,minPip:2,factor:10});
+      if(!_near(_w2.total,1320,0.001)) fails.push('dyeWorking with overage = '+_w2.total+', want 1320 µL');
+      // Fold mode needs no molecular weight at all: 1:500 into 1 mL = 2 µL + 998 µL.
+      n++; var _w3=dyeWorking({stockConc:1,stockUnit:'mg/mL',mw:0,targetConc:500,targetUnit:'fold',
+                               n:1,volPer:1000,over:0,minPip:1,factor:10});
+      if(!_near(_w3.stockDraw,2,1e-9)) fails.push('1:500 of 1 mL should draw 2 µL, got '+_w3.stockDraw);
+      if(!_near(_w3.diluent,998,1e-9)) fails.push('1:500 of 1 mL should add 998 µL diluent, got '+_w3.diluent);
+      // Without an MW, mass ⇄ molar cannot be bridged — it must refuse, not guess.
+      n++; var _w4=dyeWorking({stockConc:1,stockUnit:'mg/mL',mw:0,targetConc:300,targetUnit:'nM',
+                               n:1,volPer:1000,over:0,minPip:2,factor:10});
+      if(_w4.total!=null||!_w4.warn.length) fails.push('dyeWorking must refuse a mass→molar conversion with no MW');
+      // A target above the stock is not reachable by dilution.
+      n++; var _w5=dyeWorking({stockConc:1,stockUnit:'µM',mw:350.25,targetConc:10,targetUnit:'µM',
+                               n:1,volPer:1000,over:0,minPip:2,factor:10});
+      if(_w5.total!=null||!_w5.warn.length) fails.push('dyeWorking must refuse a target more concentrated than the stock');
+      // Reconstitution: 1 mg to 1 mg/mL is 1 mL = 1000 µL.
+      n++; if(!_near(micStockPrep(1,1,'mg/mL',350.25),1000,1e-6)) fails.push('micStockPrep(1 mg → 1 mg/mL) = '+micStockPrep(1,1,'mg/mL',350.25)+', want 1000 µL');
+      // 1 mg of DAPI to a 5 mM stock: 1e-3/350.25 mol = 2.855e-6 mol; /5e-3 M = 571 µL.
+      n++; if(!_near(micStockPrep(1,5,'mM',350.25),571.0,0.5)) fails.push('micStockPrep(1 mg → 5 mM, MW 350.25) = '+micStockPrep(1,5,'mM',350.25)+', want 571 µL');
+
+      // Channel assignment against the standard filter sets.
+      n++; var _ch=function(d){ var c=micChannelFor(d); return c?c.id:'—'; };
+      if(_ch(_dapi)!=='uv')     fails.push('DAPI (Em 461) should land in the blue channel, got '+_ch(_dapi));
+      if(_ch(_fitc)!=='green')  fails.push('FITC (Em 519) should land in the green channel, got '+_ch(_fitc));
+      if(_ch(_tritc)!=='red')   fails.push('TRITC (Em 573) should land in the red channel, got '+_ch(_tritc));
+      if(_ch(_cy5)!=='farred')  fails.push('Cy5 (Em 670) should land in the far-red channel, got '+_ch(_cy5));
+      // DAPI is poorly excited at its own 358 nm maximum by a 405 nm line, but not
+      // hopelessly so — this is why DAPI works on a violet laser at all.
+      n++; var _ex405=micExEff(_dapi,405);
+      if(!(_ex405>0.30&&_ex405<0.55)) fails.push('DAPI excitation at 405 nm modelled as '+_ex405+', expected 0.30–0.55');
+      n++; if(!_near(micExEff(_fitc,495),1,1e-9)) fails.push('a dye must be 100% excited at its own maximum');
+
+      // Two dyes with identical spectra cannot be separated — that must be reported.
+      n++; var _p1=micPanelCheck([_fitc,_af488],'confocal4');
+      if(!_p1.warnings.some(function(w){return w.kind==='collision';}))
+        fails.push('panelCheck must flag FITC + Alexa Fluor 488 as a channel collision');
+      // DAPI's long red tail reaching into the GFP band is the classic real-world
+      // bleed-through, and it has to be caught.
+      n++; var _p2=micPanelCheck([_dapi,_fitc],'confocal4');
+      if(!_p2.warnings.some(function(w){return w.kind==='bleed';}))
+        fails.push('panelCheck must flag DAPI bleed-through into the green channel');
+      // A well-separated panel must come back clean, or the check is just noise.
+      n++; var _p3=micPanelCheck([_dapi,_tritc],'confocal4');
+      if(_p3.warnings.some(function(w){return w.kind==='collision';}))
+        fails.push('panelCheck should not flag DAPI + TRITC as a collision');
+      n++; if(_p3.rows.length!==2) fails.push('panelCheck should assign both dyes a channel, got '+_p3.rows.length);
+      // Non-fluorescent entries are reported, never silently dropped.
+      n++; var _p4=micPanelCheck([_fitc,{name:'Crystal violet',spectra:null}],'confocal4');
+      if(_p4.rows.length!==1||_p4.nonFluor.length!==1)
+        fails.push('panelCheck must separate non-fluorescent stains from the assignment table');
+
+      // Overlap index: a property check, not a magic number. Emission separated by
+      // 209 nm must score far below emission separated by 58 nm.
+      n++; var _oNear=micOverlapIndex(_dapi,_fitc), _oFar=micOverlapIndex(_dapi,_cy5);
+      if(!(_oFar<_oNear)) fails.push('micOverlapIndex: DAPI/Cy5 ('+_oFar+') should score below DAPI/FITC ('+_oNear+')');
+      n++; if(!_near(micOverlapIndex(_fitc,_af488),1,1e-6)) fails.push('identical spectra must have an overlap index of 1, got '+micOverlapIndex(_fitc,_af488));
+      // Emission fractions are a probability distribution: the whole axis is 1.
+      n++; if(!_near(micEmFrac(_fitc,0,2000),1,1e-3)) fails.push('micEmFrac over the whole axis = '+micEmFrac(_fitc,0,2000)+', want 1');
+      // The split-normal band is asymmetric: more of the emission lies to the red of
+      // the maximum than to the blue of it. That asymmetry is what drives bleed-through.
+      n++; var _blue=micEmFrac(_fitc,0,519), _red=micEmFrac(_fitc,519,2000);
+      if(!(_red>_blue)) fails.push('emission should be red-tailed: blue side '+_blue+', red side '+_red);
+    }
     return {total:n, passed:n-fails.length, failures:fails};
   }
 
@@ -4610,6 +4775,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     // Counts come from the live data where it has loaded, so the hub can never drift from reality.
     var nRec=216; try{ if(window.rpLib&&rpLib.categories) nRec=rpLib.categories.reduce(function(a,c){return a+(c.recipes?c.recipes.length:0);},0); }catch(e){}
     var nLad=16; try{ if(window.GEL&&GEL._model) nLad=GEL._model.ladders().length; }catch(e){}
+    var nDye=79; try{ if(window.MIC&&MIC.list&&MIC.list.length) nDye=MIC.list.length; }catch(e){}
     var mods=[
       {m:'plasmid',icon:'🧫',title:'Plate Planner',desc:'Design 96 / 384 & multi-plate layouts — plasmid/induction & phage/MOI, master mix, randomization, bench checks.'},
       {m:'dilcalc',icon:'💧',title:'Dilution & Molarity',desc:'C1V1 across every unit, serial dilutions, molarity↔mass, and weigh-outs.'},
@@ -4617,6 +4783,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       {m:'calc',icon:'🧬',title:'Molbio Calculators',desc:CALCS.length+' bench calculators: ng↔pmol, A260, ligation, primer Tm, OD→cells, phage titer/MOI, %↔molarity & more.'},
       {m:'proto',icon:'📋',title:'Protocols',desc:(window.PROTO?PROTO.list.length:21)+' step-by-step protocols — miniprep, CTAB gDNA, gels, transformation, plaque assay — that rescale as you change the numbers.'},
       {m:'phg',icon:'🦠',title:'Phage Planner',desc:'Keep your lysates and their titers, then work out the volume for an infection — by MOI, total PFU or final PFU/mL — and the dilution to make when that volume is too small to pipette.'},
+      {m:'mic',icon:'🔬',title:'Microscopy & Dyes',desc:nDye+' dyes and stains — what to use for what, at what concentration, in which channel. Spectra, filter/laser matching, panel bleed-through checks, and the working dilution worked out for your sample count.'},
       {m:'gel',icon:'🧪',title:'Gel Simulator',desc:'Predict an agarose or SDS-PAGE run before you pour it — '+nLad+' vendor ladders, band-resolution warnings and a best-% suggestion.'},
       {m:'notebook',icon:'📓',title:'Lab Notebook',desc:'Pull results from any module into a dated entry, add your own notes, and export to Markdown, HTML, PDF, Word, CSV or JSON.'}
     ];
@@ -5325,7 +5492,352 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
         {t:'Run the gel', d:`Heat all samples <b>95 °C for 5 min</b>, spin 1 min, and load <b>10–15 µL</b> per lane on a 12% gel in the order: ladder, uninduced, induced T, induced S, induced P. Stain with Coomassie (see the SDS-PAGE protocol).`},
         {t:'Read the result', d:`A band present in the induced lanes and absent from the uninduced lane at roughly the predicted mass is your protein. <b>Mostly in S</b> → scale up as-is. <b>Mostly in P</b> → inclusion bodies: repeat at <b>15–20 °C</b> with <b>0.05–0.1 mM</b> IPTG, or change strain/tag. <b>Nothing anywhere</b> → check the construct by sequencing before you change any condition.`} ]; },
      notes:['IPTG is a non-hydrolysable lactose analogue: E. coli cannot metabolise it, so unlike lactose the inducer concentration stays roughly constant over the whole induction.', 'In T7 systems IPTG acts twice over — it de-represses the chromosomal T7 RNA polymerase gene and the lac operator in front of your gene — which is why induction is so strong and why leaky basal expression is such a problem for toxic products.', 'Strains carrying pLysS/pLysE or the Lemo21(DE3) system throttle basal T7 polymerase activity and are the first thing to try for a construct that will not clone or grow.', 'Rich media (TB, 2×YT) give far more biomass per mL than LB, but they also acidify — buffer with phosphate for long low-temperature inductions.', 'Auto-induction medium (lactose-based, e.g. ZYM-5052) removes the need to watch OD and to add anything at all, at the cost of less control over the induction point.', 'If the protein stays insoluble at low temperature, the next levers in order of effort are: solubility tag (MBP, SUMO, thioredoxin), co-expressed chaperones, then refolding from inclusion bodies.', 'Sources: BL21(DE3) induction conditions per NEB published protocol for C2527 (OD₆₀₀ 0.4–0.8, 1 M IPTG stock to 1 mM final, 3–5 h at 37 °C, lower temperature 15–30 °C for insoluble product); expression practice per OpenWetWare \'Protein expression in E. coli BL21 DE3\' and protocols.io open protocols; IPTG identity C9H18O5S, MW 238.30 from PubChem CID 656894; imidazole MW 68.08 CID 795; DTT MW 154.3 CID 439196.'],
-     sources:OWW }
+     sources:OWW },
+
+   /* ── Microscopy & staining ─────────────────────────────────────────────
+      Volumes scale off coverslip or well count the same way the rest of the
+      protocols do. Dye working concentrations are cross-referenced to the
+      Microscopy module, which will compute the exact dilution for you. */
+
+   { id:'if-coverslip', name:'Immunofluorescence on coverslips', group:'Microscopy & staining',
+     tags:'immunofluorescence if coverslip fix permeabilise block primary secondary antibody dapi mount antifade microscopy staining',
+     blurb:'The standard fix → permeabilise → block → primary → secondary → DAPI → mount workflow. Every volume scales with the number of coverslips.',
+     time:'~4 h, or overnight for the primary', safety:'Paraformaldehyde is a probable human carcinogen and a respiratory sensitiser — make and use it in a fume hood, and collect the waste as chemical waste. Triton X-100 is an eye irritant. Sodium azide in antibody stocks forms explosive metal azides in old copper or lead plumbing — never pour it down a drain.',
+     params:[{k:'n',label:'Number of coverslips',def:12,min:1},{k:'dia',label:'Coverslip diameter (mm)',def:13,min:5},
+             {k:'pri',label:'Primary antibody dilution (1:X)',def:200,min:1},{k:'sec',label:'Secondary antibody dilution (1:X)',def:500,min:1}],
+     reagents:function(v){
+       // A drop on a 13 mm coverslip is ~50 µL; scale with area so a 25 mm round is not under-covered.
+       var drop=Math.max(30, 50*Math.pow(v.dia/13,2)), well=drop*4, over=1.15;
+       return [
+       ['4% PFA in PBS', uL(well*v.n), f(well)+' µL per coverslip'],
+       ['PBS (washes)', mL(well*v.n*9/1000), '3 washes × 3 steps'],
+       ['0.1% Triton X-100 in PBS', uL(well*v.n), 'permeabilisation'],
+       ['Blocking buffer (5% BSA or normal serum in PBS-T)', uL(well*v.n), f(well)+' µL per coverslip'],
+       ['Primary antibody', uL(drop*v.n*over/v.pri), '1:'+f(v.pri)+' in '+uL(drop*v.n*over)+' antibody diluent'],
+       ['Secondary antibody', uL(drop*v.n*over/v.sec), '1:'+f(v.sec)+' in '+uL(drop*v.n*over)+' antibody diluent'],
+       ['Antibody diluent (1% BSA in PBS-T)', uL(drop*v.n*over*2), 'primary + secondary'],
+       ['DAPI, 300 nM working', uL(well*v.n), 'from a 1 mg/mL stock, diluted 1:10,000'],
+       ['Antifade mounting medium', uL(8*v.n), '~8 µL per coverslip'],
+       ['Slides', Math.ceil(v.n/3)+' slides', 'three 13 mm coverslips fit one slide'] ]; },
+     steps:function(v){
+       var drop=Math.max(30, 50*Math.pow(v.dia/13,2)), well=drop*4;
+       return [
+       {t:'Fix', d:'Aspirate the medium and add <b>'+f(well)+' µL of 4% PFA</b> per coverslip. <b>15 min at room temperature.</b> Do not let the cells dry out at any point from here on — one dry moment ruins the whole coverslip.'},
+       {t:'Wash', d:'Wash <b>3 × 5 min in PBS</b>, '+f(well)+' µL each.'},
+       {t:'Quench (optional but worth it)', d:'<b>100 mM glycine in PBS, 10 min.</b> This mops up free aldehyde and visibly cuts the background haze, especially with a bright secondary.'},
+       {t:'Permeabilise', d:'<b>0.1% Triton X-100 in PBS, 10 min.</b> Skip this only if your epitope is on the cell surface. If you are also staining F-actin, do not use methanol here — it destroys actin filaments.'},
+       {t:'Block', d:'<b>'+f(well)+' µL blocking buffer, 30–60 min at room temperature.</b> Use serum from the species the <i>secondary</i> was raised in — that is what blocks the non-specific binding you actually have.'},
+       {t:'Primary antibody', d:'Dilute the primary <b>1:'+f(v.pri)+'</b> in antibody diluent. Invert the coverslip cell-side down onto a <b>'+f(drop)+' µL</b> drop on parafilm in a humidified box. <b>1 h at room temperature, or overnight at 4 °C</b> for a weak target.'},
+       {t:'Wash', d:'Return the coverslip to the well and wash <b>3 × 5 min in PBS</b>.'},
+       {t:'Secondary antibody', d:'Dilute the secondary <b>1:'+f(v.sec)+'</b>. Invert onto a <b>'+f(drop)+' µL</b> drop and incubate <b>1 h at room temperature in the dark</b>. Everything from here on is done with the lights down.'},
+       {t:'Wash', d:'Wash <b>3 × 5 min in PBS</b>, in the dark.'},
+       {t:'Counterstain', d:'<b>300 nM DAPI, 5 min</b>, then wash <b>2 × 5 min in PBS</b>. The Microscopy module will work out the exact dilution for '+f(v.n)+' coverslips.'},
+       {t:'Mount', d:'Dip the coverslip in deionized water to remove salt (PBS crystals look exactly like structures), drain the edge on tissue, and invert onto <b>~8 µL of antifade</b> on a slide. Do not press.'},
+       {t:'Cure and store', d:'Cure flat in the dark — overnight at room temperature for a hard-setting medium. Seal with nail varnish if the medium stays liquid. Store at <b>4 °C in the dark</b>.'},
+       {t:'Run the controls', d:'A <b>secondary-only</b> coverslip is not optional — it is the only thing that tells you how much of your signal is the secondary binding non-specifically. Add an unstained coverslip too, to measure autofluorescence.'} ]; },
+     notes:['Titrate every new antibody. The vendor dilution is a starting point that assumes an abundant target and their sample, not yours.',
+            'Overnight at 4 °C usually beats 1 h at room temperature for a low-abundance epitope, and the background is often lower.',
+            'If the signal is punctate and uniform across the whole coverslip including cell-free areas, that is precipitated antibody — spin the diluted antibody at 14,000 × g for 5 min before use.',
+            'Methanol fixation is an alternative that permeabilises at the same time and works better for some cytoskeletal epitopes — but it destroys F-actin and most fluorescent proteins.'],
+     sources:OWW },
+
+   { id:'if-plate', name:'Immunofluorescence in a 96-well plate', group:'Microscopy & staining',
+     tags:'immunofluorescence if 96 well plate high content imaging screening antibody dapi microscopy',
+     blurb:'The same chemistry as the coverslip protocol, adapted for plate-based and high-content imaging. Volumes scale with the number of wells.',
+     time:'~4 h', safety:'Paraformaldehyde is a probable human carcinogen — fume hood, chemical waste. Never let wells run dry; in a plate the edge wells go first.',
+     params:[{k:'n',label:'Number of wells',def:96,min:1},{k:'vol',label:'Working volume per well (µL)',def:50,min:20},
+             {k:'sec',label:'Secondary antibody dilution (1:X)',def:1000,min:1}],
+     reagents:function(v){
+       var over=1.2, tot=v.n*v.vol*over;
+       return [
+       ['4% PFA in PBS', uL(tot), f(v.vol)+' µL per well + 20% overage'],
+       ['PBS (washes)', mL(v.n*v.vol*3*9/1000), '3 washes × 3 steps, at 3× the working volume'],
+       ['0.1% Triton X-100 in PBS', uL(tot), 'permeabilisation'],
+       ['Blocking buffer', uL(tot), '5% BSA in PBS-T'],
+       ['Primary antibody solution', uL(tot), 'diluted in antibody diluent'],
+       ['Secondary antibody', uL(tot/v.sec), '1:'+f(v.sec)+' in '+uL(tot)+' diluent'],
+       ['DAPI, 300 nM working', uL(tot), 'counterstain'],
+       ['PBS for imaging', uL(tot), 'leave the plate in PBS, not mountant'] ]; },
+     steps:function(v){
+       var over=1.2, tot=v.n*v.vol*over;
+       return [
+       {t:'Fix', d:'Aspirate to a residual volume — <b>never to dryness</b> — and add <b>'+f(v.vol)+' µL of 4% PFA</b> per well. <b>15 min at room temperature.</b> Aspirating a 96-well plate completely dry is the single most common way to lose an experiment.'},
+       {t:'Wash', d:'Wash <b>3 ×</b> with PBS at about 3× the working volume ('+f(v.vol*3)+' µL). A plate washer set to leave a residual volume is ideal; by hand, tilt the plate and aspirate from the corner of each well.'},
+       {t:'Permeabilise', d:'<b>0.1% Triton X-100, 10 min</b>, '+f(v.vol)+' µL per well.'},
+       {t:'Block', d:'<b>'+f(v.vol)+' µL blocking buffer, 30 min.</b>'},
+       {t:'Primary antibody', d:'<b>'+f(v.vol)+' µL per well, 1 h at room temperature</b> or overnight at 4 °C. Seal the plate to stop the edge wells evaporating.'},
+       {t:'Wash', d:'<b>3 ×</b> PBS.'},
+       {t:'Secondary antibody', d:'Dilute <b>1:'+f(v.sec)+'</b> — you need '+uL(tot/v.sec)+' of stock in '+uL(tot)+' of diluent. <b>1 h at room temperature in the dark.</b>'},
+       {t:'Wash', d:'<b>3 ×</b> PBS, in the dark.'},
+       {t:'Counterstain', d:'<b>300 nM DAPI, 5 min</b>, then wash <b>2 ×</b> PBS.'},
+       {t:'Leave in PBS and image', d:'Leave <b>'+f(v.vol*2)+' µL PBS</b> in each well. Do not mount a plate — image it wet, through the plate bottom. Use a glass-bottom or optically clear plastic-bottom plate; a standard tissue-culture plate has a bottom far too thick and uneven for a high-NA objective.'},
+       {t:'Watch the edge effects', d:'Edge wells evaporate, warm and wash differently from the middle. Either leave the outer ring out of the analysis or fill it with PBS and use it as a moat.'} ]; },
+     notes:['Scale the secondary further than you would on coverslips — the shorter light path in a plate makes weak signal easier to see, and less antibody means less background.',
+            'Automated washers are gentler and far more reproducible than pipetting by hand, and reproducibility is the whole point of running the assay in a plate.',
+            'For high-content imaging, always include a DAPI channel: nuclear segmentation is what every downstream measurement is anchored to.'],
+     sources:OWW },
+
+   { id:'phalloidin-actin', name:'F-actin staining with phalloidin', group:'Microscopy & staining',
+     tags:'phalloidin actin f-actin cytoskeleton stress fibres alexa rhodamine microscopy staining',
+     blurb:'Stain the actin cytoskeleton. Short, reliable, and it fails in exactly one way — methanol.',
+     time:'~1 h', safety:'Phalloidin is a potent toxin from the death cap mushroom and is lethal by ingestion. Gloves at all times, never mouth-pipette, and dispose of it as chemical waste. Paraformaldehyde is a probable human carcinogen — fume hood.',
+     params:[{k:'n',label:'Number of coverslips',def:12,min:1},{k:'dil',label:'Phalloidin dilution (1:X)',def:400,min:1},{k:'vol',label:'Volume per coverslip (µL)',def:50,min:20}],
+     reagents:function(v){
+       var over=1.15, tot=v.n*v.vol*over;
+       return [
+       ['4% PFA in PBS', uL(v.n*v.vol*4), 'fixation — formaldehyde only'],
+       ['0.1% Triton X-100 in PBS', uL(v.n*v.vol), 'permeabilisation'],
+       ['Fluorescent phalloidin conjugate', uL(tot/v.dil), '1:'+f(v.dil)+' — methanolic stock'],
+       ['PBS + 1% BSA', uL(tot), 'staining buffer'],
+       ['PBS (washes)', mL(v.n*v.vol*6/1000), '4 washes'],
+       ['DAPI, 300 nM working', uL(v.n*v.vol), 'optional counterstain'],
+       ['Antifade mounting medium', uL(8*v.n), '~8 µL per coverslip'] ]; },
+     steps:function(v){
+       var over=1.15, tot=v.n*v.vol*over;
+       return [
+       {t:'Fix with formaldehyde — never methanol', d:'<b>4% PFA, 15 min at room temperature.</b> This is the step that decides the experiment: <b>methanol depolymerises F-actin</b>, and phalloidin only binds the filament. If you have methanol-fixed the sample, there is nothing left to stain.'},
+       {t:'Wash', d:'<b>3 × 5 min PBS.</b>'},
+       {t:'Permeabilise gently', d:'<b>0.1% Triton X-100 in PBS, 5 min.</b> Harsher detergent or longer extracts actin along with everything else and thins the network.'},
+       {t:'Deal with the methanol', d:'The conjugate is supplied in methanol. Pipette <b>'+f(tot/v.dil)+' µL</b> into a tube and let the methanol evaporate, or dilute it so the final methanol is <b>under 1%</b>. Methanol carried into the staining solution depolymerises the actin you are about to stain.'},
+       {t:'Stain', d:'Make up to <b>'+uL(tot)+'</b> with PBS + 1% BSA (a 1:'+f(v.dil)+' dilution) and apply <b>'+f(v.vol)+' µL</b> per coverslip. <b>20–30 min at room temperature, in the dark.</b>'},
+       {t:'Wash', d:'<b>2 × 5 min PBS</b>, in the dark. Phalloidin has a very high affinity and does not wash off, so short washes are enough.'},
+       {t:'Counterstain (optional)', d:'<b>300 nM DAPI, 5 min</b>, then one PBS wash.'},
+       {t:'Mount', d:'Dip in deionized water, drain, and mount in <b>~8 µL antifade</b>. Cure in the dark.'} ]; },
+     notes:['Phalloidin is small and fast — if the staining is weak it is almost never the incubation time. Look at the fixation first.',
+            'Add phalloidin after the secondary antibody in a combined immunofluorescence experiment; a long antibody incubation slowly displaces it.',
+            'Jasplakinolide competes for the same site, so a jasplakinolide-treated sample stains poorly. That is pharmacology, not a failed stain.',
+            'Conjugates exist in every Alexa colour — check the Microscopy module’s panel builder before committing to one.'],
+     sources:OWW },
+
+   { id:'livecell-stain', name:'Live-cell organelle staining & imaging setup', group:'Microscopy & staining',
+     tags:'live cell imaging hoechst mitotracker lysotracker cellmask organelle phototoxicity time lapse microscopy',
+     blurb:'Load a live-cell probe without killing the cells, and set up the imaging so they survive the movie. Volumes scale with dish count.',
+     time:'~1 h loading', safety:'Live-cell dyes are supplied in DMSO, which carries them through skin — nitrile gloves. Hoechst is a DNA binder and a suspected mutagen. Keep the final DMSO below 0.1% or the solvent itself becomes the experiment.',
+     params:[{k:'n',label:'Number of dishes / wells',def:6,min:1},{k:'vol',label:'Medium per dish (mL)',def:2,min:0.1},
+             {k:'dil',label:'Probe stock dilution (1:X)',def:10000,min:1}],
+     reagents:function(v){
+       var tot=v.n*v.vol*1.1;
+       return [
+       ['Pre-warmed complete medium', mL(tot), 'phenol-red-free for imaging'],
+       ['Probe stock (DMSO or aqueous)', uL(tot*1000/v.dil), '1:'+f(v.dil)+' into '+mL(tot)],
+       ['Intermediate probe dilution', uL(100), 'make 1:100 first — see step 2'],
+       ['Fresh medium for the exchange', mL(tot), 'pre-warmed and pre-equilibrated'],
+       ['Verapamil (optional)', uL(tot*1000/1000), '10 µM final, for efflux-competent lines'] ]; },
+     steps:function(v){
+       var tot=v.n*v.vol*1.1, direct=tot*1000/v.dil;
+       return [
+       {t:'Switch to phenol-red-free medium', d:'Phenol red is strongly fluorescent in the green and orange channels and will dominate a weak signal. Swap into <b>phenol-red-free medium with 25 mM HEPES</b> (or use a stage-top CO₂ incubator) before you start.'},
+       {t:'Make an intermediate dilution', d:'A 1:'+f(v.dil)+' dilution means only <b>'+f(direct)+' µL</b> of stock into '+mL(tot)+'. If that is under about 2 µL, make a <b>1:100 intermediate</b> in medium first and take 100× more of it. The Microscopy module will size this for you.'},
+       {t:'Add verapamil if your line effluxes', d:'Many immortalised lines pump out SiR probes, Hoechst and calcein through ABC transporters. <b>10 µM verapamil</b> alongside the probe fixes it. If a probe simply refuses to load, this is the first thing to try.'},
+       {t:'Load', d:'Replace the medium with the probe medium and return to the incubator. <b>15–45 min at 37 °C</b> for most trackers; 1–6 h for the fluorogenic SiR probes. Longer is not better — over-loaded organelle dyes stain the cytoplasm non-specifically.'},
+       {t:'Exchange, do not wash', d:'Swap into <b>fresh pre-warmed, pre-equilibrated medium</b>. Live cells do not tolerate the repeated PBS washes a fixed sample gets. Equilibrium probes such as TMRM and DiBAC₄(3) must stay in the medium — washing them out destroys the measurement.'},
+       {t:'Equilibrate on the stage', d:'Let the dish sit on the stage at temperature for <b>15–30 min</b> before acquiring. Focus drift over the first quarter-hour is thermal, not biological, and it will ruin a time-lapse.'},
+       {t:'Set the light as low as you can bear', d:'Find your exposure on a sacrificial dish, then <b>halve the illumination and double the exposure</b> rather than the reverse. Phototoxicity scales with peak intensity far more steeply than with total dose.'},
+       {t:'Use the longest wavelength that works', d:'405 nm is the most phototoxic line on the microscope, and Hoechst plus 405 nm is a well-known way to arrest cells mid-movie. Prefer far-red probes for anything long.'},
+       {t:'Run a health control', d:'Image an unstained, unilluminated dish in parallel and compare division rate and morphology at the end. If your stained cells stopped dividing and the control did not, the probe or the light is your phenotype.'} ]; },
+     notes:['Cells that round up, blebb or stop dividing during a time-lapse are telling you the illumination is too strong. That is the commonest artefact in live imaging and it is very easy to mistake for a real result.',
+            'Pre-equilibrate medium in the incubator with the cap loose — medium straight from a 4 °C bottle shifts pH and shocks the cells.',
+            'A stage-top incubator with humidity beats a heated stage: evaporation concentrates the medium over hours.',
+            'Fluorogenic probes (SiR-actin, SiR-tubulin, MitoTracker Green) need no wash at all, which is one less perturbation.'],
+     sources:OWW },
+
+   { id:'livedead-bact', name:'Bacterial live/dead staining (SYTO 9 + PI)', group:'Microscopy & staining',
+     tags:'live dead baclight syto 9 propidium iodide bacteria viability membrane integrity biofilm microscopy',
+     blurb:'The membrane-integrity viability stain for bacteria: green for intact, red for compromised. Scales with sample count.',
+     time:'~30 min', safety:'Propidium iodide is a mutagenic intercalator and SYTO 9 is a nucleic-acid binder in DMSO — nitrile gloves, chemical waste. The isopropanol used for the killed control is flammable.',
+     params:[{k:'n',label:'Number of samples',def:8,min:1},{k:'vol',label:'Sample volume (µL)',def:1000,min:100},
+             {k:'inc',label:'Incubation (min)',def:15,min:5}],
+     reagents:function(v){
+       var mix=3*v.n*v.vol/1000*1.2;
+       return [
+       ['SYTO 9, 3.34 mM in DMSO', uL(mix/2), 'half of the dye mix'],
+       ['Propidium iodide, 20 mM in DMSO', uL(mix/2), 'the other half'],
+       ['Combined dye mix', uL(mix), '3 µL per mL of sample'],
+       ['0.85% NaCl', mL(v.n*v.vol*2/1000), 'wash and resuspension — NOT growth medium'],
+       ['70% isopropanol', mL(1), 'for the killed control'],
+       ['Slides and coverslips', v.n+1+' each', 'plus one for the killed control'] ]; },
+     steps:function(v){
+       var mix=3*v.n*v.vol/1000*1.2, perSample=3*v.vol/1000;
+       return [
+       {t:'Wash into saline', d:'Pellet the cells (5,000 × g, 5 min), discard the medium and resuspend in <b>0.85% NaCl</b>. <b>Rich medium is the single most common cause of a useless live/dead result</b> — it quenches SYTO 9 and raises the background. Repeat the wash once.'},
+       {t:'Set the density', d:'Adjust to roughly <b>OD₆₀₀ 0.1</b> (about 10⁸ cells/mL). Too dense and the cells stack; too sparse and you spend the session hunting for a field.'},
+       {t:'Prepare a killed control', d:'Take one aliquot and add <b>70% isopropanol for 1 h</b>, then wash back into saline. Without this you have no idea what 100% dead looks like on your instrument, and the ratio means nothing.'},
+       {t:'Make the dye mix', d:'Combine <b>equal volumes</b> of the SYTO 9 and PI stocks — you need '+uL(mix)+' in total. Mix the two dyes together <i>before</i> adding them to cells; adding them separately changes the competition between them.'},
+       {t:'Stain', d:'Add <b>'+f(perSample)+' µL of the dye mix per sample</b> (3 µL per mL). Incubate <b>'+f(v.inc)+' min at room temperature in the dark</b>. Do not extend it — PI creeps into live cells over time and the dead fraction climbs on its own.'},
+       {t:'Mount', d:'Trap <b>5 µL</b> under a coverslip, or use an agarose pad for a flat focal plane. Do not heat-fix — this is a live stain.'},
+       {t:'Image both channels', d:'Excite at <b>488 nm</b>. Collect green at <b>500–540 nm</b> (SYTO 9) and red beyond <b>600 nm</b> (PI). Image within 30 min; the ratio drifts after that.'},
+       {t:'Score', d:'Count green-only and red cells in the same fields. Report the ratio, and always report it alongside the live and killed controls rather than as an absolute viability.'} ]; },
+     notes:['"Dead" here means membrane-compromised, which is not the same as non-viable. Cells can be membrane-compromised and recover, or be viable-but-non-culturable with an intact membrane.',
+            'SYTO 9 also stains extracellular DNA, which inflates the apparent live signal in a biofilm.',
+            'The two dyes compete for the same binding sites, so the ratio depends on the dye:cell ratio. Keep the cell density and the dye volume fixed across a comparison.',
+            'For a plate-reader version, read Ex 485/Em 530 and Ex 485/Em 630 and use the green:red ratio against a standard curve of live:killed mixtures.'],
+     sources:OWW },
+
+   { id:'agarose-pad', name:'Agarose pad for bacterial time-lapse', group:'Microscopy & staining',
+     tags:'agarose pad time lapse single cell bacteria imaging gene expression microscopy slide',
+     blurb:'A flat, nutrient-containing pad that holds bacteria in one focal plane so you can follow single cells for hours.',
+     time:'~30 min to make', safety:'Molten agarose is a scald hazard and superheats in a microwave — swirl gently and wear a heat-resistant glove. If the medium contains an antibiotic or an inducer, add it below 50 °C.',
+     params:[{k:'n',label:'Number of pads',def:4,min:1},{k:'pct',label:'Agarose (%)',def:1.5,min:0.5,step:0.1},
+             {k:'vol',label:'Medium per pad (µL)',def:400,min:100}],
+     reagents:function(v){
+       var tot=v.n*v.vol*1.3;
+       return [
+       ['Agarose (low-melt or standard)', f(v.pct/100*tot/1000)+' g', f(v.pct)+'% in '+uL(tot)],
+       ['Growth medium (filtered)', uL(tot), 'the medium the cells are growing in, diluted if it autofluoresces'],
+       ['Microscope slides', (v.n+2)+' slides', 'plus 2 as spacers for each mould'],
+       ['Coverslips, #1.5', v.n+' coverslips', 'high-precision if you are doing anything quantitative'],
+       ['Inducer / antibiotic', '—', 'add below 50 °C if required'] ]; },
+     steps:function(v){
+       var tot=v.n*v.vol*1.3;
+       return [
+       {t:'Use defined, low-fluorescence medium', d:'Rich broth autofluoresces strongly in the green channel. Use a defined medium (M9 + carbon source), or dilute the rich medium, if you are imaging a weak GFP reporter.'},
+       {t:'Melt the agarose', d:'Add <b>'+f(v.pct/100*tot/1000)+' g</b> of agarose to <b>'+uL(tot)+'</b> of medium and microwave in short bursts, swirling between each, until fully dissolved. Undissolved specks become bright scattering objects on the pad.'},
+       {t:'Cool to 50 °C, then add anything heat-labile', d:'Let it cool to about <b>50 °C</b> before adding inducer, antibiotic or a dye. Above that you destroy them; below about 45 °C the agarose sets while you are pipetting.'},
+       {t:'Build the mould', d:'Lay two slides side by side as spacers with a gap between them, and place a third slide across as the base. Pipette <b>'+f(v.vol)+' µL</b> of molten agarose into the gap and immediately lay a fourth slide flat on top. The spacers set the pad thickness.'},
+       {t:'Set', d:'Leave <b>15–20 min at room temperature</b> until firm. Slide — do not lift — the top slide off, or the pad tears.'},
+       {t:'Cut a pad', d:'Cut a square slightly smaller than your coverslip with a scalpel or a cut-off pipette tip, and transfer it to the imaging dish or slide.'},
+       {t:'Dry the surface briefly', d:'Leave the pad uncovered for <b>2–5 min</b>. A wet pad lets cells swim and the field drifts; an over-dried pad cracks and the cells stop growing. This is the step that takes practice.'},
+       {t:'Apply the cells', d:'Spot <b>1–2 µL</b> of culture at around <b>OD₆₀₀ 0.05</b> on the pad and let it absorb for 2–3 min until the surface looks matte. Sparse is right — you want isolated cells with room to divide into microcolonies.'},
+       {t:'Seal', d:'Lower a coverslip without trapping bubbles and seal the edges with <b>VALAP</b> (equal parts vaseline, lanolin and paraffin, melted together) or silicone grease. An unsealed pad dries out within an hour and the cells stop growing.'},
+       {t:'Equilibrate and image', d:'Let the slide reach temperature on the stage for <b>15–30 min</b> before starting, then acquire. Use the lowest illumination that gives a usable image — bacteria are small, and photodamage shows up as cells that simply stop dividing.'} ]; },
+     notes:['Cells that grow for two divisions and then stop are almost always suffering phototoxicity or a dried pad, not showing you biology.',
+            'Low-melt agarose sets softer and is easier to cut; standard agarose gives a firmer pad that holds focus better over many hours.',
+            'For a long run, use a gene-frame or a commercial pad holder instead of the two-slide mould — the thickness is far more reproducible.',
+            'FM 4-64 or a membrane dye at 1 µg/mL can be included in the pad itself to outline the cells throughout the movie.'],
+     sources:OWW },
+
+   { id:'he-stain', name:'Haematoxylin & eosin (H&E) staining', group:'Microscopy & staining',
+     tags:'h&e haematoxylin eosin histology section paraffin dewax differentiate blue histopathology microscopy',
+     blurb:'The standard histology stain: blue-purple nuclei, pink cytoplasm. The whole result hinges on the differentiation step.',
+     time:'~45 min', safety:'Xylene is a neurotoxin and a serious inhalation hazard — fume hood only, and never pour it down the sink. Acid alcohol is corrosive and flammable. Use a mercury-free haematoxylin; the original Harris formulation contains mercuric oxide.',
+     params:[{k:'n',label:'Number of slides',def:20,min:1},{k:'hem',label:'Haematoxylin time (min)',def:4,min:0.5,step:0.5},
+             {k:'eos',label:'Eosin time (s)',def:60,min:5}],
+     reagents:function(v){
+       var bath=250;
+       return [
+       ['Xylene (or a substitute)', mL(bath*3), '3 changes, dewax and clear'],
+       ['100% ethanol', mL(bath*3), 'rehydration and dehydration'],
+       ['95% ethanol', mL(bath*2), 'graded series'],
+       ['70% ethanol', mL(bath), 'graded series'],
+       ['Haematoxylin (mercury-free)', mL(bath), 'filter before every use'],
+       ['1% acid alcohol', mL(bath), 'differentiation — the critical reagent'],
+       ['Scott’s tap water substitute', mL(bath), 'bluing'],
+       ['1% alcoholic eosin Y', mL(bath), 'counterstain'],
+       ['Resinous mountant (DPX)', uL(60*v.n), '~60 µL per slide'],
+       ['Coverslips', v.n+' coverslips', '24 × 50 mm'] ]; },
+     steps:function(v){
+       return [
+       {t:'Dewax', d:'<b>Xylene, 3 × 5 min.</b> Paraffin left in the section blocks every stain that follows — patchy staining almost always traces back to here.'},
+       {t:'Rehydrate', d:'<b>100% ethanol 2 × 3 min → 95% 3 min → 70% 3 min → running water 2 min.</b> Take it down the series gently; sudden water shock lifts sections off the slide.'},
+       {t:'Haematoxylin', d:'<b>Filter the haematoxylin</b> — it oxidises to a metallic surface scum that transfers straight onto the section — then stain for <b>'+f(v.hem)+' min</b>. The section will look far too dark. That is expected.'},
+       {t:'Rinse', d:'Rinse in running tap water until the water runs clear, about 1 min.'},
+       {t:'Differentiate — the step that matters', d:'Dip in <b>1% acid alcohol for 2–5 seconds</b>, then rinse immediately in water. This strips excess dye from the cytoplasm and leaves it in the nuclei. <b>Check a slide under the microscope before doing the rest of the rack.</b> Over-differentiate and the nuclei are pale and unrecoverable.'},
+       {t:'Blue', d:'<b>Scott’s tap water substitute, 1 min</b>, until the nuclei shift from red-purple to a crisp blue. This is a pH change, not another stain — alkaline conditions convert the haematein-aluminium lake to its blue form.'},
+       {t:'Rinse', d:'Running water, 2 min.'},
+       {t:'Eosin', d:'<b>1% alcoholic eosin Y for '+f(v.eos)+' s.</b> Timing here is largely aesthetic — but be consistent across a set, or you cannot compare them.'},
+       {t:'Differentiate the eosin in alcohol', d:'<b>95% ethanol, 2 × 10 s.</b> Eosin washes out of alcohol steadily, so watch the section rather than timing it blindly. This is where you set the final pink.'},
+       {t:'Dehydrate and clear', d:'<b>100% ethanol 2 × 2 min → xylene 3 × 3 min.</b> Any water carried into the xylene turns it milky and the section will never clear.'},
+       {t:'Mount', d:'While the slide is still wet with xylene, apply <b>~60 µL of DPX</b> and lower a coverslip at an angle to avoid bubbles. Never let the section dry before mounting.'},
+       {t:'Cure', d:'Lay flat overnight in a fume hood. Nuclei blue-purple, cytoplasm and collagen pink.'} ]; },
+     notes:['Pale nuclei mean over-differentiation; a muddy blue-grey wash over everything means under-differentiation or skipped bluing.',
+            'Progressive haematoxylins (Mayer’s) need no differentiation step and are far more forgiving if you are learning.',
+            'Sections lifting off is nearly always incomplete dewaxing or unsilanised slides — use charged or silane-coated slides for anything precious.',
+            'Eosin Y is fluorescent (~Ex 524 / Em 544), so an H&E section is unusable for green-channel fluorescence afterwards.'],
+     sources:OWW },
+
+   { id:'simple-neg-stain', name:'Simple stain & negative stain (bacterial smear)', group:'Microscopy & staining',
+     tags:'simple stain negative stain methylene blue nigrosin india ink capsule smear morphology microscopy',
+     blurb:'Two fast smear stains: one colours the cells, the other colours the background. Together they give you morphology and capsules in ten minutes.',
+     time:'~15 min', safety:'Heat fixation uses an open flame — tie hair back and keep alcohol away. Crystal violet and nigrosin stain skin and bench indelibly. Any clinical or unidentified isolate is handled at the containment level its risk group requires.',
+     params:[{k:'n',label:'Number of smears',def:6,min:1},{k:'stain',label:'Simple stain time (s)',def:60,min:10}],
+     reagents:function(v){
+       return [
+       ['Loeffler’s methylene blue', uL(500*v.n), '~0.5 mL per smear — enough to flood it'],
+       ['10% nigrosin (or India ink)', uL(50*v.n), 'one small drop per negative stain'],
+       ['Clean glass slides', (2*v.n)+' slides', 'one simple + one negative per sample'],
+       ['Immersion oil', '—', 'for the 100× objective'],
+       ['Blotting paper', '—', 'blot, never wipe'] ]; },
+     steps:function(v){
+       return [
+       {t:'Make the smear (simple stain)', d:'Place a small drop of water on a clean slide, mix in a loopful of colony, and spread to a thin film about the size of a fingernail. From broth, use a loopful directly. <b>Air-dry completely</b> — do not rush this with heat.'},
+       {t:'Fix', d:'Pass the dried slide through a flame <b>3 times</b>, smear side up, so it is warm but not hot on the back of your hand. Alternatively fix in methanol for 1 min, which distorts the cells far less.'},
+       {t:'Stain', d:'Flood with <b>Loeffler’s methylene blue for '+f(v.stain)+' s</b>.'},
+       {t:'Rinse and blot', d:'Rinse gently with water until the runoff is clear, then <b>blot</b> dry between blotting paper. Wiping takes the smear off.'},
+       {t:'Examine', d:'Oil immersion at 100×. You now have cell shape, size and arrangement — cocci in chains, rods in pairs, and so on.'},
+       {t:'Now the negative stain — no heat at all', d:'For capsules, start a fresh slide. Place a small drop of <b>10% nigrosin or India ink</b> at one end and mix in a loopful of culture. <b>Do not heat-fix at any point</b> — heat collapses capsules, which is exactly why this method exists.'},
+       {t:'Draw a thin film', d:'Bring a second slide up against the drop at about 30°, let the liquid spread along the edge, then push it smoothly along the slide — the same motion as a blood smear. Aim for a barely visible grey wash, not a black stripe.'},
+       {t:'Air-dry only', d:'Let it dry completely. No rinse, no heat, no counterstain.'},
+       {t:'Examine', d:'Oil immersion at 100×. Cells appear as bright refractile shapes against a dark grey background. <b>A clear halo around a cell is a capsule.</b>'},
+       {t:'If you need Gram status', d:'Run the Gram stain protocol on a third smear — it answers a different question and this pair does not replace it.'} ]; },
+     notes:['A too-thick smear is the commonest failure in both stains. It should be barely visible when dry.',
+            'Negative staining gives an honest cell size because nothing shrinks — heat-fixed cells are measurably smaller.',
+            'Not every ink works for negative staining: some contain shellac or biocides that lyse cells. Test a new bottle against a known capsulated strain.',
+            'India ink on cerebrospinal fluid is the classic rapid test for Cryptococcus, but its sensitivity is only about 50% — a negative does not exclude it.'],
+     sources:OWW },
+
+   { id:'endospore-capsule', name:'Endospore stain (Schaeffer–Fulton)', group:'Microscopy & staining',
+     tags:'endospore spore schaeffer fulton malachite green safranin bacillus clostridium sporulation microscopy',
+     blurb:'Drive malachite green into the spore coat with steam, wash it out of everything else, and counterstain. Green spores, pink cells.',
+     time:'~30 min', safety:'Malachite green is toxic and a suspected carcinogen and mutagen — gloves, and steam it in a fume hood if you have one. The steaming step is a scald hazard: use a rack, not your fingers. Spore-forming organisms include serious pathogens — know your isolate before you start.',
+     params:[{k:'n',label:'Number of smears',def:6,min:1},{k:'steam',label:'Steaming time (min)',def:5,min:1},{k:'counter',label:'Safranin time (s)',def:30,min:10}],
+     reagents:function(v){
+       return [
+       ['5% malachite green (aqueous)', uL(600*v.n), 'enough to flood and re-flood each smear'],
+       ['0.5% safranin', uL(400*v.n), 'counterstain'],
+       ['Blotting paper strips', v.n+' strips', 'cut to the size of the smear'],
+       ['Beaker of boiling water + rack', '—', 'the steam source'],
+       ['Slides', v.n+' slides', 'clean and grease-free'] ]; },
+     steps:function(v){
+       return [
+       {t:'Use a sporulating culture', d:'Spores appear late. Use a culture grown <b>3–5 days</b> on a sporulation medium, or check by phase contrast first — spores are bright, refractile ovals. A fresh overnight culture has none, and the stain will look like a failure when it is not.'},
+       {t:'Make and fix the smear', d:'Spread a thin smear, air-dry completely, and heat-fix by passing through a flame 3 times.'},
+       {t:'Cover with blotting paper', d:'Lay a strip of blotting paper over the smear. It holds the stain in place and stops the slide drying out during steaming.'},
+       {t:'Steam with malachite green', d:'Set the slide on a rack over a beaker of boiling water. Flood the paper with <b>5% malachite green</b> and steam for <b>'+f(v.steam)+' min</b>. <b>Keep it wet</b> — top it up as it evaporates. Letting the slide bake dry is the classic way to ruin this stain.'},
+       {t:'Cool, then remove the paper', d:'Take the slide off the heat and let it cool before touching it. Lift the blotting paper off and discard it into the chemical waste.'},
+       {t:'Rinse — this is the discriminating step', d:'Rinse under gently running water for <b>30 s</b>. This washes malachite green out of vegetative cells but not out of the spore coat, which is what makes the stain specific.'},
+       {t:'Counterstain', d:'Flood with <b>0.5% safranin for '+f(v.counter)+' s</b>, rinse briefly and blot dry.'},
+       {t:'Examine', d:'Oil immersion at 100×. <b>Spores are green</b>, vegetative cells and sporangia are pink. Note the spore position — terminal, subterminal or central — and whether it swells the cell; those are genuinely diagnostic features.'},
+       {t:'Score', d:'Count spores and vegetative cells across several fields to get a sporulation frequency, and record the spore position and shape rather than just "spores present".'} ]; },
+     notes:['No heat means no stain. Malachite green simply does not cross the spore coat at room temperature, and the whole method depends on that.',
+            'Free spores stain green with no pink cell around them — that is normal in an old culture, not an artefact.',
+            'Phase contrast on a wet mount will tell you in 30 seconds whether spores are present at all, and is worth doing before committing to the stain.',
+            'For capsules rather than spores, use the negative stain in the simple/negative stain protocol — heat destroys capsules.'],
+     sources:OWW },
+
+   { id:'neg-stain-tem', name:'Negative staining of phage for TEM', group:'Microscopy & staining',
+     tags:'negative stain tem electron microscopy phage virus uranyl acetate grid glow discharge morphology myoviridae microscopy',
+     blurb:'Get phage particles onto a grid and stained well enough to measure a head and a tail. Ties into the negative-stain recipes in Reagent Prep.',
+     time:'~30 min per grid', safety:'Uranyl acetate is BOTH radioactive (depleted uranium) and chemically toxic, and is regulated in most countries — use it only under your institution’s authorisation, in a designated area, with its own waste stream. Phosphotungstate and ammonium molybdate are non-radioactive substitutes. Handle the phage stock at the containment level its host requires.',
+     params:[{k:'n',label:'Number of grids',def:4,min:1},{k:'titer',label:'Stock titre (PFU/mL, log₁₀)',def:10,min:5,step:0.5},
+             {k:'ads',label:'Adsorption time (min)',def:2,min:0.5,step:0.5}],
+     reagents:function(v){
+       var target=1e10, have=Math.pow(10,v.titer), fold=have/target;
+       return [
+       ['Carbon-coated copper grids (300–400 mesh)', v.n+' grids', 'glow-discharged immediately before use'],
+       ['Phage stock', uL(10*v.n), '~10 µL per grid at ≥10¹⁰ PFU/mL'],
+       [fold>1.5?'SM buffer (to dilute the stock)':'SM buffer (to wash the grid)', uL(200*v.n),
+        fold>1.5? ('dilute the stock ~'+f(fold,2)+'-fold to reach 10¹⁰ PFU/mL')
+                : (have<1e9? 'stock is below 10⁹ PFU/mL — concentrate it first, see the note' : 'no dilution needed')],
+       ['Deionized water (wash drops)', uL(100*v.n), '2 drops per grid'],
+       ['2% uranyl acetate (or 2% PTA pH 7.0)', uL(50*v.n), 'filtered, 1 drop per grid'],
+       ['Filter paper wedges', (3*v.n)+' wedges', 'blot at the edge, never wipe the face'] ]; },
+     steps:function(v){
+       var have=Math.pow(10,v.titer);
+       return [
+       {t:'Check the titre first', d:'You want about <b>10⁹–10¹⁰ PFU/mL</b> on the grid. Your stock is <b>10'+SCI.sup(v.titer)+' PFU/mL</b>. '+(have<1e9?'That is too dilute — concentrate by PEG precipitation or ultracentrifugation first, or you will spend an hour finding nothing.':(have>3e10?'Dilute it in SM buffer, or the particles will pile up and overlap.':'That is in the right range.'))},
+       {t:'Remove the PEG and CsCl', d:'PEG and caesium leave a granular background that swamps fine detail. If the stock came off a PEG precipitation or a gradient, <b>dialyse against SM buffer</b> first.'},
+       {t:'Glow-discharge the grids', d:'Glow-discharge for <b>30 s</b> immediately before use. Carbon is hydrophobic as supplied and the sample will simply bead off an untreated grid. Grids lose the treatment within about 30 min — do this last, not first.'},
+       {t:'Adsorb the sample', d:'Float the grid carbon-side down on a <b>10 µL drop</b> of phage, or pipette the drop onto the grid. Leave <b>'+f(v.ads)+' min</b>.'},
+       {t:'Wash off the salt', d:'Touch the grid to <b>2 successive drops of deionized water</b>, blotting the edge between them. Buffer salts crystallise on drying and will ruin the field.'},
+       {t:'Stain', d:'Touch the grid to a drop of <b>2% uranyl acetate for 30 s</b> (or 2% PTA at pH 7.0 for an acid-labile phage). Filter the stain through 0.22 µm first — precipitate looks exactly like debris.'},
+       {t:'Blot and dry', d:'Blot at the <b>edge</b> with a filter-paper wedge — never wipe across the face — and air-dry completely, at least 5 min, before loading. A wet grid will contaminate the column.'},
+       {t:'Image', d:'Start at low magnification to find a region where the stain is neither too thick nor too thin, then go up. Take the image early: the electron beam damages the specimen as you look at it.'},
+       {t:'Measure and classify', d:'Measure <b>head diameter</b> and <b>tail length</b> against the calibrated scale bar, and note whether the tail is long and contractile, long and flexible, or short. Those features are the basis of the classical morphological groups. Record whether tails are contracted — an acidic stain can trigger contraction and mislead you.'} ]; },
+     notes:['Too little stain gives low contrast; too much buries the particle. The usable region of a grid square is usually a band between the two, and finding it is most of the skill.',
+            'Uranyl acetate photoreduces — keep the bottle wrapped in foil and discard it once it goes cloudy.',
+            'For acid-sensitive phages, use phosphotungstate or ammonium molybdate at pH 7.0. Some tailed phages lose or contract their tails at the pH 4.2 uranyl acetate needs.',
+            'The negative-stain solutions themselves are in Reagent Prep under advanced phage work — uranyl acetate, uranyl formate, phosphotungstate and ammonium molybdate.'],
+     sources:OWW },
   ];
   var pById={}; PROTOCOLS.forEach(function(p){ pById[p.id]=p; });
   var cur=null, done={};
@@ -5380,6 +5892,839 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   // The hub renders before this IIFE runs, so its protocol count starts as a literal.
   // Refresh it now that the real list exists, so the two can never disagree.
   if(typeof appMode!=='undefined'&&appMode==='home'&&window.renderHome) try{ renderHome(); }catch(e){}
+})();
+
+/* ═══════════════════ MICROSCOPY: SHARED SPECTRAL & DILUTION MATH ═══════════════════ */
+/* Top-level on purpose. The Microscopy module, the `dyedil` entry in Calculators and
+   the self-test all call these same functions, so the three surfaces cannot drift
+   apart — the same arrangement planInfection() uses for the phage math.
+
+   A word on what this model is and is not. We ship excitation and emission MAXIMA,
+   not measured spectra, because full curves for 79 dyes would dwarf the rest of the
+   app. Everything below approximates each band as a Gaussian through its published
+   maximum and full-width-half-maximum. That is good enough to catch the mistakes
+   that actually ruin experiments — two dyes landing in one channel, an emission tail
+   sitting inside the next collection band — and it is NOT a substitute for real
+   spectral overlap integrals or for linear unmixing. The UI says so too. */
+
+// Standard imaging channels: excitation band a cube would pass, emission band it
+// would collect, and the confocal laser line that serves it. Bands are the common
+// commercial filter sets (Chroma / Semrock catalogue values), rounded.
+var MIC_CHANNELS=[
+  {id:'uv',    label:'Blue (DAPI)',      ex:[330,415], em:[415,490], laser:405, cube:'DAPI (Ex 350/50, Em 460/50)'},
+  {id:'green', label:'Green (FITC/GFP)', ex:[450,505], em:[500,550], laser:488, cube:'FITC/GFP (Ex 470/40, Em 525/50)'},
+  {id:'red',   label:'Red (TRITC/Cy3)',  ex:[530,570], em:[565,605], laser:561, cube:'TRITC (Ex 545/25, Em 585/40)'},
+  {id:'txred', label:'Orange-red (Texas Red)', ex:[565,605], em:[605,645], laser:594, cube:'Texas Red (Ex 560/40, Em 630/75)'},
+  {id:'farred',label:'Far red (Cy5)',    ex:[610,665], em:[655,720], laser:640, cube:'Cy5 (Ex 620/60, Em 700/75)'},
+  {id:'nir',   label:'Near IR (Cy7)',    ex:[700,780], em:[760,830], laser:750, cube:'Cy7 (Ex 710/75, Em 810/90)'}
+];
+var MIC_CONFIGS=[
+  {id:'confocal4', label:'Confocal — 405 / 488 / 561 / 640', chans:['uv','green','red','farred']},
+  {id:'confocal5', label:'Confocal — 405 / 488 / 561 / 594 / 640', chans:['uv','green','red','txred','farred']},
+  {id:'widefield', label:'Widefield — standard filter cubes', chans:['uv','green','red','txred','farred']},
+  {id:'confocal3', label:'Confocal — 488 / 561 / 640 (no violet line)', chans:['green','red','farred']}
+];
+function micChanById(id){ for(var i=0;i<MIC_CHANNELS.length;i++) if(MIC_CHANNELS[i].id===id) return MIC_CHANNELS[i]; return null; }
+function micConfigById(id){ for(var i=0;i<MIC_CONFIGS.length;i++) if(MIC_CONFIGS[i].id===id) return MIC_CONFIGS[i]; return MIC_CONFIGS[0]; }
+
+// Abramowitz & Stegun 7.1.26 — |error| < 1.5e-7, which is far below the precision
+// of the underlying spectral maxima, so it is not the limiting approximation here.
+function micErf(x){
+  var s=x<0?-1:1; x=Math.abs(x);
+  var t=1/(1+0.3275911*x);
+  var y=1-((((1.061405429*t-1.453152027)*t+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);
+  return s*y;
+}
+var MIC_FWHM_TO_SIGMA=1/2.3548200450309493;   // 1 / (2√(2 ln2))
+// A real emission band is not symmetric: it has a steep edge on the blue side and a
+// long vibronic tail to the red. Modelling it as a split normal — narrower below the
+// maximum, wider above — matters, because the red tail is exactly what bleeds into
+// the next channel up. These two factors reproduce the published integrated tail of
+// fluorescein and DAPI to within a few percent, which is as good as this class of
+// approximation gets.
+var MIC_EM_BLUE=0.75, MIC_EM_RED=1.35;
+
+// Excitation efficiency of a dye at one wavelength, 0–1, relative to its own maximum.
+function micExEff(dye,nm){
+  var sp=dye&&dye.spectra; if(!sp||!(sp.ex>0)||!(nm>0)) return 0;
+  var sig=(sp.fwhmEx||70)*MIC_FWHM_TO_SIGMA;
+  var d=(nm-sp.ex)/sig;
+  return Math.exp(-0.5*d*d);
+}
+// Unnormalised split-normal CDF, in units where the total is (σblue + σred).
+function micEmCdf(x,mu,s1,s2){
+  return (x<mu) ? s1*(1+micErf((x-mu)/(Math.SQRT2*s1)))
+                : s1 + s2*micErf((x-mu)/(Math.SQRT2*s2));
+}
+// Fraction of a dye's total emission falling between lo and hi nm.
+function micEmFrac(dye,lo,hi){
+  var sp=dye&&dye.spectra; if(!sp||!(sp.em>0)) return 0;
+  var sig=(sp.fwhmEm||65)*MIC_FWHM_TO_SIGMA;
+  var s1=sig*MIC_EM_BLUE, s2=sig*MIC_EM_RED;
+  return Math.max(0,(micEmCdf(hi,sp.em,s1,s2)-micEmCdf(lo,sp.em,s1,s2))/(s1+s2));
+}
+// What one channel would actually record from one dye: how well its laser excites the
+// dye, times how much of the dye's emission the channel collects.
+function micSignal(dye,chan){
+  if(!dye||!dye.spectra||!chan) return 0;
+  return micExEff(dye,chan.laser)*micEmFrac(dye,chan.em[0],chan.em[1]);
+}
+// Best channel for a dye: the one that would record the most signal. Restrict to
+// `allowed` channel ids when a scope configuration is given.
+function micChannelFor(dye,allowed){
+  if(!dye||!dye.spectra) return null;
+  var best=null,bestS=-1;
+  for(var i=0;i<MIC_CHANNELS.length;i++){
+    var c=MIC_CHANNELS[i];
+    if(allowed&&allowed.indexOf(c.id)<0) continue;
+    var s=micSignal(dye,c);
+    if(s>bestS){ bestS=s; best=c; }
+  }
+  // Every laser can be a poor match — fall back to whichever emission band is nearest
+  // rather than returning nothing, and let the caller warn about the weak signal.
+  if(bestS<=0){
+    var em=dye.spectra.em, nd=1e9;
+    for(var j=0;j<MIC_CHANNELS.length;j++){
+      var ch=MIC_CHANNELS[j];
+      if(allowed&&allowed.indexOf(ch.id)<0) continue;
+      var mid=(ch.em[0]+ch.em[1])/2, d=Math.abs(em-mid);
+      if(d<nd){ nd=d; best=ch; }
+    }
+  }
+  return best;
+}
+// Symmetric 0–1 overlap of two emission bands (the Gaussian overlap coefficient).
+// 1 means indistinguishable emission, 0 means fully separated. Ignores excitation.
+function micOverlapIndex(a,b){
+  if(!a||!b||!a.spectra||!b.spectra) return 0;
+  var s1=(a.spectra.fwhmEm||65)*MIC_FWHM_TO_SIGMA, s2=(b.spectra.fwhmEm||65)*MIC_FWHM_TO_SIGMA;
+  var v=s1*s1+s2*s2, d=a.spectra.em-b.spectra.em;
+  return Math.sqrt(2*s1*s2/v)*Math.exp(-d*d/(2*v));
+}
+// Spillover of `dye` (recorded in `own`) into channel `into`, as a fraction of the
+// signal its own channel sees. This is the number that decides whether you can
+// acquire two channels at once or have to go sequential.
+function micSpill(dye,own,into){
+  var s0=micSignal(dye,own); if(!(s0>0)) return 0;
+  return micSignal(dye,into)/s0;
+}
+
+/* Panel check. Assigns every fluorescent dye to a channel on the chosen scope, then
+   reports the three failure modes that actually cost people an experiment:
+     1. two dyes in one channel — you simply cannot separate them;
+     2. emission bleed — one dye's tail sits inside another's collection band;
+     3. cross-excitation — one dye lights up on another's laser line.
+   Non-fluorescent entries (brightfield and EM stains) are reported separately
+   rather than silently dropped. */
+function micPanelCheck(dyes,configId){
+  var cfg=micConfigById(configId), allowed=cfg.chans;
+  var rows=[], warns=[], nonFluor=[];
+  (dyes||[]).forEach(function(d){
+    if(!d) return;
+    if(!d.spectra){ nonFluor.push(d); return; }
+    var ch=micChannelFor(d,allowed);
+    rows.push({dye:d, chan:ch, signal:micSignal(d,ch), exEff:ch?micExEff(d,ch.laser):0});
+  });
+  // 1. channel collisions
+  var byChan={};
+  rows.forEach(function(r){ var k=r.chan?r.chan.id:'—'; (byChan[k]=byChan[k]||[]).push(r); });
+  Object.keys(byChan).forEach(function(k){
+    var g=byChan[k]; if(g.length<2) return;
+    var ch=micChanById(k);
+    warns.push({level:'bad', kind:'collision',
+      t:g.map(function(r){return r.dye.name;}).join(' + ')+' all land in the '+(ch?ch.label:'same')+' channel — you cannot separate them. Move one to a different fluorophore.'});
+  });
+  // 2. weak excitation on the available lines
+  rows.forEach(function(r){
+    if(r.exEff>0&&r.exEff<0.25&&r.chan){
+      warns.push({level:'warn', kind:'weak',
+        t:r.dye.name+' is only ~'+Math.round(r.exEff*100)+'% excited by the '+r.chan.laser+' nm line (its maximum is '+r.dye.spectra.ex+' nm). It will be dim — expect to push the laser power up, and the phototoxicity with it.'});
+    }
+  });
+  // 3. bleed and cross-excitation, reported once per dye/channel pair. Two dyes
+  //    sharing a channel would otherwise generate the identical warning twice.
+  var used=[];
+  rows.forEach(function(r){ if(r.chan&&used.indexOf(r.chan.id)<0) used.push(r.chan.id); });
+  rows.forEach(function(r){
+    if(!r.chan) return;
+    used.forEach(function(cid){
+      if(cid===r.chan.id) return;
+      var c=micChanById(cid);
+      var bleed=micEmFrac(r.dye,c.em[0],c.em[1]);
+      if(bleed>=0.05){
+        warns.push({level:bleed>=0.15?'bad':'warn', kind:'bleed',
+          t:Math.round(bleed*100)+'% of '+r.dye.name+'’s emission falls inside the '+c.label+' collection band ('+c.em[0]+'–'+c.em[1]+' nm). Acquire those two channels sequentially, or compensate.'});
+      }
+      var xex=micExEff(r.dye,c.laser);
+      if(xex>=0.10){
+        warns.push({level:xex>=0.30?'bad':'warn', kind:'crossex',
+          t:r.dye.name+' is ~'+Math.round(xex*100)+'% excited by the '+c.laser+' nm line that serves the '+c.label+' channel. Do not excite both at once — scan sequentially.'});
+      }
+    });
+  });
+  if(nonFluor.length){
+    warns.push({level:'ok', kind:'nonfluor',
+      t:nonFluor.map(function(d){return d.name;}).join(', ')+(nonFluor.length>1?' are ':' is ')+'not fluorescent, so nothing here applies to '+(nonFluor.length>1?'them':'it')+' — '+(nonFluor.length>1?'they are':'it is')+' a brightfield or EM stain.'});
+  }
+  return {config:cfg, rows:rows, warnings:warns, nonFluor:nonFluor};
+}
+
+/* ── concentration handling ──────────────────────────────────────────────────
+   Two families of unit — molar and mass-per-volume — plus fold dilutions. Convert
+   to g/L when a molecular weight is known, so a stock in mg/mL and a target in nM
+   can be compared. Where the vendor does not publish an MW (the SYTO, MitoTracker
+   and SYBR families are proprietary), the two families cannot be bridged and we say
+   so rather than inventing a number. */
+var MIC_MOLAR={'M':1,'mM':1e-3,'µM':1e-6,'uM':1e-6,'nM':1e-9,'pM':1e-12};
+var MIC_MASS ={'g/L':1,'mg/mL':1,'µg/mL':1e-3,'ug/mL':1e-3,'ng/mL':1e-6,'mg/L':1e-3,'µg/L':1e-6};
+var MIC_FOLD ={'fold':1,'×':1,'x':1,'%':1};
+function micIsFold(u){ return u==='fold'||u==='×'||u==='x'; }
+// → g/L, or NaN when the conversion needs an MW we do not have.
+function micToGPerL(c,unit,mw){
+  if(!isFinite(c)) return NaN;
+  if(MIC_MASS[unit]!=null) return c*MIC_MASS[unit];
+  if(MIC_MOLAR[unit]!=null) return (mw>0)? c*MIC_MOLAR[unit]*mw : NaN;
+  return NaN;
+}
+// → mol/L, or NaN when it needs an MW we do not have.
+function micToMolar(c,unit,mw){
+  if(!isFinite(c)) return NaN;
+  if(MIC_MOLAR[unit]!=null) return c*MIC_MOLAR[unit];
+  if(MIC_MASS[unit]!=null) return (mw>0)? c*MIC_MASS[unit]/mw : NaN;
+  return NaN;
+}
+// How many fold the stock has to be diluted to reach the target. Works within either
+// unit family without an MW, and across families when an MW is available.
+function micDilutionFold(stock,stockU,target,targetU,mw){
+  if(micIsFold(stockU)&&micIsFold(targetU)) return (target>0)? stock/target : NaN;
+  if(micIsFold(targetU)) return target;              // "dilute 1:500" — the fold IS the answer
+  var a=micToGPerL(stock,stockU,mw), b=micToGPerL(target,targetU,mw);
+  if(isFinite(a)&&isFinite(b)&&b>0) return a/b;
+  var am=micToMolar(stock,stockU,mw), bm=micToMolar(target,targetU,mw);
+  if(isFinite(am)&&isFinite(bm)&&bm>0) return am/bm;
+  return NaN;
+}
+// Volume of solvent to reconstitute a vial: mass ÷ desired concentration.
+function micStockPrep(massMg,conc,unit,mw){
+  var g=massMg/1000, gpl=micToGPerL(conc,unit,mw);
+  if(!(g>0)||!isFinite(gpl)||!(gpl>0)) return NaN;
+  return g/gpl*1e6;   // litres → µL
+}
+
+/* The working-dilution solver. Shared by the Microscopy module and the `dyedil`
+   calculator. When the neat stock volume falls below what a pipette can deliver, it
+   builds an intermediate dilution using the SAME sizeDilutionSeries() the plate
+   planner and phage planner use, rather than a second implementation of the same
+   idea. Volumes are µL throughout. */
+function dyeWorking(o){
+  o=o||{};
+  var n=Math.max(1,Math.round(o.n||1)),
+      volPer=o.volPer>0?o.volPer:0,
+      over=o.over>=0?o.over:10,
+      minPip=o.minPip>0?o.minPip:2,
+      factor=o.factor>1?o.factor:10,
+      stepVol=o.stepVol>0?o.stepVol:100;
+  var fold=micDilutionFold(o.stockConc,o.stockUnit,o.targetConc,o.targetUnit,o.mw);
+  var out={fold:fold, n:n, volPer:volPer, over:over, warn:[]};
+  if(!isFinite(fold)||!(fold>0)){
+    out.warn.push(o.mw>0
+      ? 'Those two units cannot be compared — check the stock and target values.'
+      : 'This dye has no published molecular weight, so a stock in mass units cannot be converted to a molar target. Use the same unit family for both, or work in fold dilutions.');
+    return out;
+  }
+  if(fold<1){ out.warn.push('The target is more concentrated than the stock — you cannot get there by diluting.'); return out; }
+  if(!(volPer>0)){ out.warn.push('Enter the volume of working solution each sample needs.'); return out; }
+
+  var total=n*volPer*(1+over/100);
+  var draw=total/fold;
+  out.total=total; out.perSample=volPer; out.stockDraw=draw; out.diluent=total-draw;
+
+  if(draw<minPip){
+    // Neat stock is not pipettable. Find the smallest number of `factor`-fold
+    // intermediate steps that lifts the transfer above the pipetting floor.
+    var k=1; while(draw*Math.pow(factor,k)<minPip&&k<6) k++;
+    var need=draw*Math.pow(factor,k);
+    var demand=[]; demand[k]=need;
+    var series=sizeDilutionSeries(demand,k,factor,minPip,stepVol);
+    out.k=k; out.interFold=Math.pow(factor,k); out.interDraw=need; out.series=series;
+    out.diluent=total-need;
+    out.warn.push('Neat stock would be '+SCI.fmt(draw,3)+' µL — below the '+minPip+' µL you can pipette reliably. Make a 1:'+SCI.fmt(Math.pow(factor,k),4)+' intermediate first and take '+SCI.fmt(need,3)+' µL of that instead.');
+  }
+  return out;
+}
+
+/* ══════════════════════════ MICROSCOPY MODULE ══════════════════════════ */
+/* Browse the dye library by what you are actually staining, get the working
+   dilution worked out for your sample count, read the directions, and check a
+   whole panel against your scope before you commit reagents to it. The spectral
+   maths lives at top level (micPanelCheck, dyeWorking and friends) so this module
+   and the `dyedil` calculator share one implementation. */
+(function(){
+  var css=`
+  #micSearch{width:100%;font-family:var(--mono);font-size:12px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);box-sizing:border-box;}
+  #micSearch:focus-visible{outline:2px solid var(--accent2);outline-offset:1px;}
+  #micChips{display:flex;flex-wrap:wrap;gap:4px;}
+  .mic-chip{font:600 9.5px/1 var(--mono);letter-spacing:.02em;padding:5px 7px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--text3);cursor:pointer;}
+  .mic-chip:hover{background:var(--surface2);color:var(--text2);}
+  .mic-chip.active{background:var(--accent2);border-color:var(--accent2);color:#fff;}
+  .mic-chip:focus-visible{outline:2px solid var(--accent2);outline-offset:1px;}
+  .mic-item{display:block;width:100%;text-align:left;padding:7px 11px;border:0;background:transparent;color:var(--text2);cursor:pointer;font-size:12.5px;border-left:2px solid transparent;line-height:1.35;}
+  .mic-item:hover{background:var(--surface2);}
+  .mic-item.active{background:var(--surface2);color:var(--text);border-left-color:var(--accent2);font-weight:600;}
+  .mic-item .mic-sw{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:baseline;border:1px solid rgba(0,0,0,.25);}
+  .mic-item .mic-ix{display:block;font-family:var(--mono);font-size:9.5px;color:var(--text3);margin-left:14px;}
+  .mic-sec{margin-top:18px;margin-bottom:9px;font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);padding-bottom:5px;}
+  .mic-sec:first-child{margin-top:0;}
+  .mic-meta{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;}
+  .mic-pill{font:600 10px var(--mono);padding:4px 8px;border-radius:999px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);}
+  .mic-pill.ex{border-color:var(--accent2);}
+  .mic-spec{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px 4px;overflow-x:auto;}
+  .mic-spec svg{display:block;width:100%;min-width:420px;height:auto;}
+  .mic-disc{font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5;font-style:italic;}
+  .mic-note{margin-top:10px;padding:9px 12px;border-radius:8px;font-size:12px;line-height:1.5;border:1px solid;}
+  .mic-note.bad{background:rgba(192,57,43,.10);border-color:rgba(192,57,43,.45);color:var(--text2);}
+  .mic-note.warn{background:rgba(214,158,46,.12);border-color:rgba(214,158,46,.5);color:var(--text2);}
+  .mic-note.ok{background:rgba(61,138,85,.10);border-color:rgba(61,138,85,.4);color:var(--text2);}
+  .mic-haz{margin:0 0 12px;padding:9px 12px;border-radius:8px;font-size:12px;line-height:1.5;background:rgba(192,57,43,.09);border:1px solid rgba(192,57,43,.4);color:var(--text2);}
+  .mic-steps{list-style:none;padding:0;margin:6px 0 0;counter-reset:micstep;}
+  .mic-step{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;line-height:1.55;}
+  .mic-step:last-child{border-bottom:0;}
+  .mic-step.done .mic-sbody{opacity:.45;text-decoration:line-through;}
+  .mic-step input{margin-top:3px;flex:0 0 auto;width:15px;height:15px;cursor:pointer;}
+  .mic-num{font:700 10px var(--mono);color:var(--text3);flex:0 0 16px;margin-top:3px;}
+  .mic-sbody{flex:1;}
+  .mic-st{display:block;font-weight:700;color:var(--text);}
+  .mic-sd{display:block;color:var(--text2);}
+  .mic-notes{margin:6px 0 0;padding-left:18px;font-size:12px;line-height:1.6;color:var(--text2);}
+  .mic-notes li{margin-bottom:4px;}
+  .mic-src{margin-top:14px;font-size:11px;color:var(--text3);line-height:1.6;}
+  .mic-panel-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
+  .mic-panel-row:last-child{border-bottom:0;}
+  .mic-x{border:0;background:transparent;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 6px;min-width:26px;min-height:26px;}
+  .mic-x:hover{color:#c0392b;}
+  .mic-empty{color:var(--text3);font-style:italic;padding:14px 0;font-size:12.5px;}
+  @media print{ #micChips,#micSearch{display:none!important;} }
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  function f(n,p){ return SCI.fmt(n,p||4); }
+  function vol(v){ if(!isFinite(v))return '—'; if(v<1000)return f(v,3)+' µL'; if(v<1e6)return f(v/1000,3)+' mL'; return f(v/1e6,3)+' L'; }
+  var esc=escapeHtml;
+
+  // Filter chips. `cls` matches the library category outright; `match` also catches
+  // dyes that sit in another category but hit the same biological target — MitoTracker
+  // is an organelle dye, but someone looking for "mitochondria" should find it.
+  var TARGETS=[
+    {k:'nucleus',  label:'Nucleus / DNA',       cls:['nuclear-dna']},
+    {k:'membrane', label:'Membrane / lipid',    cls:['membrane']},
+    {k:'mito',     label:'Mitochondria',        match:/mitochondri/i},
+    {k:'lyso',     label:'Lysosome / acidic',   match:/lysosom|acidic organelle/i},
+    {k:'cytoskel', label:'Actin / tubulin',     cls:['cytoskeleton']},
+    {k:'viability',label:'Viability',           cls:['viability']},
+    {k:'wall',     label:'Cell wall / capsule', cls:['bacterial'], match:/peptidoglycan|capsul|chitin|cell wall|endospore/i},
+    {k:'antibody', label:'Antibody label',      cls:['antibody-label']},
+    {k:'fp',       label:'Fluorescent protein', cls:['fluorescent-protein']},
+    {k:'histo',    label:'Brightfield / tissue',cls:['histology']},
+    {k:'em',       label:'EM negative stain',   cls:['em-negative-stain']}
+  ];
+  var SAMPLES=[
+    {k:'live-cell', label:'Live cells'}, {k:'fixed-cell', label:'Fixed cells'},
+    {k:'bacteria',  label:'Bacteria'},   {k:'tissue',     label:'Tissue'},
+    {k:'em-grid',   label:'EM grid'},    {k:'gel',        label:'Gels'}
+  ];
+
+  var lib=null, all=[], byId={}, loaded=false;
+  var cur=null, view='dye', fTarget=null, fSample=null, done={}, panelIds=[], cfgId='confocal4';
+  var P={n:6, volPer:200, volUnit:'µL', over:10, minPip:2, factor:10, target:null, targetUnit:null, vialMg:1};
+
+  function lsPanel(){ try{ return JSON.parse(lsGet('dd_mic_panel')||'[]'); }catch(e){ return []; } }
+  function savePanel(){ try{ lsSet('dd_mic_panel',JSON.stringify(panelIds)); }catch(e){} }
+  function custom(){ try{ return JSON.parse(lsGet('dd_mic_dyes')||'[]'); }catch(e){ return []; } }
+  function saveCustom(l){ try{ lsSet('dd_mic_dyes',JSON.stringify(l)); }catch(e){} }
+
+  // ── library load: same shape and the same graceful failure as rpInit() ──
+  function init(){
+    panelIds=lsPanel();
+    if(loaded){ renderChips(); renderNav(); renderMain(); return; }
+    var s=document.getElementById('micLibStatus'); if(s) s.textContent='Loading dye library…';
+    fetch('dye-library.json',{cache:'no-cache'})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){ lib=d; finishLoad(); })
+      .catch(function(e){
+        var el=document.getElementById('micLibStatus'); if(!el) return;
+        var isFile=(location.protocol==='file:');
+        el.innerHTML='<span style="color:var(--danger,#c0392b)">'+(isFile
+          ? 'The dye library can’t be read when index.html is opened directly from disk — browsers block file:// data requests. Open the hosted page (or run <code>python -m http.server</code> in this folder) and it will work, then stay available offline.'
+          : 'Could not load dye-library.json ('+esc(e.message)+'). Make sure it sits next to index.html.')+'</span>';
+        var m=document.getElementById('micMain');
+        if(m) m.innerHTML='<div class="mic-empty">The dye library did not load — see the message in the sidebar.</div>';
+      });
+  }
+  function finishLoad(){
+    loaded=true; flatten();
+    var last=null; try{ last=lsGet('mic_last'); }catch(e){}
+    cur=byId[last]?last:(all[0]&&all[0].id);
+    renderChips(); renderNav(); renderMain();
+    var s=document.getElementById('micLibStatus'); if(s) s.textContent=all.length+' dyes & stains';
+    // The hub renders before this fetch resolves, so its dye count starts as a
+    // literal. Refresh it now the real number exists, so the two cannot disagree.
+    if(typeof appMode!=='undefined'&&appMode==='home'&&window.renderHome) try{ renderHome(); }catch(e){}
+  }
+  function flatten(){
+    all=[]; byId={};
+    (lib.categories||[]).forEach(function(c){
+      (c.dyes||[]).forEach(function(d){ all.push(Object.assign({_cat:c.title,_catKey:c.key},d)); });
+    });
+    custom().forEach(function(d){ all.push(Object.assign({},d,{_cat:'My dyes',_catKey:'custom',_custom:true})); });
+    all.forEach(function(d){ byId[d.id]=d; });
+    MIC.list=all;
+  }
+
+  // ── wavelength → approximate display colour, for the spectra strip ──
+  function wlRGB(nm){
+    var r=0,g=0,b=0;
+    if(nm<380) {r=0.35;g=0;b=0.55;}
+    else if(nm<440){r=(440-nm)/60;g=0;b=1;}
+    else if(nm<490){r=0;g=(nm-440)/50;b=1;}
+    else if(nm<510){r=0;g=1;b=(510-nm)/20;}
+    else if(nm<580){r=(nm-510)/70;g=1;b=0;}
+    else if(nm<645){r=1;g=(645-nm)/65;b=0;}
+    else if(nm<781){r=1;g=0;b=0;}
+    else {r=0.45;g=0.05;b=0.05;}
+    var a=1; if(nm>700) a=0.35+0.65*(780-nm)/80; if(nm<420) a=0.35+0.65*(nm-350)/70;
+    a=Math.max(0.35,Math.min(1,a));
+    function q(x){ return Math.round(255*Math.pow(Math.max(0,Math.min(1,x))*a,0.8)); }
+    return 'rgb('+q(r)+','+q(g)+','+q(b)+')';
+  }
+  var SP_LO=340, SP_HI=800, SP_W=700, SP_PAD_L=30, SP_PAD_R=26, SP_ROW=16;
+  function spX(nm){ return (nm-SP_LO)/(SP_HI-SP_LO)*(SP_W-SP_PAD_L-SP_PAD_R)+SP_PAD_L; }
+  // Marks published maxima on a wavelength axis. It deliberately does NOT draw
+  // spectral curves — we do not ship curves, and a drawn one would be fiction.
+  // Each dye gets its own row so the labels in a multi-dye panel cannot collide.
+  function specSVG(dyes){
+    var list=(dyes||[]).filter(function(d){ return d&&d.spectra; });
+    var h=56+Math.max(1,list.length)*SP_ROW;
+    var s='<svg viewBox="0 0 '+SP_W+' '+h+'" role="img" aria-label="Excitation and emission maxima on a wavelength axis">';
+    s+='<defs><linearGradient id="micgrad" x1="0" x2="1">';
+    for(var w=SP_LO;w<=SP_HI;w+=20) s+='<stop offset="'+((w-SP_LO)/(SP_HI-SP_LO)*100).toFixed(1)+'%" stop-color="'+wlRGB(w)+'"/>';
+    s+='</linearGradient></defs>';
+    s+='<rect x="'+SP_PAD_L+'" y="8" width="'+(SP_W-SP_PAD_L-SP_PAD_R)+'" height="12" fill="url(#micgrad)" rx="2" opacity="0.85"/>';
+    // channel collection bands
+    MIC_CHANNELS.forEach(function(c){
+      var x0=spX(c.em[0]), x1=spX(c.em[1]);
+      s+='<rect x="'+x0.toFixed(1)+'" y="24" width="'+(x1-x0).toFixed(1)+'" height="8" fill="'+wlRGB((c.em[0]+c.em[1])/2)+'" opacity="0.30"/>';
+    });
+    // axis ticks — stop at 700 so the last label cannot run into the "nm" caption
+    for(var t=400;t<=700;t+=100){
+      s+='<line x1="'+spX(t).toFixed(1)+'" y1="34" x2="'+spX(t).toFixed(1)+'" y2="39" stroke="currentColor" opacity="0.35"/>';
+      s+='<text x="'+spX(t).toFixed(1)+'" y="48" font-size="9" fill="currentColor" opacity="0.55" text-anchor="middle" font-family="monospace">'+t+'</text>';
+    }
+    s+='<text x="'+(SP_W-4)+'" y="48" font-size="9" fill="currentColor" opacity="0.55" text-anchor="end" font-family="monospace">nm</text>';
+    list.forEach(function(d,i){
+      var xe=spX(d.spectra.ex), xm=spX(d.spectra.em), yy=62+i*SP_ROW;
+      s+='<line x1="'+xe.toFixed(1)+'" y1="'+yy+'" x2="'+xm.toFixed(1)+'" y2="'+yy+'" stroke="currentColor" opacity="0.30" stroke-dasharray="2 2"/>';
+      s+='<circle cx="'+xe.toFixed(1)+'" cy="'+yy+'" r="4" fill="none" stroke="'+wlRGB(d.spectra.ex)+'" stroke-width="2"/>';
+      s+='<circle cx="'+xm.toFixed(1)+'" cy="'+yy+'" r="4.5" fill="'+wlRGB(d.spectra.em)+'"/>';
+      if(list.length>1){
+        // Label to the right of the emission dot, unless that would overflow —
+        // then put it to the left of the excitation dot instead.
+        var txtW=d.name.length*5.4, right=(xm+9+txtW)<=(SP_W-4);
+        s+='<text x="'+(right?(xm+9):(xe-9)).toFixed(1)+'" y="'+(yy+3.5)+'" font-size="9" fill="currentColor" opacity="0.85" font-family="monospace" text-anchor="'+(right?'start':'end')+'">'+esc(d.name)+'</text>';
+      }
+    });
+    s+='</svg>';
+    return s;
+  }
+
+  // ── sidebar ──
+  function renderChips(){
+    var el=document.getElementById('micChips'); if(!el) return;
+    el.innerHTML='<div style="width:100%;font:600 9px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin:6px 0 2px;">What are you staining?</div>'+
+      TARGETS.map(function(t){ return '<button class="mic-chip'+(fTarget===t.k?' active':'')+'" onclick="MIC.setTarget(\''+jsAttr(t.k)+'\')">'+esc(t.label)+'</button>'; }).join('')+
+      '<div style="width:100%;font:600 9px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin:8px 0 2px;">Sample type</div>'+
+      SAMPLES.map(function(t){ return '<button class="mic-chip'+(fSample===t.k?' active':'')+'" onclick="MIC.setSample(\''+jsAttr(t.k)+'\')">'+esc(t.label)+'</button>'; }).join('');
+  }
+  function matchesTarget(d){
+    if(!fTarget) return true;
+    var t=null; TARGETS.forEach(function(x){ if(x.k===fTarget) t=x; });
+    if(!t) return true;
+    if(t.cls&&t.cls.indexOf(d['class'])>=0) return true;
+    if(t.match) return t.match.test((d.name||'')+' '+(d.target||'')+' '+(d.summary||'')+' '+(d.aka||[]).join(' '));
+    return false;
+  }
+  function filtered(){
+    var q=((document.getElementById('micSearch')||{}).value||'').toLowerCase().trim();
+    return all.filter(function(d){
+      if(!matchesTarget(d)) return false;
+      if(fSample&&(d.samples||[]).indexOf(fSample)<0) return false;
+      if(q){
+        var hay=(d.name+' '+(d.aka||[]).join(' ')+' '+(d.target||'')+' '+(d.summary||'')+' '+d._cat+' '+
+                 (d.applications||[]).map(function(a){return a.assay;}).join(' ')).toLowerCase();
+        if(hay.indexOf(q)<0) return false;
+      }
+      return true;
+    });
+  }
+  function renderNav(){
+    var el=document.getElementById('micList'); if(!el) return;
+    var list=filtered();
+    if(!list.length){ el.innerHTML='<div class="mic-empty" style="padding:12px">No dye matches those filters.</div>'; return; }
+    var groups={}, order=[];
+    list.forEach(function(d){ if(!groups[d._cat]){groups[d._cat]=[];order.push(d._cat);} groups[d._cat].push(d); });
+    el.innerHTML=order.map(function(g){
+      return '<div class="mbc-group">'+esc(g)+'</div>'+groups[g].map(function(d){
+        var sw=d.spectra?'<span class="mic-sw" style="background:'+wlRGB(d.spectra.em)+'"></span>':'<span class="mic-sw" style="background:var(--text3)"></span>';
+        var sub=d.spectra?('Ex '+d.spectra.ex+' / Em '+d.spectra.em+' nm'):(d.absMax?('absorbs ~'+d.absMax+' nm — brightfield'):'brightfield / EM');
+        return '<button class="mic-item'+(d.id===cur&&view==='dye'?' active':'')+'" role="option" onclick="MIC.open(\''+jsAttr(d.id)+'\')">'+
+               sw+esc(d.name)+'<span class="mic-ix">'+esc(sub)+'</span></button>';
+      }).join('');
+    }).join('');
+  }
+
+  // ── main pane: dye sheet ──
+  function paramsFor(d){
+    // Seed the calculator from the dye's own recommended working concentration the
+    // first time it is opened, so the default answer is the right answer.
+    var w=d.working;
+    if(P._for!==d.id){
+      P._for=d.id;
+      P.target=w?w.conc:1;
+      P.targetUnit=w?w.unit:'µM';
+      P.vialMg=1;
+    }
+    return P;
+  }
+  function volPerUL(){ return P.volUnit==='mL'?P.volPer*1000:P.volPer; }
+  function unitOpts(sel){
+    var us=['nM','µM','mM','ng/mL','µg/mL','mg/mL','fold'];
+    if(sel&&us.indexOf(sel)<0) us.unshift(sel);
+    return us.map(function(u){ return '<option value="'+esc(u)+'"'+(u===sel?' selected':'')+'>'+(u==='fold'?'1:X (fold)':esc(u))+'</option>'; }).join('');
+  }
+  function num(id,label,val,step,min,attr){
+    return '<div class="mbc-f"><label for="'+id+'">'+esc(label)+'</label><input id="'+id+'" type="number" inputmode="decimal" step="'+(step||'any')+'"'+(min!=null?' min="'+min+'"':'')+' value="'+val+'" oninput="MIC.set(\''+jsAttr(attr)+'\',this.value)"></div>';
+  }
+
+  function dilutionHtml(d){
+    var p=paramsFor(d);
+    var stock=d.stock;
+    var h='<div class="mic-sec">Working dilution</div>';
+    if(!stock){
+      return h+'<div class="mic-empty">'+esc(d.name)+' is genetically encoded — there is nothing to dilute.</div>';
+    }
+    h+='<div class="mbc-form">'+
+      '<div class="mbc-f"><label for="micTargU">Target concentration</label><div style="display:flex;gap:6px;">'+
+        '<input id="micTarg" type="number" inputmode="decimal" step="any" min="0" value="'+p.target+'" oninput="MIC.set(\'target\',this.value)" style="flex:1;">'+
+        '<select id="micTargU" onchange="MIC.set(\'targetUnit\',this.value)" style="flex:0 0 96px;">'+unitOpts(p.targetUnit)+'</select>'+
+      '</div><div class="mbc-hint">'+esc(d.working&&d.working.range?('typical: '+d.working.range):'titrate on your own sample')+'</div></div>'+
+      num('micN','Number of samples',p.n,'1',1,'n')+
+      '<div class="mbc-f"><label for="micVol">Volume per sample</label><div style="display:flex;gap:6px;">'+
+        '<input id="micVol" type="number" inputmode="decimal" step="any" min="0" value="'+p.volPer+'" oninput="MIC.set(\'volPer\',this.value)" style="flex:1;">'+
+        '<select id="micVolU" onchange="MIC.set(\'volUnit\',this.value)" style="flex:0 0 72px;"><option value="µL"'+(p.volUnit==='µL'?' selected':'')+'>µL</option><option value="mL"'+(p.volUnit==='mL'?' selected':'')+'>mL</option></select>'+
+      '</div></div>'+
+      num('micOver','Overage (%)',p.over,'1',0,'over')+
+      num('micMin','Smallest reliable pipette (µL)',p.minPip,'0.5',0.1,'minPip')+
+    '</div>';
+
+    var r=dyeWorking({stockConc:stock.conc, stockUnit:stock.unit, mw:d.mw,
+                      targetConc:p.target, targetUnit:p.targetUnit,
+                      n:p.n, volPer:volPerUL(), over:p.over, minPip:p.minPip, factor:p.factor});
+    var txt=[];
+    if(!isFinite(r.fold)||r.warn.length&&r.total==null){
+      h+='<div class="mic-note warn">'+r.warn.map(esc).join('<br>')+'</div>';
+      MIC._dilTxt=r.warn.join(' '); MIC._dil=null;
+      return h;
+    }
+    var rows=[
+      ['Stock', f(stock.conc)+' '+stock.unit+(stock.solvent?' in '+stock.solvent:'')],
+      ['Dilution needed', '1 : '+f(r.fold,4)],
+      ['Working solution to make', vol(r.total)+'  ('+r.n+' × '+vol(r.volPer)+' + '+f(r.over)+'% overage)']
+    ];
+    if(r.series){
+      rows.push(['Intermediate', '1 : '+f(r.interFold,4)+' — see the ladder below']);
+      rows.push(['Take intermediate', vol(r.interDraw)]);
+    } else {
+      rows.push(['Take stock', vol(r.stockDraw)]);
+    }
+    rows.push(['Add diluent', vol(r.diluent)+(d.working&&d.working.buffer?' ('+d.working.buffer+')':'')]);
+    h+='<div class="mbc-tblwrap"><table class="mbc-tbl"><tbody>'+rows.map(function(x){
+      txt.push(x[0]+': '+x[1]);
+      return '<tr><td style="color:var(--text3)">'+esc(x[0])+'</td><td><b>'+esc(x[1])+'</b></td></tr>';
+    }).join('')+'</tbody></table></div>';
+
+    if(r.series){
+      var s=r.series, lad=[];
+      for(var k=1;k<=r.k;k++){
+        lad.push(['1 : '+f(Math.pow(p.factor,k),4), vol(s.prep[k]), vol(s.transferIn[k]), vol(s.diluent[k])]);
+      }
+      h+='<div class="mbc-tblwrap" style="margin-top:10px;"><table class="mbc-tbl"><thead><tr><th>Intermediate</th><th>Make</th><th>Transfer in</th><th>Diluent</th></tr></thead><tbody>'+
+        lad.map(function(x){ txt.push(x[0]+': make '+x[1]+' = '+x[2]+' + '+x[3]); return '<tr>'+x.map(function(c,i){return '<td'+(i?'':' style="font-family:var(--mono)"')+'>'+esc(c)+'</td>';}).join('')+'</tr>'; }).join('')+
+        '</tbody></table></div>';
+      h+='<div class="mic-note warn">'+r.warn.map(esc).join('<br>')+'</div>';
+    }
+    // Stock reconstitution
+    var vp=micStockPrep(p.vialMg, stock.conc, stock.unit, d.mw);
+    h+='<div class="mic-sec">Making the stock</div><div class="mbc-form">'+
+       num('micVial','Vial contents (mg)',p.vialMg,'any',0,'vialMg')+
+       '</div>';
+    if(isFinite(vp)&&vp>0){
+      h+='<div class="mbc-tblwrap"><table class="mbc-tbl"><tbody>'+
+         '<tr><td style="color:var(--text3)">Dissolve in</td><td><b>'+esc(vol(vp))+'</b> of '+esc(stock.solvent||'solvent')+'</td></tr>'+
+         '<tr><td style="color:var(--text3)">Gives</td><td><b>'+esc(f(stock.conc)+' '+stock.unit)+'</b></td></tr>'+
+         (stock.storage?'<tr><td style="color:var(--text3)">Store</td><td>'+esc(stock.storage)+'</td></tr>':'')+
+         '</tbody></table></div>';
+      txt.push('Reconstitute '+f(p.vialMg)+' mg in '+vol(vp)+' of '+(stock.solvent||'solvent')+' → '+f(stock.conc)+' '+stock.unit);
+    } else {
+      h+='<div class="mic-note warn">'+esc(d.name+' has no published molecular weight, so a mg vial cannot be converted to a '+stock.unit+' stock. Follow the vendor’s reconstitution instructions on the vial.')+'</div>';
+    }
+    if(stock.note) h+='<div class="mic-disc">'+esc(stock.note)+'</div>';
+    MIC._dilTxt=txt.join('\n');
+    MIC._dil=r;
+    return h;
+  }
+
+  function dyeHtml(d){
+    var sp=d.spectra, ch=sp?micChannelFor(d):null;
+    var h='<div class="mbc-head"><h2>'+esc(d.name)+'</h2><p>'+esc(d.summary||'')+'</p></div>';
+    h+='<div class="mic-meta">'+
+       (sp?'<span class="mic-pill ex">Ex '+sp.ex+' / Em '+sp.em+' nm</span>':'')+
+       (ch?'<span class="mic-pill">'+esc(ch.label)+'</span>':'')+
+       (!sp&&d.absMax?'<span class="mic-pill">absorbs ~'+d.absMax+' nm</span>':'')+
+       (!sp?'<span class="mic-pill">brightfield / EM — not fluorescent</span>':'')+
+       '<span class="mic-pill">'+esc(d._cat)+'</span>'+
+       '<span class="mic-pill">'+esc(d.live==='yes'?'live-cell permeant':d.live==='poor'?'poorly permeant':'not cell-permeant')+'</span>'+
+       (d.mw>0?'<span class="mic-pill">MW '+f(d.mw)+'</span>':'')+
+       '</div>';
+    if(d.aka&&d.aka.length) h+='<div class="mic-disc" style="margin:-6px 0 12px;">Also known as: '+esc(d.aka.join(' · '))+'</div>';
+    if(d.hazards) h+='<div class="mic-haz"><b>Safety —</b> '+esc(d.hazards)+'</div>';
+
+    h+='<div class="mbc-actions">'+
+       '<button class="btn" onclick="NB.capture(\'mic\')" title="Add this to a notebook entry">📓 Notebook</button>'+
+       '<button class="btn" onclick="MIC.copy()">Copy</button>'+
+       '<button class="btn" onclick="window.print()">🖨 Print</button>'+
+       '<button class="btn'+(panelIds.indexOf(d.id)>=0?'':' ac')+'" onclick="MIC.togglePanel(\''+jsAttr(d.id)+'\')">'+(panelIds.indexOf(d.id)>=0?'✓ In panel':'＋ Add to panel')+'</button>'+
+       '</div>';
+
+    if(sp){
+      h+='<div class="mic-sec">Where it sits</div><div class="mic-spec">'+specSVG([d])+'</div>';
+      var bits=[];
+      if(sp.ec>0) bits.push('ε '+f(sp.ec)+' M⁻¹cm⁻¹');
+      if(sp.qy>0) bits.push('QY '+f(sp.qy,2));
+      if(sp.ec>0&&sp.qy>0) bits.push('brightness '+f(sp.ec*sp.qy/1000,3)+' (ε×QY/1000)');
+      var wh=[['Excitation max', sp.ex+' nm'],['Emission max', sp.em+' nm'],['Stokes shift',(sp.em-sp.ex)+' nm']];
+      if(ch){
+        wh.push(['Channel', ch.label]);
+        wh.push(['Filter cube', ch.cube]);
+        wh.push(['Confocal line', ch.laser+' nm — '+Math.round(micExEff(d,ch.laser)*100)+'% of maximum excitation']);
+      }
+      if(d.lasers&&d.lasers.length) wh.push(['Also excited by', d.lasers.join(', ')+' nm']);
+      if(bits.length) wh.push(['Brightness', bits.join(' · ')]);
+      h+='<div class="mbc-tblwrap"><table class="mbc-tbl"><tbody>'+wh.map(function(x){
+        return '<tr><td style="color:var(--text3)">'+esc(x[0])+'</td><td>'+esc(x[1])+'</td></tr>'; }).join('')+'</tbody></table></div>';
+      if(sp.note) h+='<div class="mic-disc">'+esc(sp.note)+'</div>';
+      // Which other library entries would fight it for this channel.
+      var clash=all.filter(function(o){ return o.id!==d.id&&o.spectra&&micOverlapIndex(d,o)>0.5; })
+                   .sort(function(a,b){ return micOverlapIndex(d,b)-micOverlapIndex(d,a); }).slice(0,6);
+      if(clash.length) h+='<div class="mic-note warn"><b>Do not put in the same panel:</b> '+clash.map(function(o){return esc(o.name);}).join(', ')+' — their emission overlaps this one too closely to separate.</div>';
+    } else if(d.cubes&&d.cubes.length){
+      h+='<div class="mic-sec">How it is viewed</div><div class="mic-note ok">'+esc(d.cubes.join(' · '))+'</div>';
+    }
+
+    if(d.applications&&d.applications.length){
+      h+='<div class="mic-sec">What to use it for</div><div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Assay</th><th>Concentration &amp; time</th><th>Note</th></tr></thead><tbody>'+
+        d.applications.map(function(a){
+          return '<tr><td><b>'+esc(a.assay)+'</b></td><td>'+esc(a.conc)+'</td><td style="color:var(--text3)">'+esc(a.note||'')+'</td></tr>'; }).join('')+
+        '</tbody></table></div>';
+    }
+
+    h+=dilutionHtml(d);
+
+    if(d.working){
+      var w=d.working, wr=[['Incubate', (w.time||'—')+(w.temp?' at '+w.temp:'')],['Buffer', w.buffer||'—'],['Wash', w.wash||'—']];
+      if(w.dark) wr.push(['Light','Protect from light from the moment the dye goes in']);
+      h+='<div class="mic-sec">Conditions</div><div class="mbc-tblwrap"><table class="mbc-tbl"><tbody>'+
+        wr.map(function(x){ return '<tr><td style="color:var(--text3)">'+esc(x[0])+'</td><td>'+esc(x[1])+'</td></tr>'; }).join('')+'</tbody></table></div>';
+    }
+
+    if(d.directions&&d.directions.length){
+      h+='<div class="mic-sec">Directions</div><ol class="mic-steps">'+d.directions.map(function(s,i){
+        // Library `d` is repo-authored and carries <b>/<i> emphasis, exactly like the
+        // protocol steps. A user-added custom dye never gets that — it is escaped.
+        var body=d._custom?esc(String(s.d)):String(s.d);
+        return '<li class="mic-step'+(done[cur+'_'+i]?' done':'')+'" id="micstep_'+i+'"><input type="checkbox" '+(done[cur+'_'+i]?'checked':'')+' onchange="MIC.tick('+i+',this.checked)" aria-label="step '+(i+1)+' done"><span class="mic-num">'+(i+1)+'</span><span class="mic-sbody"><span class="mic-st">'+esc(s.t)+'</span><span class="mic-sd">'+body+'</span></span></li>';
+      }).join('')+'</ol>';
+    }
+    if(d.notes&&d.notes.length) h+='<div class="mic-sec">Notes</div><ul class="mic-notes">'+d.notes.map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul>';
+    if(d.mwSource) h+='<div class="mic-src">Molecular weight: '+esc(d.mwSource)+'</div>';
+    if(d.sources&&d.sources.length) h+='<div class="mic-src">Reference: '+d.sources.map(function(s){return '<a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">'+esc(s.title)+'</a>';}).join(' · ')+' — spectra are published maxima; working concentrations are starting points. Always check against your own lab SOP.</div>';
+    if(d._custom) h+='<div class="mbc-actions"><button class="btn" onclick="MIC.delCustom(\''+jsAttr(d.id)+'\')">Delete this dye</button></div>';
+    return h;
+  }
+
+  // ── main pane: panel builder ──
+  function panelHtml(){
+    var dyes=panelIds.map(function(id){return byId[id];}).filter(Boolean);
+    var h='<div class="mbc-head"><h2>Panel builder</h2><p>Check a whole set of dyes against your scope before you commit reagents to it — which channel each one lands in, and where they will bleed into each other.</p></div>';
+    h+='<div class="mbc-form"><div class="mbc-f mbc-wide"><label for="micCfg">Microscope configuration</label><select id="micCfg" onchange="MIC.set(\'cfg\',this.value)">'+
+       MIC_CONFIGS.map(function(c){ return '<option value="'+esc(c.id)+'"'+(c.id===cfgId?' selected':'')+'>'+esc(c.label)+'</option>'; }).join('')+'</select></div></div>';
+    h+='<div class="mic-sec">Dyes in this panel</div>';
+    if(!dyes.length){
+      h+='<div class="mic-empty">Nothing added yet. Open a dye from the list and press <b>＋ Add to panel</b>.</div>';
+      MIC._panelTxt='Panel is empty.'; MIC._panel=null;
+      return h;
+    }
+    h+=dyes.map(function(d){
+      return '<div class="mic-panel-row"><span style="flex:1;"><b>'+esc(d.name)+'</b>'+(d.spectra?' <span style="font-family:var(--mono);font-size:10.5px;color:var(--text3)">Ex '+d.spectra.ex+' / Em '+d.spectra.em+'</span>':' <span style="font-family:var(--mono);font-size:10.5px;color:var(--text3)">not fluorescent</span>')+'</span>'+
+             '<button class="mic-x" onclick="MIC.togglePanel(\''+jsAttr(d.id)+'\')" aria-label="Remove '+jsAttr(d.name)+' from panel">✕</button></div>';
+    }).join('');
+
+    var res=micPanelCheck(dyes,cfgId);
+    MIC._panel=res;
+    var txt=['Panel — '+res.config.label];
+    if(res.rows.length){
+      h+='<div class="mic-sec">Channel assignment</div><div class="mic-spec">'+specSVG(res.rows.map(function(r){return r.dye;}))+'</div>';
+      h+='<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Dye</th><th>Ex / Em</th><th>Channel</th><th>Laser</th><th>Excitation at that line</th></tr></thead><tbody>'+
+        res.rows.map(function(r){
+          var pct=Math.round(r.exEff*100);
+          txt.push(r.dye.name+': Ex '+r.dye.spectra.ex+' / Em '+r.dye.spectra.em+' → '+(r.chan?r.chan.label+' ('+r.chan.laser+' nm, '+pct+'%)':'no channel'));
+          return '<tr><td><b>'+esc(r.dye.name)+'</b></td><td>'+r.dye.spectra.ex+' / '+r.dye.spectra.em+' nm</td><td>'+esc(r.chan?r.chan.label:'—')+'</td><td>'+(r.chan?r.chan.laser+' nm':'—')+'</td><td'+(pct<25?' style="color:#c0392b;font-weight:700"':'')+'>'+pct+'%</td></tr>';
+        }).join('')+'</tbody></table></div>';
+    }
+    h+='<div class="mic-sec">Verdict</div>';
+    if(!res.warnings.length){
+      h+='<div class="mic-note ok">No conflicts found. Every dye lands in its own channel with no significant bleed-through or cross-excitation on this configuration.</div>';
+      txt.push('Verdict: no conflicts.');
+    } else {
+      h+=res.warnings.map(function(w){ txt.push('['+w.level+'] '+w.t); return '<div class="mic-note '+w.level+'">'+esc(w.t)+'</div>'; }).join('');
+    }
+    h+='<div class="mic-disc">These numbers are modelled from published excitation and emission <i>maxima</i> and their band widths, not from measured spectra — the app does not ship full spectral curves. Treat them as a sanity check that catches the obvious clashes, not as a substitute for real overlap integrals or for linear unmixing on your own instrument.</div>';
+    h+='<div class="mbc-actions"><button class="btn" onclick="NB.capture(\'mic\')">📓 Notebook</button><button class="btn" onclick="MIC.copy()">Copy</button><button class="btn" onclick="window.print()">🖨 Print</button><button class="btn" onclick="MIC.clearPanel()">Clear panel</button></div>';
+    MIC._panelTxt=txt.join('\n');
+    return h;
+  }
+
+  // ── custom dyes ──
+  function addHtml(){
+    return '<div class="mbc-head"><h2>Add a dye</h2><p>For a reagent the library does not carry. Stored in this browser only, and it shows up in the list and the panel builder alongside the rest.</p></div>'+
+      '<div class="mbc-form">'+
+      '<div class="mbc-f"><label for="micAddName">Name</label><input id="micAddName" placeholder="e.g. Atto 565 phalloidin"></div>'+
+      '<div class="mbc-f"><label for="micAddEx">Excitation max (nm)</label><input id="micAddEx" type="number" step="1" min="250" max="900" placeholder="563"></div>'+
+      '<div class="mbc-f"><label for="micAddEm">Emission max (nm)</label><input id="micAddEm" type="number" step="1" min="300" max="950" placeholder="592"></div>'+
+      '<div class="mbc-f"><label for="micAddMw">Molecular weight (optional)</label><input id="micAddMw" type="number" step="any" min="0" placeholder="leave blank if unknown"></div>'+
+      '<div class="mbc-f"><label for="micAddStock">Stock concentration</label><input id="micAddStock" type="number" step="any" min="0" placeholder="1"></div>'+
+      '<div class="mbc-f"><label for="micAddStockU">Stock unit</label><select id="micAddStockU">'+unitOpts('mg/mL')+'</select></div>'+
+      '<div class="mbc-f"><label for="micAddWork">Working concentration</label><input id="micAddWork" type="number" step="any" min="0" placeholder="1"></div>'+
+      '<div class="mbc-f"><label for="micAddWorkU">Working unit</label><select id="micAddWorkU">'+unitOpts('µM')+'</select></div>'+
+      '<div class="mbc-f mbc-wide"><label for="micAddNote">Notes (optional)</label><textarea id="micAddNote" rows="2" placeholder="solvent, storage, anything you want to remember"></textarea></div>'+
+      '</div><div class="mbc-actions"><button class="btn ac" onclick="MIC.saveNew()">Save dye</button><button class="btn" onclick="MIC.open(MIC.list.length?MIC.list[0].id:null)">Cancel</button></div>';
+  }
+
+  function renderMain(){
+    var m=document.getElementById('micMain'); if(!m) return;
+    if(view==='panel'){ m.innerHTML=panelHtml(); return; }
+    if(view==='add'){ m.innerHTML=addHtml(); return; }
+    var d=byId[cur];
+    if(!d){ m.innerHTML='<div class="mic-empty">Pick a dye from the list.</div>'; return; }
+    m.innerHTML=dyeHtml(d);
+    MIC._txt=plainText(d);
+  }
+  function plainText(d){
+    var t=[d.name];
+    if(d.spectra) t.push('Ex '+d.spectra.ex+' / Em '+d.spectra.em+' nm');
+    t.push(d.summary||'');
+    (d.applications||[]).forEach(function(a){ t.push('- '+a.assay+': '+a.conc); });
+    if(MIC._dilTxt) t.push('',MIC._dilTxt);
+    (d.directions||[]).forEach(function(s,i){ t.push((i+1)+'. '+s.t+' — '+String(s.d).replace(/<[^>]+>/g,'')); });
+    (d.notes||[]).forEach(function(x){ t.push('Note: '+x); });
+    return t.join('\n');
+  }
+
+  window.MIC={
+    list:[],
+    init:init,
+    open:function(id){ if(!id) return; view='dye'; cur=id; try{lsSet('mic_last',id);}catch(e){} renderNav(); renderMain(); },
+    panel:function(){ view='panel'; renderNav(); renderMain(); },
+    add:function(){ view='add'; renderMain(); },
+    filter:function(){ renderNav(); },
+    recompute:renderMain,
+    setTarget:function(k){ fTarget=(fTarget===k?null:k); renderChips(); renderNav(); },
+    setSample:function(k){ fSample=(fSample===k?null:k); renderChips(); renderNav(); },
+    set:function(k,v){
+      if(k==='cfg'){ cfgId=v; renderMain(); return; }
+      if(k==='targetUnit'||k==='volUnit'){ P[k]=v; renderMain(); return; }
+      var x=parseFloat(v); P[k]=isFinite(x)?x:P[k];
+      if(k==='n') P.n=Math.max(1,Math.round(P.n));
+      renderMain();
+    },
+    tick:function(i,on){ done[cur+'_'+i]=on; var el=document.getElementById('micstep_'+i); if(el) el.classList.toggle('done',on); },
+    togglePanel:function(id){
+      var i=panelIds.indexOf(id);
+      if(i>=0){ panelIds.splice(i,1); showToast('Removed from panel'); }
+      else if(panelIds.length>=8){ showToast('Eight dyes is already more than any scope can separate','warn'); return; }
+      else { panelIds.push(id); showToast('✓ Added to panel','green'); }
+      savePanel(); renderMain();
+    },
+    clearPanel:function(){ panelIds=[]; savePanel(); renderMain(); showToast('Panel cleared'); },
+    copy:function(){ dcCopyText(view==='panel'?MIC._panelTxt:MIC._txt); },
+    saveNew:function(){
+      function g(id){ var e=document.getElementById(id); return e?e.value:''; }
+      var name=(g('micAddName')||'').trim();
+      var ex=parseFloat(g('micAddEx')), em=parseFloat(g('micAddEm'));
+      if(!name){ showToast('Give the dye a name','warn'); return; }
+      if(!(ex>0&&em>0)){ showToast('Excitation and emission maxima are both required','warn'); return; }
+      if(em<=ex){ showToast('Emission must be longer than excitation — check the two numbers','warn'); return; }
+      var mw=parseFloat(g('micAddMw')), sc=parseFloat(g('micAddStock')), wc=parseFloat(g('micAddWork'));
+      var rec={ id:'cust-'+Date.now(), name:name, aka:[], 'class':'custom',
+        target:'user-defined', summary:'Added by you.', live:'no', samples:[],
+        mw:isFinite(mw)&&mw>0?mw:null, mwSource:null,
+        spectra:{ex:ex,em:em,ec:null,qy:null,fwhmEx:45,fwhmEm:60,bound:false,note:null},
+        absMax:null, lasers:[], cubes:[],
+        stock:isFinite(sc)&&sc>0?{conc:sc,unit:g('micAddStockU'),solvent:'',storage:'',note:''}:null,
+        working:isFinite(wc)&&wc>0?{conc:wc,unit:g('micAddWorkU'),range:'',time:'',temp:'',buffer:'',wash:'',dark:true}:null,
+        applications:[], directions:[], hazards:null,
+        notes:(g('micAddNote')||'').trim()?[(g('micAddNote')||'').trim()]:[], sources:[] };
+      var l=custom(); l.push(rec); saveCustom(l);
+      flatten(); view='dye'; cur=rec.id; renderNav(); renderMain(); showToast('✓ Dye saved','green');
+    },
+    delCustom:function(id){
+      var l=custom().filter(function(d){ return d.id!==id; }); saveCustom(l);
+      flatten(); cur=all.length?all[0].id:null; renderNav(); renderMain(); showToast('Dye deleted');
+    },
+    // consumed by the notebook capture picker
+    blocks:function(sel){
+      var out=[], d=byId[cur];
+      if(sel.dye&&d){
+        var pairs=[['Dye',d.name]];
+        if(d.spectra){ pairs.push(['Excitation / emission', d.spectra.ex+' / '+d.spectra.em+' nm']);
+          var ch=micChannelFor(d); if(ch) pairs.push(['Channel', ch.label+' — '+ch.cube]); }
+        if(d.working) pairs.push(['Working', f(d.working.conc)+' '+d.working.unit+', '+(d.working.time||'')+(d.working.temp?' at '+d.working.temp:'')]);
+        if(d.stock) pairs.push(['Stock', f(d.stock.conc)+' '+d.stock.unit+(d.stock.solvent?' in '+d.stock.solvent:'')]);
+        out.push({type:'kv', title:d.name, pairs:pairs});
+        if(d.directions&&d.directions.length)
+          out.push({type:'steps', title:d.name+' — directions',
+                    items:d.directions.map(function(s,i){ return {t:s.t, d:String(s.d).replace(/<[^>]+>/g,''), done:!!done[cur+'_'+i]}; })});
+      }
+      if(sel.dilution&&MIC._dil&&MIC._dil.total>0){
+        var r=MIC._dil;
+        var pr=[['Dilution','1 : '+f(r.fold,4)],['Working solution', vol(r.total)],
+                [r.series?'Take intermediate (1:'+f(r.interFold,4)+')':'Take stock', vol(r.series?r.interDraw:r.stockDraw)],
+                ['Add diluent', vol(r.diluent)]];
+        out.push({type:'kv', title:(d?d.name+' — ':'')+'working dilution', pairs:pr});
+      }
+      if(sel.panel&&MIC._panel&&MIC._panel.rows.length){
+        out.push({type:'table', title:'Panel — '+MIC._panel.config.label,
+          cols:['Dye','Ex','Em','Channel','Laser'],
+          rows:MIC._panel.rows.map(function(r){ return [r.dye.name, r.dye.spectra.ex, r.dye.spectra.em, r.chan?r.chan.label:'—', r.chan?r.chan.laser+' nm':'—']; })});
+        if(MIC._panel.warnings.length)
+          out.push({type:'kv', title:'Panel check',
+            pairs:MIC._panel.warnings.map(function(w,i){ return ['Note '+(i+1), w.t]; })});
+      }
+      return out;
+    },
+    _model:{ channels:MIC_CHANNELS, configs:MIC_CONFIGS, channelFor:micChannelFor,
+             overlap:micOverlapIndex, panelCheck:micPanelCheck, working:dyeWorking,
+             exEff:micExEff, emFrac:micEmFrac, spill:micSpill, stockPrep:micStockPrep,
+             byId:function(id){ return byId[id]; }, all:function(){ return all; } }
+  };
 })();
 
 /* ══════════════════════════ GEL SIMULATOR ══════════════════════════ */
@@ -6143,10 +7488,12 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     calc:    {label:'Calculators',   mod:'MBCBLK',   items:[['result','Inputs + results'],['table','Result table']]},
     proto:   {label:'Protocols',     mod:'PROTOBLK', items:[['reagents','Reagents needed'],['steps','Steps (with ticks)']]},
     gel:     {label:'Gel Sim',       mod:'GELBLK',   items:[['image','Gel image'],['table','Band table'],['warn','Gel check notes']]},
-    phg:     {label:'Phage Planner', mod:'PHGBLK',   items:[['plan','Infection plan'],['ladder','Dilution ladder'],['recipe','Dilution recipe']]}
+    phg:     {label:'Phage Planner', mod:'PHGBLK',   items:[['plan','Infection plan'],['ladder','Dilution ladder'],['recipe','Dilution recipe']]},
+    mic:     {label:'Microscopy',    mod:'MICBLK',   items:[['dye','Dye sheet + directions'],['dilution','Working dilution recipe'],['panel','Panel & channel check']]}
   };
   function providerFn(src){
     if(src==='gel'&&window.GEL&&GEL.blocks) return GEL.blocks;
+    if(src==='mic'&&window.MIC&&MIC.blocks) return MIC.blocks;
     var m=window[PROVIDERS[src]&&PROVIDERS[src].mod];
     return (typeof m==='function')?m:null;
   }

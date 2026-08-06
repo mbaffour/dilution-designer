@@ -9,17 +9,18 @@ A free, single-file, browser-based toolkit for everyday molecular-biology bench 
 
 ---
 
-## The nine modules
+## The ten modules
 
 | Module | What it does |
 |---|---|
 | **Home hub** | Launcher for everything below |
 | **Plate Planner** | 96- and 384-well, multi-plate. Plasmid/induction and phage/MOI modes, master mix with overage, replicates, randomization, exclusions, bench-reality checks |
 | **Phage Planner** | A saved library of lysates and their titers, then the volume for an infection — by MOI, total PFU or final PFU/mL — plus the dilution to make when that volume is too small to pipette |
-| **Reagent Prep** | 216 verified recipes across 13 categories — media, buffers, antibiotics, miniprep P1/P2/P3 and Buffer PE, CTAB, gel and protein reagents — scaled to whatever volume you need, with sources |
+| **Reagent Prep** | 243 verified recipes across 14 categories — media, buffers, antibiotics, miniprep P1/P2/P3 and Buffer PE, CTAB, gel and protein reagents, fixatives, stains and mountants — scaled to whatever volume you need, with sources |
 | **Dilution & Molarity** | C1V1 across molar and mass units, serial dilutions, molarity ⇄ mass, and weigh-outs |
-| **Calculators** | 15 bench calculators: ng ⇄ pmol, A260 quant, ligation ratios, primer Tm and resuspension, OD₆₀₀ → cells, phage titer, MOI, lysate → infection volume, % ⇄ molarity, RCF ⇄ RPM, doubling time, PCR/qPCR master mix |
-| **Protocols** | 21 protocols — miniprep, CTAB gDNA, transformation, plaque assay, gels, MIC, Gibson and more — that **rescale as you change the numbers** |
+| **Calculators** | 16 bench calculators: ng ⇄ pmol, A260 quant, ligation ratios, primer Tm and resuspension, OD₆₀₀ → cells, phage titer, MOI, lysate → infection volume, % ⇄ molarity, RCF ⇄ RPM, doubling time, dye working dilution, PCR/qPCR master mix |
+| **Protocols** | 31 protocols — miniprep, CTAB gDNA, transformation, plaque assay, gels, MIC, Gibson, immunofluorescence, H&E, live/dead and more — that **rescale as you change the numbers** |
+| **Microscopy & Dyes** | 79 dyes and stains — what to use for what, at what concentration, and in which channel. Ex/Em maxima, filter-cube and laser matching, a panel builder that flags channel collisions and bleed-through, working-dilution volumes for your sample count, and step-by-step staining directions |
 | **Gel Simulator** | Predict an agarose or SDS-PAGE run before you pour it: 16 vendor ladders plus your own, band-resolution warnings, and a best-percentage suggestion |
 | **Lab Notebook** | Pull results from any module into a dated entry, add your own notes, export to Markdown, HTML, PDF, Word (.docx), CSV or JSON |
 
@@ -29,8 +30,8 @@ A free, single-file, browser-based toolkit for everyday molecular-biology bench 
 
 - **Everything is local.** Every calculation runs in your browser. Nothing is uploaded, so it is fine for unpublished work.
 - **It works offline.** Visit once and it keeps working with no network — usable in a cold room, a BSL suite, or on a plane. It is a PWA, so you can install it like an app.
-- **The maths is checked.** A self-test harness (`?selftest=1`) asserts every formula — 102 assertions, anchored to published references rather than to the code's own output.
-- **It is one file.** `index.html` plus a recipe library. No build step, no dependencies, no CDN.
+- **The maths is checked.** A self-test harness (`?selftest=1`) asserts every formula — 126 assertions, anchored to published references rather than to the code's own output.
+- **It is one file.** `index.html` plus a recipe library and a dye library. No build step, no dependencies, no CDN.
 
 ---
 
@@ -42,7 +43,7 @@ Open the live URL, or serve the folder locally:
 python -m http.server 8000
 ```
 
-Then open `http://localhost:8000`. Opening `index.html` straight off disk mostly works, but browsers block local `file://` data requests, so the recipe library will not load — serve it instead.
+Then open `http://localhost:8000`. Opening `index.html` straight off disk mostly works, but browsers block local `file://` data requests, so the recipe and dye libraries will not load — serve it instead.
 
 ---
 
@@ -76,6 +77,20 @@ Then open `http://localhost:8000`. Opening `index.html` straight off disk mostly
 The same solver is available as a calculator (*Calculators → Phage lysate → infection volume*) and the Plate Planner's phage-stock editor can load from and save to the same library.
 
 > Delivered MOI, final volume and PFU/mL are computed from the volume you will **actually pipette**, not from the neat-equivalent volume — those two differ whenever a dilution is involved.
+
+### Microscopy & Dyes
+
+1. Start from **what you are staining** — the chips down the left filter the library by target (nucleus, membrane, mitochondria, actin, viability, cell wall, antibody label, brightfield, EM) and by sample type (live cells, fixed cells, bacteria, tissue, EM grid)
+2. Open a dye. The sheet gives you Ex/Em maxima on a wavelength axis, the filter cube and laser line it belongs on, how well that line actually excites it, and which other dyes in the library are too close to share a panel with
+3. **What to use it for** lists the assays that dye is good for, each with a concentration and an incubation time
+4. **Working dilution** takes your target concentration, sample count and volume per sample and gives you the exact volumes — and when the neat stock draw falls below what you can pipette, it builds the intermediate dilution ladder for you rather than telling you to take 0.1 µL
+5. **Making the stock** turns a vial mass into the volume of solvent to add
+6. **Directions** are tickable staining steps that rescale with the numbers above
+7. **＋ Add to panel**, then **🎛 Panel builder**: pick your scope configuration and it assigns every dye to a channel and flags the three things that ruin a multi-colour experiment — two dyes in one channel, emission bleeding into the next collection band, and one dye lighting up on another's laser line
+
+The working-dilution solver is also available on its own as *Calculators → Fluorophore / stain working dilution*, and **＋ Add a dye** stores your own reagents in the browser alongside the library.
+
+> The panel checks are modelled from published excitation and emission **maxima** and their band widths — the app does not ship full spectral curves. They catch the obvious clashes; they are not a substitute for real overlap integrals or for linear unmixing on your own instrument. Working concentrations are starting points from published protocols and must be titrated on your own sample.
 
 ### Gel Simulator
 

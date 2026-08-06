@@ -117,3 +117,78 @@ duplicated. Its numbers now reflect the corrected volume math automatically.
 - Extracted the single inline `<script>` block and ran `node --check` — passes.
 - Numerically verified old-vs-new delivered concentration (see table above): the new math delivers
   the exact target in every tested case.
+
+---
+
+# Microscopy workflows & dye directions
+
+## What was added
+
+Imaging was the one area of everyday bench work the toolkit did not touch. Before this change the
+whole codebase contained exactly **two** excitation/emission numbers, both buried in free-text
+`notes[]` strings in `reagent-library.json` (ethidium bromide and SYBR Safe). There was no
+fluorophore, spectra, laser, filter or channel data structure anywhere.
+
+### 1. `dye-library.json` — a new data file (79 dyes, 10 categories)
+
+Same shape and the same load discipline as `reagent-library.json`. Each record carries what you
+actually need at the scope: Ex/Em maxima and band widths, extinction coefficient and quantum yield,
+cell permeability, stock and working concentrations with solvent and storage, an `applications[]`
+table of *what to use it for and at what concentration*, tickable `directions[]`, hazards, and a
+citation. Categories cover nucleic-acid/nuclear stains, viability, membrane, organelle,
+cytoskeleton, bacterial cell-wall probes, antibody labels, fluorescent proteins, histology
+brightfield stains and EM negative stains.
+
+### 2. Microscopy module (`mic`) in `index.html`
+
+Follows the `phg` module pattern exactly — mode string, view div, five `setMode()` edits, a
+`window.MIC` global, a hub card with a live count, and a notebook provider. Two views: a per-dye
+sheet (spectra strip, channel/cube/laser assignment, working-dilution solver, stock reconstitution,
+directions) and a panel builder that checks a whole dye set against a chosen scope configuration.
+
+### 3. Shared spectral and dilution maths
+
+`dyeWorking()`, `micPanelCheck()`, `micChannelFor()`, `micOverlapIndex()`, `micEmFrac()` and the
+unit converters are **top-level functions**, so the Microscopy module, the new `dyedil` calculator
+entry and the self-test all call one implementation and cannot drift apart — the arrangement
+`planInfection()` already uses across three surfaces. When a working dilution needs a volume below
+the pipetting floor, `dyeWorking()` builds the intermediate ladder with the existing
+`sizeDilutionSeries()` rather than a second implementation of the same idea.
+
+The spectral model deserves an explicit caveat, and carries one in the UI: it approximates each band
+as a Gaussian through the published maximum, with an asymmetric split-normal emission (narrower
+below the maximum, wider above) because the red tail is what actually bleeds into the next channel.
+It catches channel collisions, bleed-through and cross-excitation. It is not a substitute for real
+overlap integrals or linear unmixing, and the app does not ship spectral curves.
+
+### 4. Ten new protocols and 27 new recipes
+
+A `Microscopy & staining` protocol group (immunofluorescence on coverslips and in 96-well plates,
+phalloidin F-actin, live-cell staining, bacterial live/dead, agarose pads for time-lapse, H&E,
+simple/negative smear stains, Schaeffer–Fulton endospore, and TEM negative staining of phage), plus
+a `microscopy` recipe category (permeabilisation and blocking buffers, antibody diluent, quench and
+retrieval buffers, Mowiol–DABCO and glycerol–NPG antifade mountants, dye stocks, histology stains,
+imaging pads and VALAP). Recipes already in the library — PBS, TBS-T, 4% PFA, the Gram reagents,
+Loeffler's methylene blue and the four TEM negative stains — are cross-referenced, not duplicated.
+
+## One real error caught along the way
+
+The DAPI record originally said to dilute the 1 mg/mL stock **1:3300** for 300 nM. Working the
+arithmetic through for the self-test showed that is wrong: 1 mg/mL DAPI is 2.855 mM, so 300 nM is a
+1:9517 dilution. 1:3300 delivers ~865 nM. The published protocols people actually follow say
+1:10,000 → 0.1 µg/mL, which is the ~286 nM everyone calls "300 nM DAPI". Fixed, and the corrected
+number is now pinned by an assertion.
+
+## Verification
+
+- Extracted the inline `<script>` block and ran `node --check` — passes.
+- `?selftest=1` goes from **102/102 to 126/126**, with 24 new assertions covering the dilution
+  solver (including the sub-pipettable intermediate case), mass ⇄ molar conversion for DAPI,
+  Hoechst 33342 and propidium iodide, stock reconstitution, channel assignment, panel collision and
+  bleed-through detection, overlap-index ordering, and the normalisation and red-tail asymmetry of
+  the emission model. Every expectation is hand-computed or taken from a vendor spec.
+- Driven headless in the pre-installed Chromium: zero page errors, all eleven mode tabs render, the
+  dye list loads 79 records, the working dilution rescales live with sample count, the panel builder
+  flags a deliberate FITC + Alexa Fluor 488 collision, and notebook capture returns blocks.
+- `sw.js` `CACHE` bumped to `dd-v1.7.0` and `./dye-library.json` added to `CORE`, so the new module
+  works offline.
