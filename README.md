@@ -18,7 +18,7 @@ A free, single-file, browser-based toolkit for everyday molecular-biology bench 
 | **Phage Planner** | A saved library of lysates and their titers, then the volume for an infection — by MOI, total PFU or final PFU/mL — plus the dilution to make when that volume is too small to pipette |
 | **Reagent Prep** | 216 verified recipes across 13 categories — media, buffers, antibiotics, miniprep P1/P2/P3 and Buffer PE, CTAB, gel and protein reagents — scaled to whatever volume you need, with sources |
 | **Dilution & Molarity** | C1V1 across molar and mass units, serial dilutions, molarity ⇄ mass, and weigh-outs |
-| **Calculators** | 15 bench calculators: ng ⇄ pmol, A260 quant, ligation ratios, primer Tm and resuspension, OD₆₀₀ → cells, phage titer, MOI, lysate → infection volume, % ⇄ molarity, RCF ⇄ RPM, doubling time, PCR/qPCR master mix |
+| **Calculators** | 15 bench calculators: ng ⇄ pmol, A260 quant, ligation ratios, nearest-neighbour primer Tm and resuspension, sequence toolkit, OD₆₀₀ → cells, CFU, phage titer, MOI, lysate → infection volume, % ⇄ molarity, RCF ⇄ RPM, doubling time, PCR/qPCR master mix |
 | **Protocols** | 21 protocols — miniprep, CTAB gDNA, transformation, plaque assay, gels, MIC, Gibson and more — that **rescale as you change the numbers** |
 | **Gel Simulator** | Predict an agarose or SDS-PAGE run before you pour it: 16 vendor ladders plus your own, band-resolution warnings, and a best-percentage suggestion |
 | **Lab Notebook** | Pull results from any module into a dated entry, add your own notes, export to Markdown, HTML, PDF, Word (.docx), CSV or JSON |
@@ -29,7 +29,7 @@ A free, single-file, browser-based toolkit for everyday molecular-biology bench 
 
 - **Everything is local.** Every calculation runs in your browser. Nothing is uploaded, so it is fine for unpublished work.
 - **It works offline.** Visit once and it keeps working with no network — usable in a cold room, a BSL suite, or on a plane. It is a PWA, so you can install it like an app.
-- **The maths is checked.** A self-test harness (`?selftest=1`) asserts every formula — 102 assertions, anchored to published references rather than to the code's own output.
+- **The maths is checked.** A self-test harness (`?selftest=1`) asserts every formula — 113 assertions, anchored to published references rather than to the code's own output.
 - **It is one file.** `index.html` plus a recipe library. No build step, no dependencies, no CDN.
 
 ---

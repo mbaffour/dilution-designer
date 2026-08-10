@@ -2080,8 +2080,15 @@ function calcWellData(r,c,p){
       : !plan                     ? pipCheck(phageVol,moi)
       : plan.pick                 ? {label:`${plan.pick.vol.toFixed(1)} µL of ${plan.pick.label}`,cls:'bg'}
       :                             {label:'no pipettable dilution',cls:'bd'};
+    // The volume that actually goes in the well is the volume you PIPETTE — the
+    // picked dilution's, which is factor^k larger than the neat equivalent. The
+    // well total, the table, both CSVs and the master mix all read addVol, so
+    // reporting the neat figure here made a 200.4 µL well that is really 204 µL
+    // and a master-mix "grand total" that stopped summing. phageVol is kept as
+    // the neat equivalent because the dilution planner sizes tubes from it.
+    const addVol=(plan&&plan.pick)?plan.pick.vol:phageVol;
     return{wellId,cond,moi,stock,titer,pfu,plan,
-           cultVol:p.infVol,phageVol,finalVol:p.infVol+phageVol,pip};
+           cultVol:p.infVol,phageVol,addVol,finalVol:p.infVol+addVol,pip};
   }
 }
 
@@ -3161,6 +3168,7 @@ function buildCalcBreakdown(ri,ci,p){
     const moi=cond.moi||0;
     const stock=phageFor(cond), titer=titerFor(cond);
     const phageVol=phageVolFor(moi,p.bacterialConc,p.infVol,titer);
+    let addVol=phageVol;                       // overwritten once the ladder is solved
     const lines=[`${wellId}  ·  ${cond.name}  ·  MOI = ${moi}`,''];
     if(moi>0&&!(titer>0)){
       lines.push(`No titer set for ${stock?stock.name:'this stock'} — set one to calculate.`,'');
@@ -3171,11 +3179,14 @@ function buildCalcBreakdown(ri,ci,p){
       lines.push(`  ÷ ${titer.toExponential(2)} PFU/mL`);
       lines.push(`  = ${phageVol.toFixed(4)} µL phage`,'');
       const plan=planPipetting(pfuPerWellFor(moi,p.bacterialConc,p.infVol),titer,pipOpts(p));
+      if(plan.pick) addVol=plan.pick.vol;
       lines.push(plan.pick
         ? `Pipette ${plan.pick.vol.toFixed(1)} µL of the ${plan.pick.label} dilution (${plan.pick.titer.toExponential(2)} PFU/mL)`
         : plan.reason,'');
     }
-    lines.push(`Culture: ${p.infVol} µL  |  Final: ${(p.infVol+phageVol).toFixed(2)} µL`);
+    // Final volume counts what you pipette, not the neat equivalent — must agree
+    // with calcWellData's finalVol or the tooltip contradicts the table.
+    lines.push(`Culture: ${p.infVol} µL  |  Final: ${(p.infVol+addVol).toFixed(2)} µL`);
     return lines.join('\n');
   }
 }
@@ -3490,7 +3501,18 @@ function rpFinishLoad(){ rpLoaded=true; rpMergeCustom(); rpFlatten(); rpRenderCa
   // The library is fetched lazily, so the Home hub's recipe count starts as a literal.
   // Once the real number is known, refresh the hub so the two can never disagree.
   if(appMode==='home'&&window.renderHome) renderHome(); }
-function rpFlatten(){ rpAllRecipes=[]; (rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ rpAllRecipes.push(Object.assign({_cat:c.title,_catKey:c.key}, r)); }); }); }
+function rpFlatten(){ rpAllRecipes=[]; (rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ rpAllRecipes.push(Object.assign({_cat:c.title,_catKey:c.key}, r)); }); }); rpDupeIds(); }
+// rpCompute resolves a selection with .find(), which always returns the FIRST
+// match — so two recipes sharing an id means clicking one silently displays the
+// other. That shipped: `soc-medium` existed in two categories and the one you
+// could not reach was the one carrying both magnesium salts. Surface it loudly
+// rather than letting an imported library reintroduce it in silence.
+function rpDupeIds(){
+  var seen={}, dupes=[];
+  rpAllRecipes.forEach(function(r){ if(seen[r.id]) dupes.push(r.id); else seen[r.id]=1; });
+  if(dupes.length) console.warn('Reagent library: duplicate recipe id(s) — only the first of each is reachable:', dupes);
+  return dupes;
+}
 function rpCustom(){ try{ return JSON.parse(lsGet('dd_reagent_custom')||'[]'); }catch(e){ return []; } }
 function rpMergeCustom(){ var cust=rpCustom(); var cat=(rpLib.categories||[]).find(function(c){return c.key==='custom';}); if(cust.length){ if(!cat){ cat={key:'custom',title:'My recipes',recipes:[]}; rpLib.categories.push(cat);} cat.recipes=cust; } else if(cat){ cat.recipes=[]; } }
 function rpRenderCats(){ var el=document.getElementById('rpCatFilter'); if(!el) return; var cats=[{key:'all',title:'All',n:rpAllRecipes.length}].concat((rpLib.categories||[]).map(function(c){return {key:c.key,title:c.title,n:(c.recipes||[]).length};})).filter(function(c){return c.n>0;}); el.innerHTML=cats.map(function(c){return '<button class="rp-cat'+(rpActiveCat===c.key?' active':'')+'" onclick="rpSetCat(\''+jsAttr(c.key)+'\')">'+escapeHtml(c.title)+' <span class="rp-catn">'+c.n+'</span></button>';}).join(''); }
@@ -3735,7 +3757,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
 
 /* ══════════════════════════ HOME HUB + MOLBIO CALCULATORS (MBC) ══════════════════════════ */
 (function(){
-  var MB_VERSION='v1.0 (2026-07)';
+  var MB_VERSION='v1.1 (2026-08)';
   // ---------- styles ----------
   var css = `
   #homeView,#calcView{color:var(--text);}
@@ -3813,6 +3835,57 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   function seqDropped(s){ var body=String(s||'').replace(/^\s*>.*$/gm,'');
     var kept=body.toUpperCase().replace(/[^ACGTUN]/g,'').length;
     return Math.max(0,(body.match(/[A-Za-z]/g)||[]).length-kept); }
+
+  // ── Nearest-neighbour Tm (SantaLucia 1998 unified parameters) ─────────
+  // This replaced `81.5 + 0.41·GC% − 675/N + 16.6·log₁₀[Na⁺]`, which is a
+  // long-duplex equation whose −675/N term is a patch that breaks down below
+  // ~50 nt — i.e. on every real PCR primer. For a 20-mer at 50 % GC it read
+  // 46.7 °C against a true ~57.7 °C, and the app then suggested Ta = Tm − 5,
+  // so users were annealing ~15 °C too cold.
+  //
+  // ΔH kcal/mol, ΔS cal/(mol·K), 5'→3' on the top strand. Ten unique
+  // dinucleotides cover all sixteen by reverse-complement symmetry; the table
+  // is written out in full so no lookup has to reverse-complement at runtime.
+  var NN={AA:[-7.9,-22.2],TT:[-7.9,-22.2],
+          AT:[-7.2,-20.4],TA:[-7.2,-21.3],
+          CA:[-8.5,-22.7],TG:[-8.5,-22.7],
+          GT:[-8.4,-22.4],AC:[-8.4,-22.4],
+          CT:[-7.8,-21.0],AG:[-7.8,-21.0],
+          GA:[-8.2,-22.2],TC:[-8.2,-22.2],
+          CG:[-10.6,-27.2],GC:[-9.8,-24.4],
+          GG:[-8.0,-19.9],CC:[-8.0,-19.9]};
+  var NN_INIT={GC:[0.1,-2.8],AT:[2.3,4.1]};   // helix initiation, by terminal pair
+  var R_CAL=1.9872;                            // gas constant, cal/(mol·K)
+
+  function revComp(s){ var m={A:'T',T:'A',G:'C',C:'G'},o=''; for(var i=s.length-1;i>=0;i--)o+=m[s[i]]||'N'; return o; }
+
+  // opts: {naMM, mgMM, dntpMM} in millimolar (the units von Ahsen's monovalent
+  // equivalence is defined in — applying it in molar inflates Mg²⁺ by ~30× and
+  // added 23 °C for a normal PCR buffer) and {primerM} in molar.
+  // Returns °C, or NaN when the sequence contains anything the DNA parameters
+  // do not cover.
+  function tmNN(s,opts){
+    var o=opts||{};
+    if(!/^[ACGT]{2,}$/.test(s)) return NaN;     // U (RNA) and N are not DNA NN
+    var dH=0,dS=0;
+    for(var i=0;i<s.length-1;i++){ var p=NN[s.substr(i,2)]; if(!p) return NaN; dH+=p[0]; dS+=p[1]; }
+    [s[0],s[s.length-1]].forEach(function(b){ var t=NN_INIT[(b==='G'||b==='C')?'GC':'AT']; dH+=t[0]; dS+=t[1]; });
+    // Self-complementary duplexes carry a symmetry penalty and use CT, not CT/4.
+    var selfComp = s===revComp(s);
+    if(selfComp) dS+=-1.4;
+    // Divalent cations dominate a PCR buffer; von Ahsen 2001 folds them into a
+    // monovalent equivalent, in mM: [Na⁺]eq = [Na⁺] + 120·√([Mg²⁺] − [dNTP]).
+    // dNTPs chelate Mg²⁺, hence the subtraction.
+    var mgFree=Math.max(0,(o.mgMM||0)-(o.dntpMM||0));
+    var naEqMM=(o.naMM||0)+120*Math.sqrt(mgFree);
+    if(!(naEqMM>0)) return NaN;
+    // SantaLucia 1998 salt correction, applied to entropy. Molar for the log.
+    dS+=0.368*(s.length-1)*Math.log(naEqMM/1000);
+    var ct=(o.primerM>0?o.primerM:250e-9)/(selfComp?1:4);
+    var denom=dS+R_CAL*Math.log(ct);
+    if(!(denom<0)) return NaN;
+    return (dH*1000)/denom-273.15;
+  }
 
   // ---------- calculator registry ----------
   var G_NA='Nucleic acids & PCR', G_CELL='Cells & phage', G_CONC='Concentrations & general';
@@ -3897,10 +3970,13 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
         return {rows:rows, warn:warn, protocol:proto, note:'µL buffer = nmol × 1000 ÷ target µM'};
       } },
     { id:'tm', name:'Primer Tm, GC% & stats', group:G_NA, tags:'tm melting temperature gc content annealing primer oligo',
-      blurb:'Melting temperature (Wallace + salt-adjusted), GC%, and a suggested annealing temp.',
+      blurb:'Nearest-neighbour Tm (SantaLucia), GC%, and a suggested annealing temp.',
       fields:[
         {k:'seq',label:'Primer sequence',kind:'seq',ph:'e.g. GCTAGCATGGATCCGGATCC'},
-        {k:'na',label:'[Na⁺/K⁺] (mM)',kind:'num',def:50}
+        {k:'na',label:'[Na⁺/K⁺] (mM)',kind:'num',def:50},
+        {k:'pconc',label:'Primer conc (nM)',kind:'num',def:250,hint:'each primer in the reaction'},
+        {k:'mg',label:'[Mg²⁺] (mM)',kind:'num',def:0,hint:'PCR buffers are typically 1.5–2'},
+        {k:'dntp',label:'[dNTPs] (mM)',kind:'num',def:0,hint:'chelates Mg²⁺; total of all four'}
       ],
       compute:function(v){
         var s=cleanSeq(v.seq); if(s.length<2) return null;
@@ -3909,18 +3985,29 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
         var wallace=2*(A+T)+4*(G+C);
         var na=(v.na>0?v.na:50)/1000;
         var salt=81.5+0.41*gc-675/N+16.6*Math.log10(na);
-        var pick = N<14? wallace : salt;
+        var nn=tmNN(s,{naMM:(v.na>0?v.na:50),mgMM:(v.mg>0?v.mg:0),dntpMM:(v.dntp>0?v.dntp:0),
+                       primerM:(v.pconc>0?v.pconc:250)*1e-9});
+        // NN is the headline whenever it applies. It does not cover RNA or N,
+        // and it is not parameterised below ~8 nt — fall back to Wallace there
+        // and say so rather than printing a number from the wrong model.
+        var useNN=isFinite(nn)&&N>=8;
+        var pick=useNN?nn:wallace;
+        var warn=[], dr=seqDropped(v.seq);
         var rows=[
           {label:'Length',value:N+' nt'},
           {label:'GC content',value:fmt(gc,3)+' %',flag:(gc>=40&&gc<=60)?'ok':'warn'},
-          {label:(N<14?'Tm (Wallace)':'Tm (salt-adjusted)'),value:fmt(pick,3)+' °C',flag:'ok'},
+          {label:(useNN?'Tm (nearest-neighbour)':'Tm (Wallace)'),value:fmt(pick,3)+' °C',flag:'ok'},
           {label:'Suggested Ta',value:fmt(pick-5,3)+' °C'},
-          {label:'',value:'Wallace '+fmt(wallace,3)+' °C · salt-adj '+fmt(salt,3)+' °C · A'+A+' T'+T+' G'+G+' C'+C,sub:true}
+          {label:'',value:'Wallace '+fmt(wallace,3)+' °C · salt-adjusted (long-duplex) '+fmt(salt,3)+' °C · A'+A+' T'+T+' G'+G+' C'+C,sub:true}
         ];
-        var warn=[]; var dr=seqDropped(v.seq);
+        if(!useNN&&N>=8) warn.push('Nearest-neighbour parameters cover DNA only — this sequence contains U or N, so the Wallace rule is shown instead.');
+        if(useNN&&N<18) warn.push('Primers below ~18 nt are short for a specific PCR anneal; the Tm is still valid but check specificity.');
         if(dr>0) warn.push(dr+' non-standard character'+(dr>1?'s were':' was')+' ignored (IUPAC degenerate bases and stray text are not counted toward length, GC% or Tm).');
         if(gc<40||gc>60) warn.push('GC '+fmt(gc,3)+'% is outside the ideal 40–60% window.');
-        return {rows:rows, warn:warn, note:N<14?'Wallace rule (N<14): 2(A+T)+4(G+C)':'Salt-adjusted: 81.5 + 0.41·GC% − 675/N + 16.6·log₁₀[Na⁺]'};
+        return {rows:rows, warn:warn,
+          note:useNN
+            ? 'Nearest-neighbour (SantaLucia 1998 unified) with the entropic salt correction; Mg²⁺ folded in as a monovalent equivalent (von Ahsen 2001). The salt-adjusted figure below is the long-duplex formula this calculator used to headline — it reads ~10 °C low on a 20-mer, so treat it as legacy only.'
+            : 'Wallace rule: 2(A+T)+4(G+C)'};
       } },
     { id:'seqtool', name:'Sequence toolkit', group:G_NA, tags:'reverse complement gc translate sequence dna rna revcomp',
       blurb:'Reverse complement, complement, GC%, and length for a DNA/RNA sequence.',
@@ -4347,7 +4434,26 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
          ['% cells infected',9.516,0.01],['Final volume',204,0.001]]],
       ['primer',{nmol:25,stock:100,work:10,wvol:100},[['Resuspend in',250,0.5]]],
       ['doubling',{n0:0.05,n:0.4,t:120,tU:'min'},[['Generations',3,0.01],['Doubling time',40,0.1]]],
-      ['tm',{seq:'ATGCATGCATGCATGCATGC',na:50},[['GC content',50,0.1],['Tm (salt-adjusted)',46.65,0.2]]],
+      // Nearest-neighbour Tm, hand-derived from the SantaLucia 1998 unified
+      // parameters for ATGCATGCATGCATGCATGC at 50 mM Na⁺, 0.25 µM primer.
+      // 19 stacks: AT×5, TG×5, GC×5, CA×4 (TG uses CA's values by symmetry).
+      //   ΔH = 5(−7.2) + 5(−8.5) + 5(−9.8) + 4(−8.5) = −161.5 kcal/mol
+      //   ΔS = 5(−20.4) + 5(−22.7) + 5(−24.4) + 4(−22.7) = −428.3 cal/mol·K
+      // initiation: 5′ A → (+2.3, +4.1); 3′ C → (+0.1, −2.8)
+      //   ΔH = −159.1 ; ΔS = −427.0
+      // salt: ΔS += 0.368 × 19 × ln(0.05) = −20.945  →  ΔS = −447.95
+      // Tm = −159100 / (−447.95 + 1.9872·ln(6.25e−8)) − 273.15 = 57.7 °C
+      // The old salt-adjusted formula returned 46.65 °C here — 11 °C low.
+      ['tm',{seq:'ATGCATGCATGCATGCATGC',na:50,pconc:250,mg:0,dntp:0},
+        [['GC content',50,0.1],['Tm (nearest-neighbour)',57.7,0.4]]],
+      // Same primer in a normal PCR buffer. von Ahsen 2001 monovalent
+      // equivalence, in mM: 50 + 120·√(1.5 − 0.2) = 186.8 mM.
+      //   ΔS = −427.0 + 0.368·19·ln(0.1868) = −438.73
+      //   Tm = −159100 / (−438.73 − 32.960) − 273.15 = 64.2 °C
+      // Applying that equivalence in molar instead of mM inflates Mg²⁺ ~30×
+      // and returns 80.7 °C — this case pins the units.
+      ['tm',{seq:'ATGCATGCATGCATGCATGC',na:50,pconc:250,mg:1.5,dntp:0.2},
+        [['Tm (nearest-neighbour)',64.2,0.4]]],
       ['titer',{plaques:120,dil:1e6,plated:0.1},[['Titer',1.2e9,1e6]]],
       ['cfu',{col:150,dil:1e6,plated:0.1},[['Viable count',1.5e9,1e6]]]
     ];
@@ -4473,6 +4579,88 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       if(!_near(ss.prep[2],100,1e-6)||!_near(ss.prep[1],60,1e-6)||!_near(ss.transferIn[1],6,1e-6)||!_near(ss.diluent[1],54,1e-6))
         fails.push('sizeDilutionSeries wrong: prep='+ss.prep.join('/')+' transferIn='+ss.transferIn.join('/'));
       n++; if(!_near(ss.neatDraw,6,1e-6)) fails.push('sizeDilutionSeries neat draw = '+ss.neatDraw+', want 6 µL');
+    }
+
+    // ---- calcWellData: the app's headline feature, previously untested ----
+    // Runs against a synthetic one-well plate and restores every global it
+    // touches. Expectations are hand-derived from the stated inputs.
+    // `palette`/`wellAssignments` are top-level `let`s, so they are lexically
+    // visible here but are NOT properties of window — feature-detect with typeof.
+    if(window.calcWellData&&typeof palette!=='undefined'&&typeof wellAssignments!=='undefined'){
+      var _keep={mode:appMode,pal:palette,wa:wellAssignments,intm:intmMode};
+      try{
+        // ── plasmid branch: volume-conserving. stock 1000 µM, target 10 µM,
+        //    culture 200 µL → iv = (10/1000)×200 = 2 µL, culture = 198 µL,
+        //    final = 200 µL exactly (the compound comes OUT of the aliquot).
+        appMode='plasmid'; intmMode='stock';
+        palette=[{id:'t1',name:'T',type:'cond',conc:10,moi:0,color:'#888'}];
+        wellAssignments=[['t1']];
+        var wp=calcWellData(0,0,{stockConc:1000,cultureVol:200,intmConc:0});
+        n++; if(!wp||!_near(wp.indVol,2,1e-9)||!_near(wp.cultVol,198,1e-9)||!_near(wp.finalVol,200,1e-9))
+          fails.push('calcWellData plasmid: iv='+(wp&&wp.indVol)+' cult='+(wp&&wp.cultVol)+' final='+(wp&&wp.finalVol)+', want 2/198/200');
+        // Delivered concentration must equal the target, which is the whole
+        // point of the volume-conserving convention: iv×src/final = target.
+        n++; if(!wp||!_near(wp.indVol*1000/wp.finalVol,10,1e-9))
+          fails.push('calcWellData plasmid delivers '+(wp&&wp.indVol*1000/wp.finalVol)+' µM, want the 10 µM target');
+
+        // ── phage branch: the well total must count the volume you PIPETTE.
+        //    2e8 CFU/mL × 0.2 mL = 4e7 cells; MOI 0.1 → 4e6 PFU.
+        //    neat = 4e6/1e10 mL = 0.4 µL → under the 2 µL floor,
+        //    so the pick is 4.0 µL of 10⁻¹ and the well finishes at 204 µL.
+        appMode='phage';
+        palette=[{id:'t1',name:'T',type:'cond',conc:0,moi:0.1,color:'#888',phageId:phages[0]&&phages[0].id}];
+        wellAssignments=[['t1']];
+        var savedTiter=phages[0].titer; phages[0].titer=1e10;
+        var wf=calcWellData(0,0,{bacterialConc:2e8,infVol:200,sdFactor:10,sdMinPip:2,sdMaxPip:20,sdPctCap:0,sdStepVol:10});
+        phages[0].titer=savedTiter;
+        n++; if(!wf||!_near(wf.phageVol,0.4,1e-9)||!wf.plan||!wf.plan.pick||wf.plan.pick.k!==1||!_near(wf.addVol,4,1e-9))
+          fails.push('calcWellData phage: neat='+(wf&&wf.phageVol)+' pick='+(wf&&wf.plan&&wf.plan.pick&&wf.plan.pick.k)+' add='+(wf&&wf.addVol)+', want 0.4 µL neat and 4 µL of 10^-1');
+        // The regression this exists for: finalVol used to be built from the
+        // neat volume (200.4 µL) while the bench added the diluted one (204 µL).
+        n++; if(!wf||!_near(wf.finalVol,204,1e-9))
+          fails.push('calcWellData phage finalVol = '+(wf&&wf.finalVol)+' µL, want 204 (culture 200 + the 4 µL actually pipetted, not the 0.4 µL neat equivalent)');
+        n++; if(!wf||!_near(wf.finalVol,wf.cultVol+wf.addVol,1e-9))
+          fails.push('calcWellData phage: finalVol must equal cultVol + addVol');
+      }catch(e){ fails.push('calcWellData tests threw '+e.message); }
+      finally{ appMode=_keep.mode; palette=_keep.pal; wellAssignments=_keep.wa; intmMode=_keep.intm; }
+    }
+
+    // ---- nearest-neighbour Tm: model behaviour, not just arithmetic ----
+    // The whole reason for the switch: on a real primer the long-duplex
+    // formula reads far too low, and Ta = Tm − 5 then anneals ~15 °C cold.
+    n++; try{
+      var tmc=byId['tm'].compute({seq:'ATGCATGCATGCATGCATGC',na:50,pconc:250,mg:0,dntp:0});
+      var nnv=_pnum(_rowVal(tmc,'Tm (nearest-neighbour)'));
+      var legacy=_pnum(tmc.rows[4].value.split('long-duplex) ')[1]);
+      if(!(nnv-legacy>8)) fails.push('NN Tm should sit well above the legacy long-duplex figure; got NN '+nnv+' vs '+legacy);
+    }catch(e){ fails.push('tm NN-vs-legacy threw '+e.message); }
+    // More GC must mean a higher Tm at equal length and conditions.
+    n++; try{
+      var hi=_pnum(_rowVal(byId['tm'].compute({seq:'GCGCGCGCGCGCGCGCGCGC',na:50,pconc:250,mg:0,dntp:0}),'Tm (nearest-neighbour)'));
+      var lo=_pnum(_rowVal(byId['tm'].compute({seq:'ATATATATATATATATATAT',na:50,pconc:250,mg:0,dntp:0}),'Tm (nearest-neighbour)'));
+      if(!(hi>lo+20)) fails.push('20-mer all-GC ('+hi+') should melt far above all-AT ('+lo+')');
+    }catch(e){ fails.push('tm GC-ordering threw '+e.message); }
+    // RNA and degenerate bases are outside the DNA parameters — fall back to
+    // Wallace and say so, rather than printing a number from the wrong model.
+    n++; try{
+      var rna=byId['tm'].compute({seq:'AUGCAUGCAUGCAUGCAUGC',na:50,pconc:250,mg:0,dntp:0});
+      if(rna.rows[2].label!=='Tm (Wallace)'||!(rna.warn||[]).some(function(w){return /DNA only/.test(w);}))
+        fails.push('an RNA sequence must fall back to Wallace with a warning, got "'+rna.rows[2].label+'"');
+    }catch(e){ fails.push('tm RNA fallback threw '+e.message); }
+
+    // ---- reagent library integrity ----
+    // Guarded because the library is fetched async and may not have landed yet;
+    // rpDupeIds() also console.warns on every load, so this is the backstop.
+    if(window.rpAllRecipes&&rpAllRecipes.length&&window.rpDupeIds){
+      n++; var dup=rpDupeIds();
+      if(dup.length) fails.push('reagent library has duplicate recipe id(s) — only the first of each is reachable: '+dup.join(', '));
+      // SOC/SOB exist for their magnesium; canonical Hanahan/CSH and NEB SOC
+      // carry BOTH salts (20 mM total Mg2+), so a missing MgSO4 is a real defect.
+      n++; ['soc-medium','sob-medium'].forEach(function(id){
+        var r=rpAllRecipes.filter(function(x){return x.id===id;})[0]; if(!r)return;
+        var names=(r.components||[]).map(function(x){return (x.name||'').toLowerCase();}).join('|');
+        if(names.indexOf('sulfate')<0) fails.push(id+' is missing MgSO4 — canonical SOB/SOC carries 10 mM MgCl2 AND 10 mM MgSO4');
+      });
     }
 
     // ---- infection planner + lysate library ----

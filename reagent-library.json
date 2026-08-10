@@ -522,6 +522,17 @@
        },
        "note": "Add 5 mL of sterile 2 M MgCl2 per litre AFTER autoclaving (5 mL x 2 M / 1 L = 10 mM). Make the 2 M stock from MgCl2*6H2O, MW 203.30 (40.66 g per 100 mL), or from anhydrous MgCl2, MW 95.21 (19.04 g per 100 mL). Sambrook's '19 g in 100 mL' refers to the anhydrous salt.",
        "mwSource": "PubChem CID 24644"
+      },
+      {
+       "name": "Magnesium sulfate (MgSO4)",
+       "fromStock": {
+        "stockConc": 2,
+        "stockUnit": "M",
+        "finalConc": 10,
+        "finalUnit": "mM"
+       },
+       "note": "Add 5 mL of sterile 2 M MgSO4 per litre AFTER autoclaving. Canonical SOB/SOC carries both magnesium salts - 10 mM MgCl2 AND 10 mM MgSO4, 20 mM total Mg2+. Make the 2 M stock from MgSO4*7H2O, MW 246.48 (49.30 g per 100 mL), or anhydrous MgSO4, MW 120.37 (24.07 g per 100 mL).",
+       "mwSource": "PubChem CID 24843"
       }
      ],
      "solvent": "deionized water (bring to final volume)",
@@ -606,6 +617,17 @@
        },
        "note": "5 mL of sterile 2 M MgCl2 per litre, added after autoclaving. MgCl2*6H2O MW 203.30; anhydrous MgCl2 MW 95.21.",
        "mwSource": "PubChem CID 24644"
+      },
+      {
+       "name": "Magnesium sulfate (MgSO4)",
+       "fromStock": {
+        "stockConc": 2,
+        "stockUnit": "M",
+        "finalConc": 10,
+        "finalUnit": "mM"
+       },
+       "note": "Add 5 mL of sterile 2 M MgSO4 per litre AFTER autoclaving. Canonical SOB/SOC carries both magnesium salts - 10 mM MgCl2 AND 10 mM MgSO4, 20 mM total Mg2+. Make the 2 M stock from MgSO4*7H2O, MW 246.48 (49.30 g per 100 mL), or anhydrous MgSO4, MW 120.37 (24.07 g per 100 mL).",
+       "mwSource": "PubChem CID 24843"
       },
       {
        "name": "D-Glucose (dextrose, anhydrous)",
@@ -9437,7 +9459,7 @@
      ]
     },
     {
-     "id": "sob-medium",
+     "id": "sob-medium-2mg",
      "name": "SOB Medium (Super Optimal Broth)",
      "aka": [
       "Hanahan SOB"
@@ -9535,7 +9557,7 @@
      ]
     },
     {
-     "id": "soc-medium",
+     "id": "soc-medium-2mg",
      "name": "SOC Medium (Super Optimal broth with Catabolite repression)",
      "aka": [
       "S.O.C. medium",
@@ -10702,7 +10724,7 @@
         "finalConc": 100,
         "finalUnit": "ug/mL"
        },
-       "note": "Add after autoclaving and cooling; 1 mL of 10 mg/mL stock per litre"
+       "note": "Add after autoclaving and cooling; 10 mL of 10 mg/mL stock per litre (10 mL x 10 mg/mL / 1 L = 100 ug/mL). Store P1 at 4 C once RNase A is in."
       }
      ],
      "solvent": "deionized water (bring to final volume)",
@@ -10808,7 +10830,7 @@
     },
     {
      "id": "p3-neutralisation",
-     "name": "P3 / N3 Neutralisation buffer (3 M potassium acetate, pH 5.5)",
+     "name": "P3 / N3 Neutralisation buffer (Solution III: 3 M potassium, 5 M acetate, pH ~4.8)",
      "aka": [
       "Solution III",
       "Alkaline Lysis Solution III"
@@ -10830,11 +10852,11 @@
         "type": "v/v"
        },
        "hazard": "Corrosive; causes severe burns - dispense in a fume hood",
-       "note": "11.5 mL per 100 mL of finished buffer in the classic Sambrook/Addgene recipe; confirm the final pH is 5.5 and top up if needed. PubChem CID 176."
+       "note": "11.5 mL per 100 mL of finished buffer in the classic Sambrook/Addgene recipe. This lands at pH ~4.8, NOT 5.5 - 11.5% v/v glacial acetic acid is about 2.0 M, and 4.76 + log10(3/2.0) = 4.94 before the ionic-strength shift. Do not 'top up' with more acid to chase 5.5; that moves it further away. PubChem CID 176."
       }
      ],
      "solvent": "deionized water (bring to final volume)",
-     "finalPH": 5.5,
+     "finalPH": 4.8,
      "adjustPHWith": "glacial acetic acid",
      "sterilization": "autoclave or 0.22 um filter",
      "storage": "Room temperature; chill on ice before use",
@@ -10842,8 +10864,8 @@
      "hazards": "Glacial acetic acid is corrosive and volatile - use a fume hood and eye protection.",
      "notes": [
       "Identical to Alkaline Lysis Solution III in the stock-solutions pack.",
-      "Made the classic way (60 mL of 5 M potassium acetate + 11.5 mL glacial acetic acid + 28.5 mL water per 100 mL) the solution is 3 M in potassium but 5 M in acetate.",
-      "QIAGEN does not disclose the composition of its Buffer P3 or Buffer N3; 3 M potassium acetate pH 5.5 is the classic open equivalent.",
+      "Made the classic way (60 mL of 5 M potassium acetate + 11.5 mL glacial acetic acid + 28.5 mL water per 100 mL) the solution is 3 M in potassium but 5 M in acetate, and lands at pH ~4.8.",
+      "This is NOT the same reagent as a true '3 M potassium acetate, pH 5.5', which needs roughly a third as much acetic acid (~0.6 M). QIAGEN does not disclose Buffer P3/N3; both this Solution III and a pH 5.5 potassium acetate neutralise a miniprep lysate adequately, and Solution III is what the open protocols specify.",
       "Use ice-cold: chilling gives a tighter precipitate of genomic DNA, protein and potassium dodecyl sulfate."
      ],
      "sources": [
