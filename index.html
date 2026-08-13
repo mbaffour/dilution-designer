@@ -384,6 +384,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <button class="btn" onclick="deleteNamedLayout()" title="Delete selected saved layout">🗑</button>
     </span>
     <button class="btn" onclick="exportPlatePNG()" title="Export plate as PNG image">🖼 PNG</button>
+    <button class="btn" onclick="exportPlatePNG(300)" title="Publication PNG — re-rendered at 300 dpi with the resolution stamped in the file">🖼 300 dpi</button>
     <button class="btn" onclick="copyText()">Copy</button>
     <button class="btn" onclick="downloadCSV()">CSV</button>
     <button class="btn" onclick="downloadMinimalCSV()">Minimal CSV</button>
@@ -2349,7 +2350,9 @@ function starsForP(p){
 function titChartModel(data,opts){
   var o=opts||{}, W=o.w>0?o.w:760, H=o.h>0?o.h:430;
   var useLog=o.log!==false;
-  var plot={x0:74,y0:44,x1:W-16,y1:H-88};
+  var FS=o.fontScale>0?o.fontScale:1;          // figure-editor font scaling
+  function fz(s){ return Math.round(s*FS*10)/10; }
+  var plot={x0:74,y0:44,x1:W-16,y1:H-(o.legend===false?46:88)};
   var lo=isFinite(o.logMin)?o.logMin:0, hi=isFinite(o.logMax)?o.logMax:10;
   if(hi<=lo)hi=lo+1;
   var linMax=o.linMax>0?o.linMax:1;
@@ -2363,23 +2366,23 @@ function titChartModel(data,opts){
   }
   function sup(nn){ var neg=nn<0; var s=String(Math.abs(nn)).split('').map(function(d){return '⁰¹²³⁴⁵⁶⁷⁸⁹'[+d];}).join(''); return (neg?'⁻':'')+s; }
   var prims=[];
-  if(data.title)prims.push({t:'text',x:(plot.x0+plot.x1)/2,y:22,txt:data.title,cls:'title',size:14,anchor:'middle',bold:true});
-  // Y gridlines + tick labels.
+  if(data.title)prims.push({t:'text',x:(plot.x0+plot.x1)/2,y:22,txt:data.title,cls:'title',size:fz(14),anchor:'middle',bold:true});
+  // Y gridlines + tick labels (labels stay even when the grid is hidden).
   if(useLog){
     for(var d=Math.ceil(lo);d<=Math.floor(hi);d++){
       var yy=y(Math.pow(10,d));
-      prims.push({t:'line',x:plot.x0,y:yy,x2:plot.x1,y2:yy,cls:'grid'});
-      prims.push({t:'text',x:plot.x0-8,y:yy+4,txt:'10'+sup(d),cls:'tick',size:11,anchor:'end'});
+      if(o.grid!==false)prims.push({t:'line',x:plot.x0,y:yy,x2:plot.x1,y2:yy,cls:'grid'});
+      prims.push({t:'text',x:plot.x0-8,y:yy+4,txt:'10'+sup(d),cls:'tick',size:fz(11),anchor:'end'});
     }
   } else {
     for(var i=0;i<=4;i++){
       var v=linMax*i/4, yy2=y(v);
-      prims.push({t:'line',x:plot.x0,y:yy2,x2:plot.x1,y2:yy2,cls:'grid'});
+      if(o.grid!==false)prims.push({t:'line',x:plot.x0,y:yy2,x2:plot.x1,y2:yy2,cls:'grid'});
       var lbl=v===0?'0':(v>=1e4||v<1e-2? v.toExponential(1):(+v.toPrecision(3)).toString());
-      prims.push({t:'text',x:plot.x0-8,y:yy2+4,txt:lbl,cls:'tick',size:11,anchor:'end'});
+      prims.push({t:'text',x:plot.x0-8,y:yy2+4,txt:lbl,cls:'tick',size:fz(11),anchor:'end'});
     }
   }
-  if(data.yLabel)prims.push({t:'text',x:20,y:(plot.y0+plot.y1)/2,txt:data.yLabel,cls:'ylabel',size:12,anchor:'middle',rot:-90});
+  if(data.yLabel)prims.push({t:'text',x:20,y:(plot.y0+plot.y1)/2,txt:data.yLabel,cls:'ylabel',size:fz(12),anchor:'middle',rot:-90});
   // EOP reference line at 1.
   if(data.kind==='eop'){
     var y1v=y(1);
@@ -2410,32 +2413,78 @@ function titChartModel(data,opts){
             prims.push({t:'circle',x:bx+bw/2+off,y:y(p),r:2.6,cls:'dot'});
           });
         }
-        if(c.stars&&c.stars!=='ns'){
+        if(c.stars&&c.stars!=='ns'&&o.stars!==false){
           var topY=Math.min(by,c.sd>0?y(c.mean+c.sd):by)-7;
-          prims.push({t:'text',x:bx+bw/2,y:topY,txt:c.stars,cls:'stars',size:12,anchor:'middle',bold:true});
+          prims.push({t:'text',x:bx+bw/2,y:topY,txt:c.stars,cls:'stars',size:fz(12),anchor:'middle',bold:true});
         }
       } else if(c.limit>0){
         // All counts zero: show the detection limit as a dashed bound.
         var ly=y(c.limit);
         prims.push({t:'line',x:bx,y:ly,x2:bx+bw,y2:ly,cls:'limit',dash:true});
-        prims.push({t:'text',x:bx+bw/2,y:ly-6,txt:'<',cls:'tick',size:11,anchor:'middle'});
+        prims.push({t:'text',x:bx+bw/2,y:ly-6,txt:'<',cls:'tick',size:fz(11),anchor:'middle'});
       }
     });
-    prims.push({t:'text',x:plot.x0+gi*gw+gw/2,y:plot.y1+18,txt:g.name,cls:'xlabel',size:12,anchor:'middle'});
+    prims.push({t:'text',x:plot.x0+gi*gw+gw/2,y:plot.y1+18,txt:g.name,cls:'xlabel',size:fz(12),anchor:'middle'});
   });
   // Frame axes on top of the bars.
   prims.push({t:'line',x:plot.x0,y:plot.y0,x2:plot.x0,y2:plot.y1,cls:'axis'});
   prims.push({t:'line',x:plot.x0,y:plot.y1,x2:plot.x1,y2:plot.y1,cls:'axis'});
   // Legend: one swatch per condition, laid out left-to-right.
-  var lx=plot.x0, ly2=plot.y1+40;
-  (data.condNames||[]).forEach(function(nm,ci){
-    var label=nm+(data.refName===nm?' (reference)':'');
-    prims.push({t:'rect',x:lx,y:ly2-9,w:11,h:11,cls:'swatch',ci:ci});
-    prims.push({t:'text',x:lx+16,y:ly2,txt:label,cls:'legend',size:11,anchor:'start'});
-    lx+=16+label.length*6.4+18;
-    if(lx>plot.x1-90){lx=plot.x0;ly2+=18;}
-  });
+  if(o.legend!==false){
+    var lx=plot.x0, ly2=plot.y1+40;
+    (data.condNames||[]).forEach(function(nm,ci){
+      var label=nm+(data.refName===nm?' (reference)':'');
+      prims.push({t:'rect',x:lx,y:ly2-9,w:11,h:11,cls:'swatch',ci:ci});
+      prims.push({t:'text',x:lx+16,y:ly2,txt:label,cls:'legend',size:fz(11),anchor:'start'});
+      lx+=16+label.length*6.4*FS+18;
+      if(lx>plot.x1-90){lx=plot.x0;ly2+=18;}
+    });
+  }
   return {w:W,h:H,plot:plot,prims:prims};
+}
+
+// ── True-resolution PNG export, shared by every module ─────────────────
+// A "300 dpi" PNG is only 300 dpi if the file SAYS so: the pHYs chunk
+// carries pixels-per-metre, and without it journals' checkers read 72/96.
+// Insert (or replace) pHYs right after IHDR. Same technique FigureLab uses.
+var _pngCrcTab=null;
+function _pngCrc32(u8,from,to){
+  if(!_pngCrcTab){ _pngCrcTab=new Uint32Array(256);
+    for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); _pngCrcTab[n]=c>>>0; } }
+  var crc=0xFFFFFFFF;
+  for(var i=from;i<to;i++) crc=_pngCrcTab[(crc^u8[i])&0xFF]^(crc>>>8);
+  return (crc^0xFFFFFFFF)>>>0;
+}
+function pngWithDpi(u8,dpi){
+  var ppm=Math.round(dpi/0.0254);
+  var chunk=new Uint8Array(21); var dv=new DataView(chunk.buffer);
+  dv.setUint32(0,9);
+  chunk[4]=0x70;chunk[5]=0x48;chunk[6]=0x59;chunk[7]=0x73;   // 'pHYs'
+  dv.setUint32(8,ppm); dv.setUint32(12,ppm); chunk[16]=1;    // per metre
+  dv.setUint32(17,_pngCrc32(chunk,4,17));
+  var parts=[u8.subarray(0,8)], i=8, inserted=false;
+  while(i<u8.length){
+    var len=(u8[i]<<24|u8[i+1]<<16|u8[i+2]<<8|u8[i+3])>>>0;
+    var type=String.fromCharCode(u8[i+4],u8[i+5],u8[i+6],u8[i+7]);
+    var end=i+12+len;
+    if(type!=='pHYs') parts.push(u8.subarray(i,end));
+    if(type==='IHDR'&&!inserted){ parts.push(chunk); inserted=true; }
+    i=end;
+  }
+  var total=parts.reduce(function(s,p){return s+p.length;},0);
+  var out=new Uint8Array(total), off=0;
+  parts.forEach(function(p){ out.set(p,off); off+=p.length; });
+  return out;
+}
+// Download any canvas as a PNG stamped with a real dpi.
+function dlCanvasPngDpi(canvas,dpi,name){
+  canvas.toBlob(function(b){
+    if(!b){ showToast('PNG export failed','warn'); return; }
+    b.arrayBuffer().then(function(ab){
+      _dl(pngWithDpi(new Uint8Array(ab),dpi),name,'image/png');
+      showToast('✓ PNG ('+dpi+' dpi) downloaded','green');
+    });
+  },'image/png');
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -3559,13 +3608,15 @@ function deleteNamedLayout(){
 // ══════════════════════════════════════════════════════════════════
 // PLATE PNG EXPORT
 // ══════════════════════════════════════════════════════════════════
-function buildPlateCanvas(){
+function buildPlateCanvas(scale){
   const p=P();
   const big=NC>=24;
   const WS=big?18:46,GAP=big?2:3,RLW=big?16:24,CLH=big?14:22,PAD=16,RAD=big?3:8;
   const W=PAD*2+RLW+NC*(WS+GAP)-GAP;
   const H=PAD*2+CLH+NR*(WS+GAP)-GAP+28;
-  const DPR=2;
+  // Everything below draws in logical units, so a higher backing-store scale
+  // is a true re-render (crisp), not an upscale. 300 dpi → scale 300/96.
+  const DPR=scale>0?scale:2;
   const canvas=document.createElement('canvas');
   canvas.width=W*DPR;canvas.height=H*DPR;
   const ctx=canvas.getContext('2d');
@@ -3617,11 +3668,13 @@ function buildPlateCanvas(){
   return canvas;
 }
 // Thin wrapper: build then download. Split out so the notebook can grab the canvas as a dataURL.
-function exportPlatePNG(){
-  const p=P(), canvas=buildPlateCanvas();
-  canvas.toBlob(blob=>{
-    const n=(p.expName||'plate').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
-    const d=p.expDate||new Date().toISOString().slice(0,10);
+// Pass a dpi (300/600) for a publication re-render with a real pHYs chunk.
+function exportPlatePNG(dpi){
+  const p=P();
+  const n=(p.expName||'plate').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
+  const d=p.expDate||new Date().toISOString().slice(0,10);
+  if(dpi>0){ dlCanvasPngDpi(buildPlateCanvas(dpi/96),dpi,`dd-${n}-${d}-${dpi}dpi.png`); return; }
+  buildPlateCanvas().toBlob(blob=>{
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`dd-${n}-${d}.png`;a.click();
     showToast('✓ Plate PNG exported','green');
   },'image/png');
@@ -5031,6 +5084,40 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
           if(!_near(frac,0.5,1e-6)) fails.push('1e7 bar on a 1e4..1e10 log axis should reach 0.5 of the panel, got '+frac);
         }
       }catch(e){ fails.push('titChartModel threw — '+e.message); }
+    }
+    // ── PDF + xlsx builders: structural checks a viewer would also make.
+    if(window.TIT&&TIT._model&&TIT._model.pdfFromModel){
+      try{
+        var _pm=titChartModel({kind:'titer',condNames:['X'],refName:null,
+          groups:[{name:'A',cells:[{cond:'X',ci:0,mean:1e7,sd:0,n:3,points:[]}]}]},{w:300,h:200,logMin:4,logMax:10});
+        var _pdf=TIT._model.pdfFromModel(_pm);
+        n++; if(_pdf.slice(0,8)!=='%PDF-1.4') fails.push('pdf: wrong header '+_pdf.slice(0,8));
+        // The xref offset for object 1 must land exactly on "1 0 obj" — a
+        // byte-accounting bug here makes some viewers reject the file.
+        n++; var _xr=_pdf.match(/xref\n0 \d+\n0{10} 65535 f \n(\d{10})/);
+        if(!_xr) fails.push('pdf: xref table missing');
+        else if(_pdf.substr(+_xr[1],7)!=='1 0 obj') fails.push('pdf: xref offset for object 1 points at "'+_pdf.substr(+_xr[1],7)+'"');
+        n++; if(_pdf.indexOf('/BaseFont /Helvetica')<0||_pdf.indexOf('%%EOF')<0) fails.push('pdf: font or trailer missing');
+        // Superscript ticks are raised runs; Greek (ΔlamB and friends) is set
+        // in the Symbol font, never degraded to '?'. The group name below
+        // exercises exactly that path.
+        var _pm2=titChartModel({kind:'titer',condNames:['ΔlamB'],refName:null,
+          groups:[{name:'ΔlamB λ',cells:[{cond:'ΔlamB',ci:0,mean:1e7,sd:0,n:2,points:[]}]}]},{w:300,h:200,logMin:4,logMax:10});
+        var _pdf2=TIT._model.pdfFromModel(_pm2);
+        n++; if(_pdf2.indexOf('/F3')<0||_pdf2.indexOf('/Symbol')<0) fails.push('pdf: Greek text did not switch to the Symbol font');
+        n++; if(/\([^)]*\?[^)]*\) Tj/.test(_pdf2)) fails.push('pdf: a label degraded to "?"');
+      }catch(e){ n++; fails.push('pdf build threw — '+e.message); }
+    }
+    if(window.TIT&&TIT._model&&TIT._model.buildXlsx&&window.NBDOCX){
+      try{
+        var _xb=TIT._model.buildXlsx([{name:'T',rows:[['a',1],[2,'b']]}]);
+        n++; if(!(_xb[0]===0x50&&_xb[1]===0x4B)) fails.push('xlsx: not a ZIP (no PK magic)');
+        var _xs=new TextDecoder().decode(_xb);
+        n++; if(_xs.indexOf('[Content_Types].xml')<0||_xs.indexOf('xl/workbook.xml')<0||_xs.indexOf('xl/worksheets/sheet1.xml')<0)
+          fails.push('xlsx: required package parts missing');
+        n++; if(_xs.indexOf('<v>1</v>')<0||_xs.indexOf('inlineStr')<0)
+          fails.push('xlsx: numeric and string cells not both encoded');
+      }catch(e){ n++; fails.push('xlsx build threw — '+e.message); }
     }
     return {total:n, passed:n-fails.length, failures:fails};
   }
@@ -7146,10 +7233,11 @@ function dyeWorking(o){
 
   // ── canvas. Gel colours are deliberately photo-realistic and theme-independent
   //    (a gel image looks the same whatever UI theme you use).
-  function buildCanvas(){
+  function buildCanvas(scale){
     var lanes=computeLanes(), dark=(S.look==='dark');
     var LW=78, GAP=8, LEFT=64, PADX=16, TOP=34, GELH=430, BOT=26;
-    var W=PADX*2+LEFT+lanes.length*(LW+GAP), H=TOP+GELH+BOT, DPR=2;
+    // Logical-unit drawing throughout, so a higher scale is a crisp re-render.
+    var W=PADX*2+LEFT+lanes.length*(LW+GAP), H=TOP+GELH+BOT, DPR=scale>0?scale:2;
     var c=document.createElement('canvas'); c.width=W*DPR; c.height=H*DPR;
     c.style.width=W+'px'; c.style.height=H+'px';
     // Canvas pixels are opaque to screen readers, so name the image and point at the
@@ -7214,6 +7302,7 @@ function dyeWorking(o){
       '<div class="gel-disc">Migration is modelled as linear in log₁₀(size) across this gel’s resolving range. It is a planning aid, not a prediction: real mobility also depends on buffer, voltage, temperature and conformation. Circular/supercoiled DNA is <b>not</b> modelled — it runs anomalously.</div>'+
       w.map(function(x){return '<div class="gel-warn '+x.k+'">'+(x.k==='ok'?'✓ ':'⚠ ')+escapeHtml(x.t)+'</div>';}).join('')+
       '<div class="mbc-actions"><button class="btn" onclick="GEL.png()">⬇ PNG</button>'+
+      '<button class="btn" onclick="GEL.png(300)" title="Publication PNG — re-rendered at 300 dpi with the resolution stamped in the file">⬇ 300 dpi</button>'+
         '<button class="btn" onclick="GEL.copy()">Copy band table</button>'+
         '<button class="btn" onclick="GEL.csv()">⬇ CSV</button>'+
         '<button class="btn ac" onclick="GEL.toNotebook()">＋ Notebook</button></div>'+
@@ -7279,7 +7368,9 @@ function dyeWorking(o){
       try{ lsSet('dd_gel_ladders',JSON.stringify(list)); }catch(e){}
       S.ladder=id; renderControls(); render(); showToast('✓ Ladder saved','green');
     },
-    png:function(){ var c=buildCanvas(); c.toBlob(function(bl){ var a=document.createElement('a');
+    png:function(dpi){
+      if(dpi>0){ dlCanvasPngDpi(buildCanvas(dpi/96),dpi,'gel-'+(S.type)+'-'+S.pct+'-'+dpi+'dpi.png'); return; }
+      var c=buildCanvas(); c.toBlob(function(bl){ var a=document.createElement('a');
       a.href=URL.createObjectURL(bl); a.download='gel-'+(S.type)+'-'+S.pct+'.png'; a.click();
       setTimeout(function(){URL.revokeObjectURL(a.href);},1000); showToast('✓ Gel PNG exported','green'); },'image/png'); },
     csv:function(){ var rows=bandTable(computeLanes());
@@ -7692,9 +7783,19 @@ function dyeWorking(o){
   var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
 
   // Okabe–Ito colourblind-safe palette — the same one the publication-quality
-  // wave standardised on across the R tools.
+  // wave standardised on across the R tools. The figure editor can override
+  // any condition's colour; _pal is rebuilt from the experiment on every
+  // chartData() call, which every render/export path goes through first.
   var CB=['#E69F00','#56B4E9','#009E73','#F0E442','#0072B2','#D55E00','#CC79A7','#999999'];
-  function colFor(ci){ return CB[((ci%CB.length)+CB.length)%CB.length]; }
+  var _pal=CB.slice();
+  function colFor(ci){ var p=_pal.length?_pal:CB; return p[((ci%p.length)+p.length)%p.length]; }
+  function paletteFor(exp){
+    var ov=(exp.chart&&exp.chart.colors)||{};
+    return exp.conds.map(function(c,i){
+      var v=ov[c.id];
+      return /^#[0-9a-fA-F]{6}$/.test(v||'')?v:CB[i%CB.length];
+    });
+  }
 
   // ── state ─────────────────────────────────────────────────────────
   var S=null;
@@ -7785,14 +7886,22 @@ function dyeWorking(o){
       if(hi<=lo)hi=lo+1;
     }
     var linMax=vals.length?Math.max.apply(null,vals)*1.08:1;
+    // Figure-editor overrides (empty/auto values fall back to the computed ones).
+    var ch=exp.chart||{};
+    if(isFinite(+ch.ymin)&&String(ch.ymin).trim()!=='')lo=+ch.ymin;
+    if(isFinite(+ch.ymax)&&String(ch.ymax).trim()!==''&&+ch.ymax>lo)hi=+ch.ymax;
+    _pal=paletteFor(exp);
     return {model:titChartModel(
       {kind:kind,
-       title:(exp.name||'Experiment')+(kind==='eop'?' — efficiency of plating':' — titers'),
-       yLabel:kind==='eop'?'EOP (vs '+(ref?ref.name:'reference')+')':'Titer (PFU/mL)',
+       title:(ch.title&&ch.title.trim())||((exp.name||'Experiment')+(kind==='eop'?' — efficiency of plating':' — titers')),
+       yLabel:(ch.ylab&&ch.ylab.trim())||(kind==='eop'?'EOP (vs '+(ref?ref.name:'reference')+')':'Titer (PFU/mL)'),
        condNames:exp.conds.map(function(c){return c.name;}),
        refName:ref?ref.name:null, groups:groups},
-      {w:Math.max(560,150+exp.lys.length*Math.max(120,exp.conds.length*64)),h:430,
-       log:exp.chart.log!==false,logMin:lo,logMax:hi,linMax:linMax,dots:exp.chart.dots!==false}),
+      {w:ch.w>0?+ch.w:Math.max(560,150+exp.lys.length*Math.max(120,exp.conds.length*64)),
+       h:ch.h>0?+ch.h:430,
+       fontScale:ch.font>0?ch.font/11:1,
+       grid:ch.grid!==false,legend:ch.legend!==false,stars:ch.stars!==false,
+       log:ch.log!==false,logMin:lo,logMax:hi,linMax:linMax,dots:ch.dots!==false}),
       kind:kind};
   }
 
@@ -7847,37 +7956,200 @@ function dyeWorking(o){
     });
   }
 
-  // ── PNG with a REAL dpi (pHYs chunk), same technique FigureLab uses ──
-  var _crcTab=null;
-  function _crc32(u8,from,to){
-    if(!_crcTab){ _crcTab=new Uint32Array(256);
-      for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); _crcTab[n]=c>>>0; } }
-    var crc=0xFFFFFFFF;
-    for(var i=from;i<to;i++) crc=_crcTab[(crc^u8[i])&0xFF]^(crc>>>8);
-    return (crc^0xFFFFFFFF)>>>0;
+  // PNG-with-dpi lives at top level now (pngWithDpi/dlCanvasPngDpi) so the
+  // gel and plate exports share it.
+
+  // ── vector PDF from the same primitive list ───────────────────────
+  // Hand-rolled single-page PDF: Helvetica is one of the 14 fonts every PDF
+  // viewer must ship, so the file needs no embedded font and stays tiny.
+  // Unicode superscripts (10⁻³) don't exist in WinAnsi, so they are typeset
+  // properly instead: split into base + superscript runs, the latter at 70%
+  // size with a raised baseline — which is better typography than the SVG
+  // anyway. ×, µ, ± map to their CP1252 bytes.
+  // Greek letters (ΔlamB, λ, α…) are not in WinAnsi; the base-14 Symbol font
+  // has them all, so Greek becomes its own font run instead of degrading to
+  // "?". SYM maps each glyph to its byte in Symbol's built-in encoding.
+  var _PDF_SUP={'⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','⁻':'-'};
+  var _PDF_SYM={'Δ':'D','Γ':'G','Θ':'Q','Λ':'L','Ξ':'X','Π':'P','Σ':'S','Φ':'F','Ψ':'Y','Ω':'W',
+    'α':'a','β':'b','γ':'g','δ':'d','ε':'e','ζ':'z','η':'h','θ':'q','ι':'i','κ':'k','λ':'l','ν':'n',
+    'ξ':'x','π':'p','ρ':'r','σ':'s','τ':'t','υ':'u','φ':'f','χ':'c','ψ':'y','ω':'w'};
+  function _pdfRuns(txt){
+    var runs=[],cur='',curSup=false,curSym=false;
+    String(txt).split('').forEach(function(ch){
+      var isSup=_PDF_SUP.hasOwnProperty(ch), isSym=!isSup&&_PDF_SYM.hasOwnProperty(ch);
+      if((isSup!==curSup||isSym!==curSym)&&cur){runs.push({s:cur,sup:curSup,sym:curSym});cur='';}
+      curSup=isSup; curSym=isSym;
+      cur+=isSup?_PDF_SUP[ch]:isSym?_PDF_SYM[ch]:ch;
+    });
+    if(cur)runs.push({s:cur,sup:curSup,sym:curSym});
+    return runs;
   }
-  // Insert (or replace) a pHYs chunk right after IHDR so the PNG carries its
-  // physical resolution — without this, "300 dpi" would just be big pixels.
-  function pngWithDpi(u8,dpi){
-    var ppm=Math.round(dpi/0.0254);
-    var chunk=new Uint8Array(21); var dv=new DataView(chunk.buffer);
-    dv.setUint32(0,9);                                   // data length
-    chunk[4]=0x70;chunk[5]=0x48;chunk[6]=0x59;chunk[7]=0x73; // 'pHYs'
-    dv.setUint32(8,ppm); dv.setUint32(12,ppm); chunk[16]=1;  // per metre
-    dv.setUint32(17,_crc32(chunk,4,17));
-    var parts=[u8.subarray(0,8)], i=8, inserted=false;
-    while(i<u8.length){
-      var len=(u8[i]<<24|u8[i+1]<<16|u8[i+2]<<8|u8[i+3])>>>0;
-      var type=String.fromCharCode(u8[i+4],u8[i+5],u8[i+6],u8[i+7]);
-      var end=i+12+len;
-      if(type!=='pHYs') parts.push(u8.subarray(i,end));   // drop any existing pHYs
-      if(type==='IHDR'&&!inserted){ parts.push(chunk); inserted=true; }
-      i=end;
+  function _pdfEsc(s){
+    var out='';
+    for(var i=0;i<s.length;i++){
+      var ch=s[i], c=s.charCodeAt(i);
+      if(ch==='\\'||ch==='('||ch===')')out+='\\'+ch;
+      else if(c<128)out+=ch;
+      else if(ch==='×')out+='\\327'; else if(ch==='µ')out+='\\265';
+      else if(ch==='±')out+='\\261'; else if(ch==='°')out+='\\260';
+      else if(ch==='—'||ch==='–')out+='-'; else if(ch==='★')out+='*';
+      else out+='?';
     }
-    var total=parts.reduce(function(s,p){return s+p.length;},0);
-    var out=new Uint8Array(total), off=0;
-    parts.forEach(function(p){ out.set(p,off); off+=p.length; });
     return out;
+  }
+  // Approximate Helvetica advance widths (em fractions) — good enough to
+  // center/right-align labels.
+  function _pdfW(s,size){
+    var w=0;
+    for(var i=0;i<s.length;i++){
+      var ch=s[i];
+      w+=('iljt.,:;|!\'`'.indexOf(ch)>=0)?0.28:('mwMW'.indexOf(ch)>=0)?0.85:(ch===' ')?0.28:0.55;
+    }
+    return w*size;
+  }
+  function _pdfTextW(txt,size){
+    return _pdfRuns(txt).reduce(function(s,r){return s+_pdfW(r.s,r.sup?size*0.7:size);},0);
+  }
+  function _hexRgb(hex){
+    return [parseInt(hex.slice(1,3),16)/255,parseInt(hex.slice(3,5),16)/255,parseInt(hex.slice(5,7),16)/255]
+      .map(function(v){return +v.toFixed(4);}).join(' ');
+  }
+  function pdfFromModel(m){
+    var H=m.h, c=[];
+    function col(hex,stroke){ c.push(_hexRgb(hex)+(stroke?' RG':' rg')); }
+    // white ground
+    col('#ffffff'); c.push('0 0 '+m.w+' '+H+' re f');
+    function text(p){
+      var size=p.size||11, font=p.bold?'/F2':'/F1';
+      var tw=_pdfTextW(p.txt,size);
+      var x=p.x, y=H-p.y;
+      col('#111111');
+      c.push('BT');
+      if(p.rot){ // -90° on screen = text running upward; center along the baseline
+        c.push('0 1 -1 0 '+x.toFixed(1)+' '+(y-tw/2).toFixed(1)+' Tm');
+      } else {
+        if(p.anchor==='middle')x-=tw/2; else if(p.anchor==='end')x-=tw;
+        c.push('1 0 0 1 '+x.toFixed(1)+' '+y.toFixed(1)+' Tm');
+      }
+      _pdfRuns(p.txt).forEach(function(r){
+        var f=r.sym?'/F3':font;
+        c.push(f+' '+(r.sup?(size*0.7).toFixed(1):size)+' Tf '+(r.sup?(size*0.35).toFixed(1):'0')+' Ts ('+_pdfEsc(r.s)+') Tj');
+      });
+      c.push('ET');
+    }
+    m.prims.forEach(function(p){
+      if(p.t==='rect'){
+        var isBar=p.cls==='bar'||p.cls==='swatch';
+        col(isBar?colFor(p.ci):'#ffffff');
+        c.push(p.x.toFixed(1)+' '+(H-p.y-Math.max(0,p.h)).toFixed(1)+' '+p.w.toFixed(1)+' '+Math.max(0,p.h).toFixed(1)+' re f');
+        if(p.cls==='bar'){ col('#111111',true); c.push('0.75 w'); c.push(p.x.toFixed(1)+' '+(H-p.y-Math.max(0,p.h)).toFixed(1)+' '+p.w.toFixed(1)+' '+Math.max(0,p.h).toFixed(1)+' re S'); }
+      } else if(p.t==='line'){
+        col(p.cls==='grid'?'#e3e3e3':p.cls==='ref1'?'#888888':p.cls==='limit'?'#555555':'#111111',true);
+        c.push((p.cls==='err'?1.3:p.cls==='axis'?1.2:1)+' w');
+        if(p.dash)c.push('[5 4] 0 d');
+        c.push(p.x.toFixed(1)+' '+(H-p.y).toFixed(1)+' m '+p.x2.toFixed(1)+' '+(H-p.y2).toFixed(1)+' l S');
+        if(p.dash)c.push('[] 0 d');
+      } else if(p.t==='circle'){
+        var r=p.r||2.6, k=0.5523*r, x=p.x, y=H-p.y;
+        col('#3a3a3a');
+        c.push((x+r).toFixed(1)+' '+y.toFixed(1)+' m');
+        c.push((x+r).toFixed(1)+' '+(y+k).toFixed(1)+' '+(x+k).toFixed(1)+' '+(y+r).toFixed(1)+' '+x.toFixed(1)+' '+(y+r).toFixed(1)+' c');
+        c.push((x-k).toFixed(1)+' '+(y+r).toFixed(1)+' '+(x-r).toFixed(1)+' '+(y+k).toFixed(1)+' '+(x-r).toFixed(1)+' '+y.toFixed(1)+' c');
+        c.push((x-r).toFixed(1)+' '+(y-k).toFixed(1)+' '+(x-k).toFixed(1)+' '+(y-r).toFixed(1)+' '+x.toFixed(1)+' '+(y-r).toFixed(1)+' c');
+        c.push((x+k).toFixed(1)+' '+(y-r).toFixed(1)+' '+(x+r).toFixed(1)+' '+(y-k).toFixed(1)+' '+(x+r).toFixed(1)+' '+y.toFixed(1)+' c f');
+      } else if(p.t==='text'){
+        text(p);
+      }
+    });
+    var stream=c.join('\n');
+    var objs=[
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+m.w+' '+m.h+'] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> >>',
+      '<< /Length '+stream.length+' >>\nstream\n'+stream+'\nendstream',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
+      // Symbol keeps its built-in encoding — that is where the Greek lives.
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Symbol >>'
+    ];
+    var out='%PDF-1.4\n', offs=[];
+    objs.forEach(function(o,i){ offs.push(out.length); out+=(i+1)+' 0 obj\n'+o+'\nendobj\n'; });
+    var xref=out.length;
+    out+='xref\n0 '+(objs.length+1)+'\n0000000000 65535 f \n';
+    offs.forEach(function(o){ out+=String(o).padStart(10,'0')+' 00000 n \n'; });
+    out+='trailer\n<< /Size '+(objs.length+1)+' /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF';
+    return out;
+  }
+
+  // ── real .xlsx via the docx module's stored-ZIP writer ────────────
+  // An .xlsx is a ZIP of XML parts; strings go inline (t="inlineStr") so no
+  // sharedStrings table is needed, numbers stay numbers so Excel can chart
+  // and formula over them directly.
+  function _colName(i){ var s=''; i++; while(i>0){ var r=(i-1)%26; s=String.fromCharCode(65+r)+s; i=(i-1-r)/26; } return s; }
+  function _xmlEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function _sheetXml(rows){
+    var out=['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'];
+    rows.forEach(function(r,ri){
+      out.push('<row r="'+(ri+1)+'">');
+      r.forEach(function(v,ci){
+        var ref=_colName(ci)+(ri+1);
+        if(typeof v==='number'&&isFinite(v)) out.push('<c r="'+ref+'"><v>'+v+'</v></c>');
+        else if(v!==''&&v!=null) out.push('<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+_xmlEsc(v)+'</t></is></c>');
+      });
+      out.push('</row>');
+    });
+    out.push('</sheetData></worksheet>');
+    return out.join('');
+  }
+  // sheets: [{name, rows:[[cell,…],…]}] → xlsx bytes. Pure — the self-test
+  // feeds it a fixture and checks the ZIP structure.
+  function buildXlsx(sheets){
+    var z=window.NBDOCX&&NBDOCX._zip; if(!z) throw new Error('ZIP writer unavailable');
+    var ct=['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+      '<Default Extension="xml" ContentType="application/xml"/>',
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'];
+    var wbSheets=[],wbRels=[],files=[];
+    sheets.forEach(function(s,i){
+      var n=i+1;
+      ct.push('<Override PartName="/xl/worksheets/sheet'+n+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>');
+      wbSheets.push('<sheet name="'+_xmlEsc(String(s.name||('Sheet'+n)).slice(0,31))+'" sheetId="'+n+'" r:id="rId'+n+'"/>');
+      wbRels.push('<Relationship Id="rId'+n+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+n+'.xml"/>');
+      files.push({name:'xl/worksheets/sheet'+n+'.xml',data:z.enc(_sheetXml(s.rows||[]))});
+    });
+    ct.push('</Types>');
+    files.unshift(
+      {name:'[Content_Types].xml',data:z.enc(ct.join(''))},
+      {name:'_rels/.rels',data:z.enc('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')},
+      {name:'xl/workbook.xml',data:z.enc('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+wbSheets.join('')+'</sheets></workbook>')},
+      {name:'xl/_rels/workbook.xml.rels',data:z.enc('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+wbRels.join('')+'</Relationships>')});
+    return z.zip(files);
+  }
+  // The workbook mirrors the two CSVs, but numbers stay numeric (full
+  // precision) so Excel can compute on them without parsing "1.0e+9" text.
+  function xlsxSheets(){
+    var exp=E();
+    var raw=[['experiment','date','lysate','condition','is_reference','mode','dilution_exponent','dilution_factor','volume_uL','plaques','flag','titer_pfu_ml']];
+    exp.counts.forEach(function(r){
+      var t=rowTiter(exp,r);
+      raw.push([exp.name,exp.date,(lysById(exp,r.lysId)||{}).name||'',(condById(exp,r.condId)||{}).name||'',
+        r.condId===exp.refId?'yes':'no',exp.mode,r.k,exp.factor,r.volUl,r.plaques,
+        r.tntc?'TNTC':countFlag(r.plaques,exp.mode),(isFinite(t)&&t>0)?t:'']);
+    });
+    var sum=[['experiment','lysate','condition','is_reference','n','mean_titer_pfu_ml','sd','cv_pct','detection_limit','eop','eop_spread','welch_t','welch_df','p_two_tailed','stars']];
+    exp.lys.forEach(function(l){ exp.conds.forEach(function(c){
+      var cc=cellCalc(exp,l.id,c.id), refC=cellCalc(exp,l.id,exp.refId);
+      var eop=c.id===exp.refId?1:eopFrom(cc.st.mean,refC.st.mean);
+      var sp=c.id===exp.refId?NaN:eopSpread(eop,cc.st.cv,refC.st.cv);
+      var w2=welchVsRef(exp,l.id,c.id);
+      sum.push([exp.name,l.name,c.name,c.id===exp.refId?'yes':'no',cc.st.n,
+        cc.st.n?cc.st.mean:'',cc.st.sd>0?cc.st.sd:'',isFinite(cc.st.cv)?cc.st.cv:'',
+        cc.limit>0?cc.limit:'',isFinite(eop)?eop:'',isFinite(sp)?sp:'',
+        w2?w2.t:'',w2?w2.df:'',w2?w2.p:'',w2?starsForP(w2.p):'']);
+    });});
+    return [{name:'Raw counts',rows:raw},{name:'Summary',rows:sum}];
   }
 
   // ── rendering ─────────────────────────────────────────────────────
@@ -8019,14 +8291,38 @@ function dyeWorking(o){
 
     // Chart.
     var cd=chartData(exp);
+    var chp=exp.chart;
     h+='<div class="tit-sec">Chart</div>'
       +'<div class="tit-row" style="flex-wrap:wrap;">'
-      +'<button class="tit-chip'+(exp.chart.tab!=='eop'?' on':'')+'" aria-pressed="'+(exp.chart.tab!=='eop')+'" onclick="TIT.chart(\'tab\',\'titer\')">Titers</button>'
-      +'<button class="tit-chip'+(exp.chart.tab==='eop'?' on':'')+'" aria-pressed="'+(exp.chart.tab==='eop')+'" onclick="TIT.chart(\'tab\',\'eop\')">EOP</button>'
+      +'<button class="tit-chip'+(chp.tab!=='eop'?' on':'')+'" aria-pressed="'+(chp.tab!=='eop')+'" onclick="TIT.chart(\'tab\',\'titer\')">Titers</button>'
+      +'<button class="tit-chip'+(chp.tab==='eop'?' on':'')+'" aria-pressed="'+(chp.tab==='eop')+'" onclick="TIT.chart(\'tab\',\'eop\')">EOP</button>'
       +'<span style="width:10px;"></span>'
-      +'<button class="tit-chip'+(exp.chart.log!==false?' on':'')+'" aria-pressed="'+(exp.chart.log!==false)+'" onclick="TIT.chart(\'log\','+(exp.chart.log!==false?'false':'true')+')">log scale</button>'
-      +'<button class="tit-chip'+(exp.chart.dots!==false?' on':'')+'" aria-pressed="'+(exp.chart.dots!==false)+'" onclick="TIT.chart(\'dots\','+(exp.chart.dots!==false?'false':'true')+')">replicate dots</button>'
+      +'<button class="tit-chip'+(chp.log!==false?' on':'')+'" aria-pressed="'+(chp.log!==false)+'" onclick="TIT.chart(\'log\','+(chp.log!==false?'false':'true')+')">log scale</button>'
+      +'<button class="tit-chip'+(chp.dots!==false?' on':'')+'" aria-pressed="'+(chp.dots!==false)+'" onclick="TIT.chart(\'dots\','+(chp.dots!==false?'false':'true')+')">replicate dots</button>'
+      +'<button class="tit-chip'+(chp.stars!==false?' on':'')+'" aria-pressed="'+(chp.stars!==false)+'" onclick="TIT.chart(\'stars\','+(chp.stars!==false?'false':'true')+')">stars</button>'
+      +'<button class="tit-chip'+(chp.grid!==false?' on':'')+'" aria-pressed="'+(chp.grid!==false)+'" onclick="TIT.chart(\'grid\','+(chp.grid!==false?'false':'true')+')">grid</button>'
+      +'<button class="tit-chip'+(chp.legend!==false?' on':'')+'" aria-pressed="'+(chp.legend!==false)+'" onclick="TIT.chart(\'legend\','+(chp.legend!==false?'false':'true')+')">legend</button>'
       +'</div>'
+      // Figure editor: everything the exported file will use, editable here.
+      +'<details style="margin:6px 0 10px;"'+(chp.edOpen?' open':'')+' ontoggle="TIT.chart(\'edOpen\',this.open)">'
+      +'<summary tabindex="0" style="font-family:var(--mono);font-size:11px;color:var(--text2);cursor:pointer;padding:4px 0;">✎ Figure editor — titles, colours, size, axis</summary>'
+      +'<div class="tit-entry" style="margin-top:6px;">'
+      +'<div class="mbc-f"><label for="titFigTitle">Title</label><input type="text" id="titFigTitle" value="'+escapeHtml(chp.title||'')+'" placeholder="auto" style="width:210px;" onchange="TIT.chart(\'title\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigYlab">Y-axis label</label><input type="text" id="titFigYlab" value="'+escapeHtml(chp.ylab||'')+'" placeholder="auto" style="width:160px;" onchange="TIT.chart(\'ylab\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigW">Width px</label><input type="text" inputmode="numeric" id="titFigW" value="'+(chp.w>0?chp.w:'')+'" placeholder="auto" style="width:64px;" onchange="TIT.chart(\'w\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigH">Height px</label><input type="text" inputmode="numeric" id="titFigH" value="'+(chp.h>0?chp.h:'')+'" placeholder="430" style="width:64px;" onchange="TIT.chart(\'h\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigF">Font px</label><input type="text" inputmode="numeric" id="titFigF" value="'+(chp.font>0?chp.font:'')+'" placeholder="11" style="width:56px;" onchange="TIT.chart(\'font\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigYmin">Y min (10^x)</label><input type="text" inputmode="decimal" id="titFigYmin" value="'+escapeHtml(chp.ymin||'')+'" placeholder="auto" style="width:64px;" onchange="TIT.chart(\'ymin\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigYmax">Y max (10^x)</label><input type="text" inputmode="decimal" id="titFigYmax" value="'+escapeHtml(chp.ymax||'')+'" placeholder="auto" style="width:64px;" onchange="TIT.chart(\'ymax\',this.value)"></div>'
+      +'</div>'
+      +'<div class="tit-row" style="flex-wrap:wrap;align-items:center;">'
+      +'<span class="tit-mini">Condition colours:</span>'
+      +exp.conds.map(function(c,ci){
+        return '<label class="tit-mini" style="display:inline-flex;align-items:center;gap:4px;">'+escapeHtml(c.name)
+          +'<input type="color" value="'+escapeHtml(paletteFor(exp)[ci])+'" aria-label="Bar colour for '+escapeHtml(c.name)+'" style="width:26px;height:22px;border:none;padding:0;cursor:pointer;" onchange="TIT.chartColor(\''+jsAttr(c.id)+'\',this.value)"></label>';
+      }).join('')
+      +'<button class="tit-chip" onclick="TIT.chartColorReset()">↺ Okabe-Ito defaults</button>'
+      +'</div></details>'
       +'<div class="tit-chart-wrap" role="img" aria-label="'+escapeHtml(cd.kind==='eop'?'EOP bar chart':'Titer bar chart')+'">'+svgFromModel(cd.model)+'</div>'
       +'<div class="tit-caption">'+(cd.kind==='eop'
           ?'EOP per lysate vs '+escapeHtml(ref?ref.name:'reference')+'; dashed line = EOP 1 (equal plating). Error bars: propagated spread from the two CVs.'
@@ -8035,9 +8331,11 @@ function dyeWorking(o){
 
     // Actions.
     h+='<div class="mbc-actions" style="margin-top:12px;">'
+      +'<button class="btn" onclick="TIT.xlsx()">Excel (.xlsx)</button>'
       +'<button class="btn" onclick="TIT.rawCsv()">Raw CSV</button>'
       +'<button class="btn" onclick="TIT.sumCsv()">Summary CSV</button>'
       +'<button class="btn" onclick="TIT.svg()">SVG</button>'
+      +'<button class="btn" onclick="TIT.pdf()">PDF</button>'
       +'<button class="btn" onclick="TIT.png(300)">PNG 300 dpi</button>'
       +'<button class="btn" onclick="TIT.png(600)">PNG 600 dpi</button>'
       +'<button class="btn" onclick="TIT.copy()">Copy</button>'
@@ -8186,20 +8484,29 @@ function dyeWorking(o){
       render(); },
     toggleTntc:function(id){ var r=E().counts.filter(function(x){return x.id===id;})[0]; if(r){r.tntc=!r.tntc; render();} },
     delCount:function(id){ var exp=E(); exp.counts=exp.counts.filter(function(x){return x.id!==id;}); render(); },
-    chart:function(k,v){ E().chart[k]=v; render(); },
+    chart:function(k,v){ var ch=E().chart;
+      if(k==='w'||k==='h'||k==='font'){ var n=SCI.parse(String(v)); ch[k]=n>0?n:0; }
+      else if(k==='ymin'||k==='ymax'){ ch[k]=String(v).trim(); }
+      else if(k==='title'||k==='ylab'){ ch[k]=String(v).slice(0,140); }
+      else ch[k]=v;
+      render(); },
     rawCsv:function(){ _dl(rawCsvText(),baseName()+'-raw.csv','text/csv'); showToast('✓ Raw CSV downloaded','green'); },
     sumCsv:function(){ _dl(sumCsvText(),baseName()+'-summary.csv','text/csv'); showToast('✓ Summary CSV downloaded','green'); },
     svg:function(){ var cd=chartData(E()); _dl(svgFromModel(cd.model),baseName()+'-'+cd.kind+'.svg','image/svg+xml'); showToast('✓ SVG downloaded','green'); },
     png:function(dpi){ var cd=chartData(E()); var scale=dpi/96;
       var cv=document.createElement('canvas'); cv.width=Math.round(cd.model.w*scale); cv.height=Math.round(cd.model.h*scale);
       var ctx=cv.getContext('2d'); ctx.scale(scale,scale); paintModel(ctx,cd.model);
-      cv.toBlob(function(b){
-        if(!b){ showToast('PNG export failed','warn'); return; }
-        b.arrayBuffer().then(function(ab){
-          _dl(pngWithDpi(new Uint8Array(ab),dpi),baseName()+'-'+cd.kind+'-'+dpi+'dpi.png','image/png');
-          showToast('✓ PNG ('+dpi+' dpi) downloaded','green');
-        });
-      },'image/png'); },
+      dlCanvasPngDpi(cv,dpi,baseName()+'-'+cd.kind+'-'+dpi+'dpi.png'); },
+    pdf:function(){ var cd=chartData(E());
+      _dl(pdfFromModel(cd.model),baseName()+'-'+cd.kind+'.pdf','application/pdf');
+      showToast('✓ PDF downloaded','green'); },
+    xlsx:function(){ try{
+        _dl(buildXlsx(xlsxSheets()),baseName()+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        showToast('✓ Excel workbook downloaded','green');
+      }catch(e){ showToast('Excel export failed: '+e.message,'warn'); } },
+    chartColor:function(condId,hex){ var ch=E().chart; ch.colors=ch.colors||{};
+      if(/^#[0-9a-fA-F]{6}$/.test(hex))ch.colors[condId]=hex; render(); },
+    chartColorReset:function(){ E().chart.colors={}; render(); },
     copy:function(){ var exp=E();
       var t='TITERING — '+(exp.name||'experiment')+' ('+(exp.date||'')+')\n'+sumCsvText().replace(/,/g,'\t');
       dcCopyText(t); },
@@ -8220,7 +8527,8 @@ function dyeWorking(o){
         showToast('✓ '+l.name+' → library at '+cc.st.mean.toExponential(2)+' PFU/mL','green');
       } },
     blocks:blocks,
-    _model:{cellCalc:cellCalc,rowTiter:rowTiter,chartData:chartData,svgFromModel:svgFromModel,pngWithDpi:pngWithDpi,crc32:_crc32}
+    _model:{cellCalc:cellCalc,rowTiter:rowTiter,chartData:chartData,svgFromModel:svgFromModel,
+            pdfFromModel:pdfFromModel,buildXlsx:buildXlsx,xlsxSheets:xlsxSheets,pngWithDpi:pngWithDpi}
   };
 })();
 
