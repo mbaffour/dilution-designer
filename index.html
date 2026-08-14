@@ -7933,19 +7933,24 @@ function dyeWorking(o){
     var linMax=vals.length?Math.max.apply(null,vals)*1.08:1;
     // Figure-editor overrides (empty/auto values fall back to the computed ones).
     var ch=exp.chart||{};
+    // hideRef strips every reference/comparison mark from the FIGURE — the
+    // "(reference)" legend tag, the Welch stars, and the "vs …" axis label —
+    // for graphs where the comparison is not the story. EOP values themselves
+    // are still computed against the chosen reference.
+    var hideRef=ch.hideRef===true;
     if(isFinite(+ch.ymin)&&String(ch.ymin).trim()!=='')lo=+ch.ymin;
     if(isFinite(+ch.ymax)&&String(ch.ymax).trim()!==''&&+ch.ymax>lo)hi=+ch.ymax;
     _pal=paletteFor(exp);
     return {model:titChartModel(
       {kind:kind,
        title:(ch.title&&ch.title.trim())||((exp.name||'Experiment')+(kind==='eop'?' — efficiency of plating':' — titers')),
-       yLabel:(ch.ylab&&ch.ylab.trim())||(kind==='eop'?'EOP (vs '+(ref?ref.name:'reference')+')':'Titer (PFU/mL)'),
+       yLabel:(ch.ylab&&ch.ylab.trim())||(kind==='eop'?(hideRef?'EOP':'EOP (vs '+(ref?ref.name:'reference')+')'):'Titer (PFU/mL)'),
        condNames:exp.conds.map(function(c){return c.name;}),
-       refName:ref?ref.name:null, groups:groups},
+       refName:hideRef?null:(ref?ref.name:null), groups:groups},
       {w:ch.w>0?+ch.w:Math.max(560,150+exp.lys.length*Math.max(120,exp.conds.length*64)),
        h:ch.h>0?+ch.h:430,
        fontScale:ch.font>0?ch.font/11:1,
-       grid:ch.grid!==false,legend:ch.legend!==false,stars:ch.stars!==false,
+       grid:ch.grid!==false,legend:ch.legend!==false,stars:ch.stars!==false&&!hideRef,
        log:ch.log!==false,logMin:lo,logMax:hi,linMax:linMax,dots:ch.dots!==false}),
       kind:kind};
   }
@@ -8374,6 +8379,7 @@ function dyeWorking(o){
       +'<button class="tit-chip'+(chp.stars!==false?' on':'')+'" aria-pressed="'+(chp.stars!==false)+'" onclick="TIT.chart(\'stars\','+(chp.stars!==false?'false':'true')+')">stars</button>'
       +'<button class="tit-chip'+(chp.grid!==false?' on':'')+'" aria-pressed="'+(chp.grid!==false)+'" onclick="TIT.chart(\'grid\','+(chp.grid!==false?'false':'true')+')">grid</button>'
       +'<button class="tit-chip'+(chp.legend!==false?' on':'')+'" aria-pressed="'+(chp.legend!==false)+'" onclick="TIT.chart(\'legend\','+(chp.legend!==false?'false':'true')+')">legend</button>'
+      +'<button class="tit-chip'+(!chp.hideRef?' on':'')+'" aria-pressed="'+(!chp.hideRef)+'" onclick="TIT.chart(\'hideRef\','+(chp.hideRef?'false':'true')+')" title="Show or hide the (reference) tag, significance stars and vs-reference labels on the figure">reference marks</button>'
       +'</div>'
       // Figure editor: everything the exported file will use, editable here.
       +'<details style="margin:6px 0 10px;"'+(chp.edOpen?' open':'')+' ontoggle="TIT.chart(\'edOpen\',this.open)">'
@@ -8397,9 +8403,10 @@ function dyeWorking(o){
       +'</div></details>'
       +'<div class="tit-chart-wrap" role="img" aria-label="'+escapeHtml(cd.kind==='eop'?'EOP bar chart':'Titer bar chart')+'">'+svgFromModel(cd.model)+'</div>'
       +'<div class="tit-caption">'+(cd.kind==='eop'
-          ?'EOP per lysate vs '+escapeHtml(ref?ref.name:'reference')+'; dashed line = EOP 1 (equal plating). Error bars: propagated spread from the two CVs.'
+          ?(chp.hideRef?'EOP per lysate; dashed line = EOP 1 (equal plating).':'EOP per lysate vs '+escapeHtml(ref?ref.name:'reference')+'; dashed line = EOP 1 (equal plating).')+' Error bars: propagated spread from the two CVs.'
           :'Bars: mean titer; error bars ± SD; dots: individual replicates.')
-      +' Stars: Welch\'s t on log₁₀ titers vs the reference. Exports are publication-styled (white ground, Helvetica, Okabe-Ito colours).</div>';
+      +((chp.stars!==false&&!chp.hideRef)?' Stars: Welch\'s t on log₁₀ titers vs the reference.':'')
+      +' Exports are publication-styled (white ground, Helvetica, Okabe-Ito colours).</div>';
 
     // Actions.
     h+='<div class="mbc-actions" style="margin-top:12px;">'
