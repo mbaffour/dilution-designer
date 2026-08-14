@@ -356,6 +356,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <button class="mode-tab" id="modeTabCalc" onclick="setMode('calc')">🧬 Calculators</button>
     <button class="mode-tab" id="modeTabProto" onclick="setMode('proto')">📋 Protocols</button>
     <button class="mode-tab" id="modeTabPhg" onclick="setMode('phg')">🦠 Phage Planner</button>
+    <button class="mode-tab" id="modeTabTit" onclick="setMode('titer')">⭕ Titering</button>
     <button class="mode-tab" id="modeTabMic" onclick="setMode('mic')">🔬 Microscopy</button>
     <button class="mode-tab" id="modeTabGel" onclick="setMode('gel')">🧪 Gel Sim</button>
     <button class="mode-tab" id="modeTabNb" onclick="setMode('notebook')">📓 Notebook</button>
@@ -383,6 +384,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <button class="btn" onclick="deleteNamedLayout()" title="Delete selected saved layout">🗑</button>
     </span>
     <button class="btn" onclick="exportPlatePNG()" title="Export plate as PNG image">🖼 PNG</button>
+    <button class="btn" onclick="exportPlatePNG(300)" title="Publication PNG — re-rendered at 300 dpi with the resolution stamped in the file">🖼 300 dpi</button>
     <button class="btn" onclick="copyText()">Copy</button>
     <button class="btn" onclick="downloadCSV()">CSV</button>
     <button class="btn" onclick="downloadMinimalCSV()">Minimal CSV</button>
@@ -603,6 +605,14 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div id="phgLibTools"></div>
     </aside>
     <section class="mbc-main" id="phgMain"></section>
+  </div>
+</div>
+
+<!-- ══════════ TITERING / EOP ══════════ -->
+<div id="titView" style="display:none;padding:16px 20px 60px;max-width:1180px;margin:0 auto;">
+  <div class="mbc-grid">
+    <aside class="mbc-nav" id="titSide"></aside>
+    <section class="mbc-main" id="titMain"></section>
   </div>
 </div>
 
@@ -1130,6 +1140,7 @@ var SCI=(function(){
       else if(appMode==='home'&&window.renderHome) renderHome();
       else if(appMode==='phg'&&window.PHG) PHG.render();
       else if(appMode==='mic'&&window.MIC) MIC.recompute();
+      else if(appMode==='titer'&&window.TIT) TIT.render();
       else if(typeof update==='function') update();
     }catch(e){}
   }
@@ -1275,12 +1286,14 @@ function setMode(m) {
   var mtN=document.getElementById('modeTabNb'); if(mtN) mtN.classList.toggle('active',m==='notebook');
   var mtL=document.getElementById('modeTabPhg'); if(mtL) mtL.classList.toggle('active',m==='phg');
   var mtM=document.getElementById('modeTabMic'); if(mtM) mtM.classList.toggle('active',m==='mic');
+  var mtT=document.getElementById('modeTabTit'); if(mtT) mtT.classList.toggle('active',m==='titer');
   // Home, Reagent Prep, Dilution Calc and Calculators are self-contained views — hide the plate workspace when active.
   var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView'), dv=document.getElementById('dilcalcView'),
       hv=document.getElementById('homeView'), cv=document.getElementById('calcView'), pv=document.getElementById('protoView'),
       gv=document.getElementById('gelView'), nv=document.getElementById('notebookView'),
-      lv=document.getElementById('phgView'), mv=document.getElementById('micView');
-  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto'||m==='gel'||m==='notebook'||m==='phg'||m==='mic');
+      lv=document.getElementById('phgView'), mv=document.getElementById('micView'),
+      tv=document.getElementById('titView');
+  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto'||m==='gel'||m==='notebook'||m==='phg'||m==='mic'||m==='titer');
   if(rv) rv.style.display = m==='reagent'?'':'none';
   if(dv) dv.style.display = m==='dilcalc'?'':'none';
   if(hv) hv.style.display = m==='home'?'':'none';
@@ -1290,6 +1303,7 @@ function setMode(m) {
   if(nv) nv.style.display = m==='notebook'?'':'none';
   if(lv) lv.style.display = m==='phg'?'':'none';
   if(mv) mv.style.display = m==='mic'?'':'none';
+  if(tv) tv.style.display = m==='titer'?'':'none';
   if(appEl) appEl.style.display = special?'none':'';
   if(m==='reagent'){ rpInit(); return; }
   if(m==='dilcalc'){ dcInit(); return; }
@@ -1300,6 +1314,7 @@ function setMode(m) {
   if(m==='notebook'){ if(window.NB) NB.init(); return; }
   if(m==='phg'){ if(window.PHG) PHG.init(); return; }
   if(m==='mic'){ if(window.MIC) MIC.init(); return; }
+  if(m==='titer'){ if(window.TIT) TIT.init(); return; }
   document.getElementById('sbPlasmid').style.display = m==='plasmid'?'':'none';
   document.getElementById('sbPhage').style.display   = m==='phage'?'':'none';
   document.getElementById('moiPanel').style.display  = m==='phage'?'':'none';
@@ -2201,6 +2216,275 @@ function planPipetting(pfuPerWell,titer,opts){
     else reason=`No dilution between neat and ${dilLabel(maxSteps,factor)} lands in ${minPip}–${maxPip} µL (deepest gives ${fmtUl(last.vol)} µL).`;
   }
   return{steps,pick,reason};
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TITERING / EOP MATH — pure, no DOM, same placement rationale as the
+// phage math above: it must survive any module IIFE failing to parse.
+// The Titering module is the main consumer; the self-test asserts on
+// these directly with hand-computed expectations.
+// ══════════════════════════════════════════════════════════════════
+
+// Mean / sample SD / CV% of replicate titers. Zero and non-finite values
+// are the CALLER's problem to filter (zero counts become detection limits,
+// not titers) — this just does the arithmetic.
+function titerStats(titers){
+  const v=(titers||[]).filter(x=>isFinite(x)&&x>0);
+  const n=v.length;
+  if(!n)return{n:0,mean:NaN,sd:NaN,cv:NaN};
+  const mean=v.reduce((s,x)=>s+x,0)/n;
+  if(n===1)return{n:1,mean,sd:NaN,cv:NaN};
+  const sd=Math.sqrt(v.reduce((s,x)=>s+(x-mean)*(x-mean),0)/(n-1));
+  return{n,mean,sd,cv:mean>0?sd/mean*100:NaN};
+}
+
+// EOP = titer on the test condition / titer on the reference condition.
+// A missing or zero reference gives NaN, never Infinity — an Infinity
+// would render as a plausible-looking "∞" and get copied into a figure.
+function eopFrom(meanTest,meanRef){
+  if(!(meanTest>0&&meanRef>0))return NaN;
+  return meanTest/meanRef;
+}
+// Spread of a ratio of two noisy means, first-order propagation:
+// eop × √(cvA² + cvB²), with CVs as fractions.
+function eopSpread(eop,cvA,cvB){
+  if(!(eop>0)||!isFinite(cvA)||!isFinite(cvB))return NaN;
+  return eop*Math.sqrt((cvA/100)*(cvA/100)+(cvB/100)*(cvB/100));
+}
+
+// Countable-window check. Full plates: the classic 30–300. Spots: a 5–10 µL
+// spot saturates far sooner, 3–30 is the practical window.
+function countWindow(mode){ return mode==='spot'?[3,30]:[30,300]; }
+function countFlag(plaques,mode){
+  if(!(plaques>0))return plaques===0?'zero':'';
+  const w=countWindow(mode);
+  return plaques<w[0]?'low':plaques>w[1]?'high':'';
+}
+
+// ── Welch's t-test on two samples (the module feeds it log10 titers).
+// Returns {t, df, p} (two-tailed) or null when either side has n<2.
+function welchT(a,b){
+  const A=(a||[]).filter(isFinite), B=(b||[]).filter(isFinite);
+  if(A.length<2||B.length<2)return null;
+  const mean=v=>v.reduce((s,x)=>s+x,0)/v.length;
+  const varS=(v,m)=>v.reduce((s,x)=>s+(x-m)*(x-m),0)/(v.length-1);
+  const ma=mean(A), mb=mean(B), va=varS(A,ma), vb=varS(B,mb);
+  const na=A.length, nb=B.length;
+  const se2=va/na+vb/nb;
+  if(!(se2>0)){
+    // Zero variance on both sides: identical values ⇒ p=1 if means match, else
+    // the difference is exact — report p≈0 rather than dividing by zero.
+    return {t:ma===mb?0:Infinity, df:na+nb-2, p:ma===mb?1:0};
+  }
+  const t=(ma-mb)/Math.sqrt(se2);
+  // Welch–Satterthwaite degrees of freedom.
+  const df=se2*se2/((va/na)*(va/na)/(na-1)+(vb/nb)*(vb/nb)/(nb-1));
+  return {t, df, p:tTwoTailedP(Math.abs(t),df)};
+}
+
+// Two-tailed p for |t| with df degrees of freedom, via the regularised
+// incomplete beta function: p = I_{df/(df+t²)}(df/2, 1/2).
+function tTwoTailedP(t,df){
+  if(!isFinite(t))return 0;
+  if(!(df>0))return NaN;
+  if(t===0)return 1;
+  return _regIncBeta(df/(df+t*t), df/2, 0.5);
+}
+// Regularised incomplete beta I_x(a,b) by Lentz continued fraction
+// (Numerical Recipes betacf), good to ~1e-10 for the df range stats needs.
+function _regIncBeta(x,a,b){
+  if(x<=0)return 0; if(x>=1)return 1;
+  const lnBeta=_lnGamma(a)+_lnGamma(b)-_lnGamma(a+b);
+  const front=Math.exp(a*Math.log(x)+b*Math.log(1-x)-lnBeta);
+  // Use the symmetry that keeps the continued fraction convergent.
+  if(x<(a+1)/(a+b+2))return front*_betacf(x,a,b)/a;
+  return 1-Math.exp(b*Math.log(1-x)+a*Math.log(x)-lnBeta)*_betacf(1-x,b,a)/b;
+}
+function _betacf(x,a,b){
+  const EPS=1e-12, FPMIN=1e-300;
+  let qab=a+b, qap=a+1, qam=a-1;
+  let c=1, d=1-qab*x/qap;
+  if(Math.abs(d)<FPMIN)d=FPMIN;
+  d=1/d; let h=d;
+  for(let m=1;m<=200;m++){
+    const m2=2*m;
+    let aa=m*(b-m)*x/((qam+m2)*(a+m2));
+    d=1+aa*d; if(Math.abs(d)<FPMIN)d=FPMIN;
+    c=1+aa/c; if(Math.abs(c)<FPMIN)c=FPMIN;
+    d=1/d; h*=d*c;
+    aa=-(a+m)*(qab+m)*x/((a+m2)*(qap+m2));
+    d=1+aa*d; if(Math.abs(d)<FPMIN)d=FPMIN;
+    c=1+aa/c; if(Math.abs(c)<FPMIN)c=FPMIN;
+    d=1/d; const del=d*c; h*=del;
+    if(Math.abs(del-1)<EPS)break;
+  }
+  return h;
+}
+// Lanczos log-gamma (g=7, n=9), |error| < 1e-13 over the positive reals.
+function _lnGamma(z){
+  const g=7, C=[0.99999999999980993,676.5203681218851,-1259.1392167224028,
+    771.32342877765313,-176.61502916214059,12.507343278686905,
+    -0.13857109526572012,9.9843695780195716e-6,1.5056327351493116e-7];
+  if(z<0.5)return Math.log(Math.PI/Math.sin(Math.PI*z))-_lnGamma(1-z);
+  z-=1;
+  let x=C[0];
+  for(let i=1;i<g+2;i++)x+=C[i]/(z+i);
+  const t=z+g+0.5;
+  return 0.5*Math.log(2*Math.PI)+(z+0.5)*Math.log(t)-t+Math.log(x);
+}
+function starsForP(p){
+  if(!isFinite(p))return'';
+  return p<0.001?'***':p<0.01?'**':p<0.05?'*':'ns';
+}
+
+// ── Chart layout for the Titering module — geometry only, no DOM/canvas.
+// Emits a flat list of primitives that two backends consume (an SVG
+// serialiser for display/export and a canvas painter for PNG), so the two
+// renderings can never disagree and the layout is directly unit-testable.
+//
+// data: {kind:'titer'|'eop', title, yLabel,
+//        condNames:[...], refName,
+//        groups:[{name, cells:[{cond, ci, mean, sd, n, points:[], stars, isRef, limit}]}]}
+// opts: {w,h,log:true, logMin,logMax, linMax, dots:true}
+// returns {w,h,plot:{x0,y0,x1,y1}, prims:[{t:'rect'|'line'|'text'|'circle',…}]}
+function titChartModel(data,opts){
+  var o=opts||{}, W=o.w>0?o.w:760, H=o.h>0?o.h:430;
+  var useLog=o.log!==false;
+  var FS=o.fontScale>0?o.fontScale:1;          // figure-editor font scaling
+  function fz(s){ return Math.round(s*FS*10)/10; }
+  var plot={x0:74,y0:44,x1:W-16,y1:H-(o.legend===false?46:88)};
+  var lo=isFinite(o.logMin)?o.logMin:0, hi=isFinite(o.logMax)?o.logMax:10;
+  if(hi<=lo)hi=lo+1;
+  var linMax=o.linMax>0?o.linMax:1;
+  function y(v){
+    if(useLog){
+      if(!(v>0))return plot.y1;
+      var l=Math.max(lo,Math.min(hi,Math.log10(v)));
+      return plot.y1-(l-lo)/(hi-lo)*(plot.y1-plot.y0);
+    }
+    return plot.y1-Math.max(0,Math.min(1,v/linMax))*(plot.y1-plot.y0);
+  }
+  function sup(nn){ var neg=nn<0; var s=String(Math.abs(nn)).split('').map(function(d){return '⁰¹²³⁴⁵⁶⁷⁸⁹'[+d];}).join(''); return (neg?'⁻':'')+s; }
+  var prims=[];
+  if(data.title)prims.push({t:'text',x:(plot.x0+plot.x1)/2,y:22,txt:data.title,cls:'title',size:fz(14),anchor:'middle',bold:true});
+  // Y gridlines + tick labels (labels stay even when the grid is hidden).
+  if(useLog){
+    for(var d=Math.ceil(lo);d<=Math.floor(hi);d++){
+      var yy=y(Math.pow(10,d));
+      if(o.grid!==false)prims.push({t:'line',x:plot.x0,y:yy,x2:plot.x1,y2:yy,cls:'grid'});
+      prims.push({t:'text',x:plot.x0-8,y:yy+4,txt:'10'+sup(d),cls:'tick',size:fz(11),anchor:'end'});
+    }
+  } else {
+    for(var i=0;i<=4;i++){
+      var v=linMax*i/4, yy2=y(v);
+      if(o.grid!==false)prims.push({t:'line',x:plot.x0,y:yy2,x2:plot.x1,y2:yy2,cls:'grid'});
+      var lbl=v===0?'0':(v>=1e4||v<1e-2? v.toExponential(1):(+v.toPrecision(3)).toString());
+      prims.push({t:'text',x:plot.x0-8,y:yy2+4,txt:lbl,cls:'tick',size:fz(11),anchor:'end'});
+    }
+  }
+  if(data.yLabel)prims.push({t:'text',x:20,y:(plot.y0+plot.y1)/2,txt:data.yLabel,cls:'ylabel',size:fz(12),anchor:'middle',rot:-90});
+  // EOP reference line at 1.
+  if(data.kind==='eop'){
+    var y1v=y(1);
+    if(y1v>plot.y0-1&&y1v<plot.y1+1)prims.push({t:'line',x:plot.x0,y:y1v,x2:plot.x1,y2:y1v,cls:'ref1',dash:true});
+  }
+  // Grouped bars.
+  var groups=data.groups||[], nG=groups.length||1;
+  var plotW=plot.x1-plot.x0, gw=plotW/nG;
+  groups.forEach(function(g,gi){
+    var cells=g.cells||[], nC=cells.length||1;
+    var slot=gw*0.84/nC, x0g=plot.x0+gi*gw+gw*0.08;
+    cells.forEach(function(c,cj){
+      var bx=x0g+cj*slot, bw=slot*0.86;
+      if(c.mean>0){
+        var by=y(c.mean);
+        prims.push({t:'rect',x:bx,y:by,w:bw,h:plot.y1-by,cls:'bar',ci:c.ci,cond:c.cond,group:g.name});
+        if(c.sd>0){
+          var hiY=y(c.mean+c.sd);
+          var loV=c.mean-c.sd, cx=bx+bw/2;
+          prims.push({t:'line',x:cx,y:hiY,x2:cx,y2:(loV>0?y(loV):y(c.mean)),cls:'err'});
+          prims.push({t:'line',x:cx-bw*0.22,y:hiY,x2:cx+bw*0.22,y2:hiY,cls:'err'});
+          if(loV>0)prims.push({t:'line',x:cx-bw*0.22,y:y(loV),x2:cx+bw*0.22,y2:y(loV),cls:'err'});
+        }
+        if(o.dots!==false&&c.points&&c.points.length>1){
+          c.points.forEach(function(p,pi){
+            if(!(p>0)&&useLog)return;
+            var off=(pi-(c.points.length-1)/2)*Math.min(6,bw*0.18);
+            prims.push({t:'circle',x:bx+bw/2+off,y:y(p),r:2.6,cls:'dot'});
+          });
+        }
+        if(c.stars&&c.stars!=='ns'&&o.stars!==false){
+          var topY=Math.min(by,c.sd>0?y(c.mean+c.sd):by)-7;
+          prims.push({t:'text',x:bx+bw/2,y:topY,txt:c.stars,cls:'stars',size:fz(12),anchor:'middle',bold:true});
+        }
+      } else if(c.limit>0){
+        // All counts zero: show the detection limit as a dashed bound.
+        var ly=y(c.limit);
+        prims.push({t:'line',x:bx,y:ly,x2:bx+bw,y2:ly,cls:'limit',dash:true});
+        prims.push({t:'text',x:bx+bw/2,y:ly-6,txt:'<',cls:'tick',size:fz(11),anchor:'middle'});
+      }
+    });
+    prims.push({t:'text',x:plot.x0+gi*gw+gw/2,y:plot.y1+18,txt:g.name,cls:'xlabel',size:fz(12),anchor:'middle'});
+  });
+  // Frame axes on top of the bars.
+  prims.push({t:'line',x:plot.x0,y:plot.y0,x2:plot.x0,y2:plot.y1,cls:'axis'});
+  prims.push({t:'line',x:plot.x0,y:plot.y1,x2:plot.x1,y2:plot.y1,cls:'axis'});
+  // Legend: one swatch per condition, laid out left-to-right.
+  if(o.legend!==false){
+    var lx=plot.x0, ly2=plot.y1+40;
+    (data.condNames||[]).forEach(function(nm,ci){
+      var label=nm+(data.refName===nm?' (reference)':'');
+      prims.push({t:'rect',x:lx,y:ly2-9,w:11,h:11,cls:'swatch',ci:ci});
+      prims.push({t:'text',x:lx+16,y:ly2,txt:label,cls:'legend',size:fz(11),anchor:'start'});
+      lx+=16+label.length*6.4*FS+18;
+      if(lx>plot.x1-90){lx=plot.x0;ly2+=18;}
+    });
+  }
+  return {w:W,h:H,plot:plot,prims:prims};
+}
+
+// ── True-resolution PNG export, shared by every module ─────────────────
+// A "300 dpi" PNG is only 300 dpi if the file SAYS so: the pHYs chunk
+// carries pixels-per-metre, and without it journals' checkers read 72/96.
+// Insert (or replace) pHYs right after IHDR. Same technique FigureLab uses.
+var _pngCrcTab=null;
+function _pngCrc32(u8,from,to){
+  if(!_pngCrcTab){ _pngCrcTab=new Uint32Array(256);
+    for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); _pngCrcTab[n]=c>>>0; } }
+  var crc=0xFFFFFFFF;
+  for(var i=from;i<to;i++) crc=_pngCrcTab[(crc^u8[i])&0xFF]^(crc>>>8);
+  return (crc^0xFFFFFFFF)>>>0;
+}
+function pngWithDpi(u8,dpi){
+  var ppm=Math.round(dpi/0.0254);
+  var chunk=new Uint8Array(21); var dv=new DataView(chunk.buffer);
+  dv.setUint32(0,9);
+  chunk[4]=0x70;chunk[5]=0x48;chunk[6]=0x59;chunk[7]=0x73;   // 'pHYs'
+  dv.setUint32(8,ppm); dv.setUint32(12,ppm); chunk[16]=1;    // per metre
+  dv.setUint32(17,_pngCrc32(chunk,4,17));
+  var parts=[u8.subarray(0,8)], i=8, inserted=false;
+  while(i<u8.length){
+    var len=(u8[i]<<24|u8[i+1]<<16|u8[i+2]<<8|u8[i+3])>>>0;
+    var type=String.fromCharCode(u8[i+4],u8[i+5],u8[i+6],u8[i+7]);
+    var end=i+12+len;
+    if(type!=='pHYs') parts.push(u8.subarray(i,end));
+    if(type==='IHDR'&&!inserted){ parts.push(chunk); inserted=true; }
+    i=end;
+  }
+  var total=parts.reduce(function(s,p){return s+p.length;},0);
+  var out=new Uint8Array(total), off=0;
+  parts.forEach(function(p){ out.set(p,off); off+=p.length; });
+  return out;
+}
+// Download any canvas as a PNG stamped with a real dpi.
+function dlCanvasPngDpi(canvas,dpi,name){
+  canvas.toBlob(function(b){
+    if(!b){ showToast('PNG export failed','warn'); return; }
+    b.arrayBuffer().then(function(ab){
+      _dl(pngWithDpi(new Uint8Array(ab),dpi),name,'image/png');
+      showToast('✓ PNG ('+dpi+' dpi) downloaded','green');
+    });
+  },'image/png');
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -3324,13 +3608,15 @@ function deleteNamedLayout(){
 // ══════════════════════════════════════════════════════════════════
 // PLATE PNG EXPORT
 // ══════════════════════════════════════════════════════════════════
-function buildPlateCanvas(){
+function buildPlateCanvas(scale){
   const p=P();
   const big=NC>=24;
   const WS=big?18:46,GAP=big?2:3,RLW=big?16:24,CLH=big?14:22,PAD=16,RAD=big?3:8;
   const W=PAD*2+RLW+NC*(WS+GAP)-GAP;
   const H=PAD*2+CLH+NR*(WS+GAP)-GAP+28;
-  const DPR=2;
+  // Everything below draws in logical units, so a higher backing-store scale
+  // is a true re-render (crisp), not an upscale. 300 dpi → scale 300/96.
+  const DPR=scale>0?scale:2;
   const canvas=document.createElement('canvas');
   canvas.width=W*DPR;canvas.height=H*DPR;
   const ctx=canvas.getContext('2d');
@@ -3382,11 +3668,13 @@ function buildPlateCanvas(){
   return canvas;
 }
 // Thin wrapper: build then download. Split out so the notebook can grab the canvas as a dataURL.
-function exportPlatePNG(){
-  const p=P(), canvas=buildPlateCanvas();
-  canvas.toBlob(blob=>{
-    const n=(p.expName||'plate').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
-    const d=p.expDate||new Date().toISOString().slice(0,10);
+// Pass a dpi (300/600) for a publication re-render with a real pHYs chunk.
+function exportPlatePNG(dpi){
+  const p=P();
+  const n=(p.expName||'plate').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
+  const d=p.expDate||new Date().toISOString().slice(0,10);
+  if(dpi>0){ dlCanvasPngDpi(buildPlateCanvas(dpi/96),dpi,`dd-${n}-${d}-${dpi}dpi.png`); return; }
+  buildPlateCanvas().toBlob(blob=>{
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`dd-${n}-${d}.png`;a.click();
     showToast('✓ Plate PNG exported','green');
   },'image/png');
@@ -4758,6 +5046,79 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       n++; var _blue=micEmFrac(_fitc,0,519), _red=micEmFrac(_fitc,519,2000);
       if(!(_red>_blue)) fails.push('emission should be red-tailed: blue side '+_blue+', red side '+_red);
     }
+    // ── titering / EOP math. Anchors: hand arithmetic and PUBLISHED t-table
+    // values (t=2.776 df=4 ⇒ p=.05; t=4.604 df=4 ⇒ p=.01) — never our own
+    // output. Welch case cross-checked against R: t.test(c(1,2,3),c(2,3,4))
+    // gives t=-1.2247, df=4, p=0.2879.
+    if(window.titerStats&&window.welchT){
+      n++; var _ts=titerStats([1e9,1.2e9,0.8e9]);
+      if(!_near(_ts.mean,1e9,1)||!_near(_ts.sd,2e8,1e3)||!_near(_ts.cv,20,1e-6))
+        fails.push('titerStats([1e9,1.2e9,0.8e9]) mean/sd/cv = '+_ts.mean+'/'+_ts.sd+'/'+_ts.cv+', want 1e9/2e8/20');
+      n++; if(!isNaN(titerStats([5e8]).sd)) fails.push('titerStats n=1 must give sd NaN, not a number');
+      n++; if(!_near(eopFrom(5e4,1e9),5e-5,1e-12)) fails.push('eopFrom(5e4,1e9) = '+eopFrom(5e4,1e9)+', want 5e-5');
+      n++; if(!isNaN(eopFrom(5e4,0))) fails.push('eopFrom with ref=0 must be NaN, never Infinity');
+      n++; if(!_near(eopSpread(0.5,30,40),0.25,1e-12)) fails.push('eopSpread(0.5,30,40) = '+eopSpread(0.5,30,40)+', want 0.25 (3-4-5)');
+      n++; if(!_near(tTwoTailedP(2.776,4),0.05,5e-4)) fails.push('tTwoTailedP(2.776,4) = '+tTwoTailedP(2.776,4)+', want 0.05 (t-table)');
+      n++; if(!_near(tTwoTailedP(4.604,4),0.01,5e-4)) fails.push('tTwoTailedP(4.604,4) = '+tTwoTailedP(4.604,4)+', want 0.01 (t-table)');
+      n++; if(!_near(tTwoTailedP(0,7),1,1e-9)) fails.push('t=0 must give p=1');
+      n++; var _w=welchT([1,2,3],[2,3,4]);
+      if(!_w||!_near(_w.t,-1.224745,1e-5)||!_near(_w.df,4,1e-9)||!_near(_w.p,0.2879,5e-3))
+        fails.push('welchT([1,2,3],[2,3,4]) t/df/p = '+(_w?_w.t+'/'+_w.df+'/'+_w.p:'null')+', want -1.2247/4/0.2879');
+      n++; if(welchT([1],[1,2])!==null) fails.push('welchT with n<2 must return null, not a fake p');
+      n++; if(countFlag(29,'plate')!=='low'||countFlag(31,'plate')!==''||countFlag(301,'plate')!=='high')
+        fails.push('plate countable window (30-300) misflagged');
+      n++; if(countFlag(2,'spot')!=='low'||countFlag(4,'spot')!==''||countFlag(31,'spot')!=='high')
+        fails.push('spot countable window (3-30) misflagged');
+      n++; if(starsForP(0.0005)!=='***'||starsForP(0.03)!=='*'||starsForP(0.2)!=='ns') fails.push('significance stars wrong');
+    }
+    // Chart layout: pure geometry, hand-computable. On a log10 axis spanning
+    // 1e4..1e10 a 1e7 bar must end exactly halfway up the panel.
+    if(window.titChartModel){
+      n++; try{
+        var _cm=titChartModel({kind:'titer',groups:[{name:'A',cells:[{cond:'X',mean:1e7,sd:0,n:3,points:[1e7]}]}],refName:null},
+                              {w:400,h:300,logMin:4,logMax:10});
+        var _bar=(_cm.prims||[]).filter(function(p){return p.t==='rect'&&p.cls==='bar';})[0];
+        if(!_bar) fails.push('titChartModel produced no bar rect');
+        else {
+          var frac=(_cm.plot.y1-_bar.y)/(_cm.plot.y1-_cm.plot.y0);
+          if(!_near(frac,0.5,1e-6)) fails.push('1e7 bar on a 1e4..1e10 log axis should reach 0.5 of the panel, got '+frac);
+        }
+      }catch(e){ fails.push('titChartModel threw — '+e.message); }
+    }
+    // ── PDF + xlsx builders: structural checks a viewer would also make.
+    if(window.TIT&&TIT._model&&TIT._model.pdfFromModel){
+      try{
+        var _pm=titChartModel({kind:'titer',condNames:['X'],refName:null,
+          groups:[{name:'A',cells:[{cond:'X',ci:0,mean:1e7,sd:0,n:3,points:[]}]}]},{w:300,h:200,logMin:4,logMax:10});
+        var _pdf=TIT._model.pdfFromModel(_pm);
+        n++; if(_pdf.slice(0,8)!=='%PDF-1.4') fails.push('pdf: wrong header '+_pdf.slice(0,8));
+        // The xref offset for object 1 must land exactly on "1 0 obj" — a
+        // byte-accounting bug here makes some viewers reject the file.
+        n++; var _xr=_pdf.match(/xref\n0 \d+\n0{10} 65535 f \n(\d{10})/);
+        if(!_xr) fails.push('pdf: xref table missing');
+        else if(_pdf.substr(+_xr[1],7)!=='1 0 obj') fails.push('pdf: xref offset for object 1 points at "'+_pdf.substr(+_xr[1],7)+'"');
+        n++; if(_pdf.indexOf('/BaseFont /Helvetica')<0||_pdf.indexOf('%%EOF')<0) fails.push('pdf: font or trailer missing');
+        // Superscript ticks are raised runs; Greek (ΔlamB and friends) is set
+        // in the Symbol font, never degraded to '?'. The group name below
+        // exercises exactly that path.
+        var _pm2=titChartModel({kind:'titer',condNames:['ΔlamB'],refName:null,
+          groups:[{name:'ΔlamB λ',cells:[{cond:'ΔlamB',ci:0,mean:1e7,sd:0,n:2,points:[]}]}]},{w:300,h:200,logMin:4,logMax:10});
+        var _pdf2=TIT._model.pdfFromModel(_pm2);
+        n++; if(_pdf2.indexOf('/F3')<0||_pdf2.indexOf('/Symbol')<0) fails.push('pdf: Greek text did not switch to the Symbol font');
+        n++; if(/\([^)]*\?[^)]*\) Tj/.test(_pdf2)) fails.push('pdf: a label degraded to "?"');
+      }catch(e){ n++; fails.push('pdf build threw — '+e.message); }
+    }
+    if(window.TIT&&TIT._model&&TIT._model.buildXlsx&&window.NBDOCX){
+      try{
+        var _xb=TIT._model.buildXlsx([{name:'T',rows:[['a',1],[2,'b']]}]);
+        n++; if(!(_xb[0]===0x50&&_xb[1]===0x4B)) fails.push('xlsx: not a ZIP (no PK magic)');
+        var _xs=new TextDecoder().decode(_xb);
+        n++; if(_xs.indexOf('[Content_Types].xml')<0||_xs.indexOf('xl/workbook.xml')<0||_xs.indexOf('xl/worksheets/sheet1.xml')<0)
+          fails.push('xlsx: required package parts missing');
+        n++; if(_xs.indexOf('<v>1</v>')<0||_xs.indexOf('inlineStr')<0)
+          fails.push('xlsx: numeric and string cells not both encoded');
+      }catch(e){ n++; fails.push('xlsx build threw — '+e.message); }
+    }
     return {total:n, passed:n-fails.length, failures:fails};
   }
 
@@ -4783,6 +5144,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       {m:'calc',icon:'🧬',title:'Molbio Calculators',desc:CALCS.length+' bench calculators: ng↔pmol, A260, ligation, primer Tm, OD→cells, phage titer/MOI, %↔molarity & more.'},
       {m:'proto',icon:'📋',title:'Protocols',desc:(window.PROTO?PROTO.list.length:21)+' step-by-step protocols — miniprep, CTAB gDNA, gels, transformation, plaque assay — that rescale as you change the numbers.'},
       {m:'phg',icon:'🦠',title:'Phage Planner',desc:'Keep your lysates and their titers, then work out the volume for an infection — by MOI, total PFU or final PFU/mL — and the dilution to make when that volume is too small to pipette.'},
+      {m:'titer',icon:'⭕',title:'Titering & EOP',desc:'Log plaque counts with replicates, get PFU/mL with SD and CV, group lysates under host conditions, EOP against a switchable reference with Welch-t significance — then export tidy CSVs and publication-ready SVG/PNG bar charts.'},
       {m:'mic',icon:'🔬',title:'Microscopy & Dyes',desc:nDye+' dyes and stains — what to use for what, at what concentration, in which channel. Spectra, filter/laser matching, panel bleed-through checks, and the working dilution worked out for your sample count.'},
       {m:'gel',icon:'🧪',title:'Gel Simulator',desc:'Predict an agarose or SDS-PAGE run before you pour it — '+nLad+' vendor ladders, band-resolution warnings and a best-% suggestion.'},
       {m:'notebook',icon:'📓',title:'Lab Notebook',desc:'Pull results from any module into a dated entry, add your own notes, and export to Markdown, HTML, PDF, Word, CSV or JSON.'}
@@ -6871,10 +7233,11 @@ function dyeWorking(o){
 
   // ── canvas. Gel colours are deliberately photo-realistic and theme-independent
   //    (a gel image looks the same whatever UI theme you use).
-  function buildCanvas(){
+  function buildCanvas(scale){
     var lanes=computeLanes(), dark=(S.look==='dark');
     var LW=78, GAP=8, LEFT=64, PADX=16, TOP=34, GELH=430, BOT=26;
-    var W=PADX*2+LEFT+lanes.length*(LW+GAP), H=TOP+GELH+BOT, DPR=2;
+    // Logical-unit drawing throughout, so a higher scale is a crisp re-render.
+    var W=PADX*2+LEFT+lanes.length*(LW+GAP), H=TOP+GELH+BOT, DPR=scale>0?scale:2;
     var c=document.createElement('canvas'); c.width=W*DPR; c.height=H*DPR;
     c.style.width=W+'px'; c.style.height=H+'px';
     // Canvas pixels are opaque to screen readers, so name the image and point at the
@@ -6939,6 +7302,7 @@ function dyeWorking(o){
       '<div class="gel-disc">Migration is modelled as linear in log₁₀(size) across this gel’s resolving range. It is a planning aid, not a prediction: real mobility also depends on buffer, voltage, temperature and conformation. Circular/supercoiled DNA is <b>not</b> modelled — it runs anomalously.</div>'+
       w.map(function(x){return '<div class="gel-warn '+x.k+'">'+(x.k==='ok'?'✓ ':'⚠ ')+escapeHtml(x.t)+'</div>';}).join('')+
       '<div class="mbc-actions"><button class="btn" onclick="GEL.png()">⬇ PNG</button>'+
+      '<button class="btn" onclick="GEL.png(300)" title="Publication PNG — re-rendered at 300 dpi with the resolution stamped in the file">⬇ 300 dpi</button>'+
         '<button class="btn" onclick="GEL.copy()">Copy band table</button>'+
         '<button class="btn" onclick="GEL.csv()">⬇ CSV</button>'+
         '<button class="btn ac" onclick="GEL.toNotebook()">＋ Notebook</button></div>'+
@@ -7004,7 +7368,9 @@ function dyeWorking(o){
       try{ lsSet('dd_gel_ladders',JSON.stringify(list)); }catch(e){}
       S.ladder=id; renderControls(); render(); showToast('✓ Ladder saved','green');
     },
-    png:function(){ var c=buildCanvas(); c.toBlob(function(bl){ var a=document.createElement('a');
+    png:function(dpi){
+      if(dpi>0){ dlCanvasPngDpi(buildCanvas(dpi/96),dpi,'gel-'+(S.type)+'-'+S.pct+'-'+dpi+'dpi.png'); return; }
+      var c=buildCanvas(); c.toBlob(function(bl){ var a=document.createElement('a');
       a.href=URL.createObjectURL(bl); a.download='gel-'+(S.type)+'-'+S.pct+'.png'; a.click();
       setTimeout(function(){URL.revokeObjectURL(a.href);},1000); showToast('✓ Gel PNG exported','green'); },'image/png'); },
     csv:function(){ var rows=bandTable(computeLanes());
@@ -7393,6 +7759,788 @@ function dyeWorking(o){
   };
 })();
 
+/* ══════════════════════════ TITERING / EOP ══════════════════════════ */
+(function(){
+  var css=`
+  .tit-sec{font:600 10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--text3);margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--border);}
+  .tit-row{display:flex;gap:6px;align-items:center;margin-bottom:5px;}
+  .tit-row input[type=text],.tit-row input[type=date]{flex:1;min-width:0;}
+  .tit-entry{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px;}
+  .tit-entry .mbc-f{margin:0;}
+  .tit-chips{display:flex;gap:4px;flex-wrap:wrap;}
+  .tit-chip{font:600 11px var(--mono);padding:5px 8px;border-radius:5px;border:1px solid var(--border);background:var(--surface);color:var(--text2);cursor:pointer;}
+  .tit-chip.on{background:var(--accent-fill);color:var(--accent-fill-fg);border-color:var(--accent-fill);}
+  .tit-ref-col{background:var(--accent-bg);}
+  .tit-cell-eop{font:11px var(--mono);color:var(--text2);margin-top:3px;}
+  .tit-stars{font-weight:700;color:var(--accent);}
+  .tit-chart-wrap{background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px;overflow-x:auto;}
+  .tit-chart-wrap svg{display:block;max-width:100%;height:auto;}
+  .tit-caption{font:11px var(--mono);color:var(--text3);line-height:1.7;margin-top:8px;}
+  .tit-mini{font:10px var(--mono);color:var(--text3);}
+  .tit-del{background:none;border:none;cursor:pointer;color:var(--text3);font-size:12px;padding:2px 5px;border-radius:3px;min-width:26px;min-height:26px;}
+  .tit-del:hover{color:var(--danger);background:var(--surface2);}
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  // Okabe–Ito colourblind-safe palette — the same one the publication-quality
+  // wave standardised on across the R tools. The figure editor can override
+  // any condition's colour; _pal is rebuilt from the experiment on every
+  // chartData() call, which every render/export path goes through first.
+  var CB=['#E69F00','#56B4E9','#009E73','#F0E442','#0072B2','#D55E00','#CC79A7','#999999'];
+  var _pal=CB.slice();
+  function colFor(ci){ var p=_pal.length?_pal:CB; return p[((ci%p.length)+p.length)%p.length]; }
+  function paletteFor(exp){
+    var ov=(exp.chart&&exp.chart.colors)||{};
+    return exp.conds.map(function(c,i){
+      var v=ov[c.id];
+      return /^#[0-9a-fA-F]{6}$/.test(v||'')?v:CB[i%CB.length];
+    });
+  }
+
+  // ── state ─────────────────────────────────────────────────────────
+  var S=null;
+  function _id(){ S.seq=(S.seq||1)+1; return 'te'+S.seq.toString(36); }
+  function defExp(n){
+    // Two conditions from the start so EOP means something immediately.
+    var c1='tc1',c2='tc2',l1='tl1';
+    return {id:'tx'+Date.now().toString(36),name:n||'Experiment 1',date:new Date().toISOString().slice(0,10),notes:'',
+      mode:'plate',volUl:100,factor:10,refId:c1,
+      conds:[{id:c1,name:'Reference host'},{id:c2,name:'Test host'}],
+      lys:[{id:l1,name:'Phage 1',libId:''}],
+      counts:[],
+      entry:{lysId:l1,condId:c1,k:6,volUl:100},
+      chart:{tab:'titer',dots:true,log:true}};
+  }
+  function defState(){ return {v:1,active:0,seq:1,experiments:[defExp()]}; }
+  function load(){
+    try{ var j=JSON.parse(lsGet('dd_titer')||'null');
+      if(j&&j.v===1&&Array.isArray(j.experiments)&&j.experiments.length) return j;
+    }catch(e){}
+    return defState();
+  }
+  function save(){ if(window._sharedSession)return; if(!lsSet('dd_titer',JSON.stringify(S))) lsWarnOnce(); }
+  function E(){ S.active=Math.max(0,Math.min(S.active||0,S.experiments.length-1)); return S.experiments[S.active]; }
+  function condById(exp,id){ return exp.conds.filter(function(c){return c.id===id;})[0]||null; }
+  function lysById(exp,id){ return exp.lys.filter(function(l){return l.id===id;})[0]||null; }
+
+  // ── computation (all titer math via the shared pure helpers) ──────
+  function rowTiter(exp,c){
+    if(c.tntc||!(c.plaques>0))return NaN;
+    return titerFromPlaques(c.plaques,Math.pow(exp.factor,c.k),c.volUl/1000);
+  }
+  // Everything the summary needs for one lysate × condition cell.
+  function cellCalc(exp,lysId,condId){
+    var rows=exp.counts.filter(function(c){return c.lysId===lysId&&c.condId===condId;});
+    var titers=rows.map(function(r){return rowTiter(exp,r);}).filter(function(t){return isFinite(t)&&t>0;});
+    var stx=titerStats(titers);
+    var limit=NaN;
+    if(!stx.n){
+      // Nothing countable. If zero-plaque rows exist, the least-dilute one sets
+      // the tightest bound: "had there been 1 plaque there, titer would be X".
+      var zeros=rows.filter(function(r){return !r.tntc&&r.plaques===0;});
+      if(zeros.length) limit=Math.min.apply(null,zeros.map(function(r){return titerFromPlaques(1,Math.pow(exp.factor,r.k),r.volUl/1000);}));
+    }
+    return {rows:rows,titers:titers,st:stx,limit:limit,
+            logs:titers.map(function(t){return Math.log10(t);})};
+  }
+  function welchVsRef(exp,lysId,condId){
+    if(condId===exp.refId)return null;
+    var a=cellCalc(exp,lysId,condId), b=cellCalc(exp,lysId,exp.refId);
+    return welchT(a.logs,b.logs);
+  }
+
+  // ── chart data → shared layout model ──────────────────────────────
+  function chartData(exp){
+    var kind=exp.chart.tab==='eop'?'eop':'titer';
+    var ref=condById(exp,exp.refId);
+    var vals=[];
+    var groups=exp.lys.map(function(l){
+      var cells=[];
+      exp.conds.forEach(function(c,ci){
+        var cc=cellCalc(exp,l.id,c.id);
+        if(kind==='titer'){
+          if(cc.st.n){ vals.push(cc.st.mean); if(cc.st.sd>0){vals.push(cc.st.mean+cc.st.sd); if(cc.st.mean-cc.st.sd>0)vals.push(cc.st.mean-cc.st.sd);} cc.titers.forEach(function(t){vals.push(t);}); }
+          else if(cc.limit>0) vals.push(cc.limit);
+          var w=welchVsRef(exp,l.id,c.id);
+          cells.push({cond:c.name,ci:ci,mean:cc.st.n?cc.st.mean:0,sd:cc.st.sd>0?cc.st.sd:0,n:cc.st.n,
+                      points:exp.chart.dots?cc.titers:[],stars:w?starsForP(w.p):'',isRef:c.id===exp.refId,limit:cc.limit>0?cc.limit:0});
+        } else {
+          if(c.id===exp.refId)return;
+          var refC=cellCalc(exp,l.id,exp.refId);
+          var eop=eopFrom(cc.st.mean,refC.st.mean);
+          var sp=eopSpread(eop,cc.st.cv,refC.st.cv);
+          if(eop>0){ vals.push(eop); if(sp>0){vals.push(eop+sp); if(eop-sp>0)vals.push(eop-sp);} }
+          var w2=welchVsRef(exp,l.id,c.id);
+          cells.push({cond:c.name,ci:ci,mean:eop>0?eop:0,sd:sp>0?sp:0,n:cc.st.n,points:[],stars:w2?starsForP(w2.p):'',isRef:false,limit:0});
+        }
+      });
+      return {name:l.name,cells:cells};
+    });
+    var logs=vals.filter(function(v){return v>0;}).map(function(v){return Math.log10(v);});
+    var lo,hi;
+    if(!logs.length){ lo=kind==='eop'?-3:4; hi=kind==='eop'?1:10; }
+    else{
+      lo=Math.floor(Math.min.apply(null,logs)); hi=Math.ceil(Math.max.apply(null,logs));
+      if(kind==='eop'){ lo=Math.min(lo,0); hi=Math.max(hi,0); }      // keep EOP=1 in frame
+      else lo=Math.max(0,lo);
+      if(hi<=lo)hi=lo+1;
+    }
+    var linMax=vals.length?Math.max.apply(null,vals)*1.08:1;
+    // Figure-editor overrides (empty/auto values fall back to the computed ones).
+    var ch=exp.chart||{};
+    if(isFinite(+ch.ymin)&&String(ch.ymin).trim()!=='')lo=+ch.ymin;
+    if(isFinite(+ch.ymax)&&String(ch.ymax).trim()!==''&&+ch.ymax>lo)hi=+ch.ymax;
+    _pal=paletteFor(exp);
+    return {model:titChartModel(
+      {kind:kind,
+       title:(ch.title&&ch.title.trim())||((exp.name||'Experiment')+(kind==='eop'?' — efficiency of plating':' — titers')),
+       yLabel:(ch.ylab&&ch.ylab.trim())||(kind==='eop'?'EOP (vs '+(ref?ref.name:'reference')+')':'Titer (PFU/mL)'),
+       condNames:exp.conds.map(function(c){return c.name;}),
+       refName:ref?ref.name:null, groups:groups},
+      {w:ch.w>0?+ch.w:Math.max(560,150+exp.lys.length*Math.max(120,exp.conds.length*64)),
+       h:ch.h>0?+ch.h:430,
+       fontScale:ch.font>0?ch.font/11:1,
+       grid:ch.grid!==false,legend:ch.legend!==false,stars:ch.stars!==false,
+       log:ch.log!==false,logMin:lo,logMax:hi,linMax:linMax,dots:ch.dots!==false}),
+      kind:kind};
+  }
+
+  // ── SVG serialiser (also the on-screen renderer) ──────────────────
+  function escXml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function svgFromModel(m){
+    // Publication styling on purpose: white ground and near-black ink in every
+    // app theme, so the exported figure never inherits night-mode colours.
+    var o=['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+m.w+' '+m.h+'" width="'+m.w+'" height="'+m.h+'" font-family="Helvetica, Arial, sans-serif" role="img">'];
+    o.push('<rect x="0" y="0" width="'+m.w+'" height="'+m.h+'" fill="#ffffff"/>');
+    m.prims.forEach(function(p){
+      if(p.t==='rect'){
+        var fill=(p.cls==='bar'||p.cls==='swatch')?colFor(p.ci):'#ffffff';
+        o.push('<rect x="'+p.x.toFixed(1)+'" y="'+p.y.toFixed(1)+'" width="'+p.w.toFixed(1)+'" height="'+Math.max(0,p.h).toFixed(1)+'" fill="'+fill+'"'+(p.cls==='bar'?' stroke="#111111" stroke-width="0.75"':'')+'/>');
+      } else if(p.t==='line'){
+        var stk=p.cls==='grid'?'#e3e3e3':p.cls==='ref1'?'#888888':p.cls==='limit'?'#555555':'#111111';
+        var wd=p.cls==='err'?1.3:p.cls==='axis'?1.2:1;
+        o.push('<line x1="'+p.x.toFixed(1)+'" y1="'+p.y.toFixed(1)+'" x2="'+p.x2.toFixed(1)+'" y2="'+p.y2.toFixed(1)+'" stroke="'+stk+'" stroke-width="'+wd+'"'+(p.dash?' stroke-dasharray="5 4"':'')+'/>');
+      } else if(p.t==='circle'){
+        o.push('<circle cx="'+p.x.toFixed(1)+'" cy="'+p.y.toFixed(1)+'" r="'+(p.r||2.6)+'" fill="#111111" fill-opacity="0.7"/>');
+      } else if(p.t==='text'){
+        o.push('<text x="'+p.x.toFixed(1)+'" y="'+p.y.toFixed(1)+'" text-anchor="'+(p.anchor||'start')+'" font-size="'+(p.size||11)+'" fill="#111111"'+(p.bold?' font-weight="bold"':'')+(p.rot?' transform="rotate('+p.rot+' '+p.x.toFixed(1)+' '+p.y.toFixed(1)+')"':'')+'>'+escXml(p.txt)+'</text>');
+      }
+    });
+    o.push('</svg>');
+    return o.join('');
+  }
+  // Canvas painter — consumes the SAME primitive list, for PNG export.
+  function paintModel(ctx,m){
+    ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,m.w,m.h);
+    ctx.font='11px Helvetica, Arial, sans-serif';
+    m.prims.forEach(function(p){
+      if(p.t==='rect'){
+        ctx.fillStyle=(p.cls==='bar'||p.cls==='swatch')?colFor(p.ci):'#ffffff';
+        ctx.fillRect(p.x,p.y,p.w,Math.max(0,p.h));
+        if(p.cls==='bar'){ ctx.strokeStyle='#111111'; ctx.lineWidth=0.75; ctx.strokeRect(p.x,p.y,p.w,Math.max(0,p.h)); }
+      } else if(p.t==='line'){
+        ctx.strokeStyle=p.cls==='grid'?'#e3e3e3':p.cls==='ref1'?'#888888':p.cls==='limit'?'#555555':'#111111';
+        ctx.lineWidth=p.cls==='err'?1.3:p.cls==='axis'?1.2:1;
+        ctx.setLineDash(p.dash?[5,4]:[]);
+        ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(p.x2,p.y2); ctx.stroke(); ctx.setLineDash([]);
+      } else if(p.t==='circle'){
+        ctx.fillStyle='rgba(17,17,17,0.7)';
+        ctx.beginPath(); ctx.arc(p.x,p.y,p.r||2.6,0,Math.PI*2); ctx.fill();
+      } else if(p.t==='text'){
+        ctx.fillStyle='#111111';
+        ctx.font=(p.bold?'bold ':'')+(p.size||11)+'px Helvetica, Arial, sans-serif';
+        ctx.textAlign=p.anchor==='middle'?'center':p.anchor==='end'?'right':'left';
+        if(p.rot){ ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot*Math.PI/180); ctx.fillText(p.txt,0,0); ctx.restore(); }
+        else ctx.fillText(p.txt,p.x,p.y);
+      }
+    });
+  }
+
+  // PNG-with-dpi lives at top level now (pngWithDpi/dlCanvasPngDpi) so the
+  // gel and plate exports share it.
+
+  // ── vector PDF from the same primitive list ───────────────────────
+  // Hand-rolled single-page PDF: Helvetica is one of the 14 fonts every PDF
+  // viewer must ship, so the file needs no embedded font and stays tiny.
+  // Unicode superscripts (10⁻³) don't exist in WinAnsi, so they are typeset
+  // properly instead: split into base + superscript runs, the latter at 70%
+  // size with a raised baseline — which is better typography than the SVG
+  // anyway. ×, µ, ± map to their CP1252 bytes.
+  // Greek letters (ΔlamB, λ, α…) are not in WinAnsi; the base-14 Symbol font
+  // has them all, so Greek becomes its own font run instead of degrading to
+  // "?". SYM maps each glyph to its byte in Symbol's built-in encoding.
+  var _PDF_SUP={'⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9','⁻':'-'};
+  var _PDF_SYM={'Δ':'D','Γ':'G','Θ':'Q','Λ':'L','Ξ':'X','Π':'P','Σ':'S','Φ':'F','Ψ':'Y','Ω':'W',
+    'α':'a','β':'b','γ':'g','δ':'d','ε':'e','ζ':'z','η':'h','θ':'q','ι':'i','κ':'k','λ':'l','ν':'n',
+    'ξ':'x','π':'p','ρ':'r','σ':'s','τ':'t','υ':'u','φ':'f','χ':'c','ψ':'y','ω':'w'};
+  function _pdfRuns(txt){
+    var runs=[],cur='',curSup=false,curSym=false;
+    String(txt).split('').forEach(function(ch){
+      var isSup=_PDF_SUP.hasOwnProperty(ch), isSym=!isSup&&_PDF_SYM.hasOwnProperty(ch);
+      if((isSup!==curSup||isSym!==curSym)&&cur){runs.push({s:cur,sup:curSup,sym:curSym});cur='';}
+      curSup=isSup; curSym=isSym;
+      cur+=isSup?_PDF_SUP[ch]:isSym?_PDF_SYM[ch]:ch;
+    });
+    if(cur)runs.push({s:cur,sup:curSup,sym:curSym});
+    return runs;
+  }
+  function _pdfEsc(s){
+    var out='';
+    for(var i=0;i<s.length;i++){
+      var ch=s[i], c=s.charCodeAt(i);
+      if(ch==='\\'||ch==='('||ch===')')out+='\\'+ch;
+      else if(c<128)out+=ch;
+      else if(ch==='×')out+='\\327'; else if(ch==='µ')out+='\\265';
+      else if(ch==='±')out+='\\261'; else if(ch==='°')out+='\\260';
+      else if(ch==='—'||ch==='–')out+='-'; else if(ch==='★')out+='*';
+      else out+='?';
+    }
+    return out;
+  }
+  // Approximate Helvetica advance widths (em fractions) — good enough to
+  // center/right-align labels.
+  function _pdfW(s,size){
+    var w=0;
+    for(var i=0;i<s.length;i++){
+      var ch=s[i];
+      w+=('iljt.,:;|!\'`'.indexOf(ch)>=0)?0.28:('mwMW'.indexOf(ch)>=0)?0.85:(ch===' ')?0.28:0.55;
+    }
+    return w*size;
+  }
+  function _pdfTextW(txt,size){
+    return _pdfRuns(txt).reduce(function(s,r){return s+_pdfW(r.s,r.sup?size*0.7:size);},0);
+  }
+  function _hexRgb(hex){
+    return [parseInt(hex.slice(1,3),16)/255,parseInt(hex.slice(3,5),16)/255,parseInt(hex.slice(5,7),16)/255]
+      .map(function(v){return +v.toFixed(4);}).join(' ');
+  }
+  function pdfFromModel(m){
+    var H=m.h, c=[];
+    function col(hex,stroke){ c.push(_hexRgb(hex)+(stroke?' RG':' rg')); }
+    // white ground
+    col('#ffffff'); c.push('0 0 '+m.w+' '+H+' re f');
+    function text(p){
+      var size=p.size||11, font=p.bold?'/F2':'/F1';
+      var tw=_pdfTextW(p.txt,size);
+      var x=p.x, y=H-p.y;
+      col('#111111');
+      c.push('BT');
+      if(p.rot){ // -90° on screen = text running upward; center along the baseline
+        c.push('0 1 -1 0 '+x.toFixed(1)+' '+(y-tw/2).toFixed(1)+' Tm');
+      } else {
+        if(p.anchor==='middle')x-=tw/2; else if(p.anchor==='end')x-=tw;
+        c.push('1 0 0 1 '+x.toFixed(1)+' '+y.toFixed(1)+' Tm');
+      }
+      _pdfRuns(p.txt).forEach(function(r){
+        var f=r.sym?'/F3':font;
+        c.push(f+' '+(r.sup?(size*0.7).toFixed(1):size)+' Tf '+(r.sup?(size*0.35).toFixed(1):'0')+' Ts ('+_pdfEsc(r.s)+') Tj');
+      });
+      c.push('ET');
+    }
+    m.prims.forEach(function(p){
+      if(p.t==='rect'){
+        var isBar=p.cls==='bar'||p.cls==='swatch';
+        col(isBar?colFor(p.ci):'#ffffff');
+        c.push(p.x.toFixed(1)+' '+(H-p.y-Math.max(0,p.h)).toFixed(1)+' '+p.w.toFixed(1)+' '+Math.max(0,p.h).toFixed(1)+' re f');
+        if(p.cls==='bar'){ col('#111111',true); c.push('0.75 w'); c.push(p.x.toFixed(1)+' '+(H-p.y-Math.max(0,p.h)).toFixed(1)+' '+p.w.toFixed(1)+' '+Math.max(0,p.h).toFixed(1)+' re S'); }
+      } else if(p.t==='line'){
+        col(p.cls==='grid'?'#e3e3e3':p.cls==='ref1'?'#888888':p.cls==='limit'?'#555555':'#111111',true);
+        c.push((p.cls==='err'?1.3:p.cls==='axis'?1.2:1)+' w');
+        if(p.dash)c.push('[5 4] 0 d');
+        c.push(p.x.toFixed(1)+' '+(H-p.y).toFixed(1)+' m '+p.x2.toFixed(1)+' '+(H-p.y2).toFixed(1)+' l S');
+        if(p.dash)c.push('[] 0 d');
+      } else if(p.t==='circle'){
+        var r=p.r||2.6, k=0.5523*r, x=p.x, y=H-p.y;
+        col('#3a3a3a');
+        c.push((x+r).toFixed(1)+' '+y.toFixed(1)+' m');
+        c.push((x+r).toFixed(1)+' '+(y+k).toFixed(1)+' '+(x+k).toFixed(1)+' '+(y+r).toFixed(1)+' '+x.toFixed(1)+' '+(y+r).toFixed(1)+' c');
+        c.push((x-k).toFixed(1)+' '+(y+r).toFixed(1)+' '+(x-r).toFixed(1)+' '+(y+k).toFixed(1)+' '+(x-r).toFixed(1)+' '+y.toFixed(1)+' c');
+        c.push((x-r).toFixed(1)+' '+(y-k).toFixed(1)+' '+(x-k).toFixed(1)+' '+(y-r).toFixed(1)+' '+x.toFixed(1)+' '+(y-r).toFixed(1)+' c');
+        c.push((x+k).toFixed(1)+' '+(y-r).toFixed(1)+' '+(x+r).toFixed(1)+' '+(y-k).toFixed(1)+' '+(x+r).toFixed(1)+' '+y.toFixed(1)+' c f');
+      } else if(p.t==='text'){
+        text(p);
+      }
+    });
+    var stream=c.join('\n');
+    var objs=[
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+m.w+' '+m.h+'] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> >>',
+      '<< /Length '+stream.length+' >>\nstream\n'+stream+'\nendstream',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
+      // Symbol keeps its built-in encoding — that is where the Greek lives.
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Symbol >>'
+    ];
+    var out='%PDF-1.4\n', offs=[];
+    objs.forEach(function(o,i){ offs.push(out.length); out+=(i+1)+' 0 obj\n'+o+'\nendobj\n'; });
+    var xref=out.length;
+    out+='xref\n0 '+(objs.length+1)+'\n0000000000 65535 f \n';
+    offs.forEach(function(o){ out+=String(o).padStart(10,'0')+' 00000 n \n'; });
+    out+='trailer\n<< /Size '+(objs.length+1)+' /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF';
+    return out;
+  }
+
+  // ── real .xlsx via the docx module's stored-ZIP writer ────────────
+  // An .xlsx is a ZIP of XML parts; strings go inline (t="inlineStr") so no
+  // sharedStrings table is needed, numbers stay numbers so Excel can chart
+  // and formula over them directly.
+  function _colName(i){ var s=''; i++; while(i>0){ var r=(i-1)%26; s=String.fromCharCode(65+r)+s; i=(i-1-r)/26; } return s; }
+  function _xmlEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function _sheetXml(rows){
+    var out=['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'];
+    rows.forEach(function(r,ri){
+      out.push('<row r="'+(ri+1)+'">');
+      r.forEach(function(v,ci){
+        var ref=_colName(ci)+(ri+1);
+        if(typeof v==='number'&&isFinite(v)) out.push('<c r="'+ref+'"><v>'+v+'</v></c>');
+        else if(v!==''&&v!=null) out.push('<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+_xmlEsc(v)+'</t></is></c>');
+      });
+      out.push('</row>');
+    });
+    out.push('</sheetData></worksheet>');
+    return out.join('');
+  }
+  // sheets: [{name, rows:[[cell,…],…]}] → xlsx bytes. Pure — the self-test
+  // feeds it a fixture and checks the ZIP structure.
+  function buildXlsx(sheets){
+    var z=window.NBDOCX&&NBDOCX._zip; if(!z) throw new Error('ZIP writer unavailable');
+    var ct=['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+      '<Default Extension="xml" ContentType="application/xml"/>',
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'];
+    var wbSheets=[],wbRels=[],files=[];
+    sheets.forEach(function(s,i){
+      var n=i+1;
+      ct.push('<Override PartName="/xl/worksheets/sheet'+n+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>');
+      wbSheets.push('<sheet name="'+_xmlEsc(String(s.name||('Sheet'+n)).slice(0,31))+'" sheetId="'+n+'" r:id="rId'+n+'"/>');
+      wbRels.push('<Relationship Id="rId'+n+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+n+'.xml"/>');
+      files.push({name:'xl/worksheets/sheet'+n+'.xml',data:z.enc(_sheetXml(s.rows||[]))});
+    });
+    ct.push('</Types>');
+    files.unshift(
+      {name:'[Content_Types].xml',data:z.enc(ct.join(''))},
+      {name:'_rels/.rels',data:z.enc('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')},
+      {name:'xl/workbook.xml',data:z.enc('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+wbSheets.join('')+'</sheets></workbook>')},
+      {name:'xl/_rels/workbook.xml.rels',data:z.enc('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+wbRels.join('')+'</Relationships>')});
+    return z.zip(files);
+  }
+  // The workbook mirrors the two CSVs, but numbers stay numeric (full
+  // precision) so Excel can compute on them without parsing "1.0e+9" text.
+  function xlsxSheets(){
+    var exp=E();
+    var raw=[['experiment','date','lysate','condition','is_reference','mode','dilution_exponent','dilution_factor','volume_uL','plaques','flag','titer_pfu_ml']];
+    exp.counts.forEach(function(r){
+      var t=rowTiter(exp,r);
+      raw.push([exp.name,exp.date,(lysById(exp,r.lysId)||{}).name||'',(condById(exp,r.condId)||{}).name||'',
+        r.condId===exp.refId?'yes':'no',exp.mode,r.k,exp.factor,r.volUl,r.plaques,
+        r.tntc?'TNTC':countFlag(r.plaques,exp.mode),(isFinite(t)&&t>0)?t:'']);
+    });
+    var sum=[['experiment','lysate','condition','is_reference','n','mean_titer_pfu_ml','sd','cv_pct','detection_limit','eop','eop_spread','welch_t','welch_df','p_two_tailed','stars']];
+    exp.lys.forEach(function(l){ exp.conds.forEach(function(c){
+      var cc=cellCalc(exp,l.id,c.id), refC=cellCalc(exp,l.id,exp.refId);
+      var eop=c.id===exp.refId?1:eopFrom(cc.st.mean,refC.st.mean);
+      var sp=c.id===exp.refId?NaN:eopSpread(eop,cc.st.cv,refC.st.cv);
+      var w2=welchVsRef(exp,l.id,c.id);
+      sum.push([exp.name,l.name,c.name,c.id===exp.refId?'yes':'no',cc.st.n,
+        cc.st.n?cc.st.mean:'',cc.st.sd>0?cc.st.sd:'',isFinite(cc.st.cv)?cc.st.cv:'',
+        cc.limit>0?cc.limit:'',isFinite(eop)?eop:'',isFinite(sp)?sp:'',
+        w2?w2.t:'',w2?w2.df:'',w2?w2.p:'',w2?starsForP(w2.p):'']);
+    });});
+    return [{name:'Raw counts',rows:raw},{name:'Summary',rows:sum}];
+  }
+
+  // ── rendering ─────────────────────────────────────────────────────
+  function fmtT(n){ return (isFinite(n)&&n>0)?SCI.fmt(n,3):'—'; }
+  function renderSide(){
+    var exp=E();
+    var h='<div class="sl">Experiments</div><div class="mbc-list" role="listbox" aria-label="Titering experiments">';
+    S.experiments.forEach(function(x,i){
+      h+='<button class="mbc-item'+(i===S.active?' active':'')+'" role="option" aria-selected="'+(i===S.active)+'" onclick="TIT.sel('+i+')">'+escapeHtml(x.name||('Experiment '+(i+1)))+'<span class="tit-mini" style="display:block;">'+escapeHtml(x.date||'')+' · '+x.counts.length+' counts</span></button>';
+    });
+    h+='</div><div class="tit-row"><button class="btn ac" style="flex:1;justify-content:center;" onclick="TIT.addExp()">＋ New</button>'
+      +'<button class="btn" onclick="TIT.dupExp()" title="Duplicate this experiment">⧉</button>'
+      +'<button class="btn" onclick="TIT.delExp()" title="Delete this experiment"'+(S.experiments.length<2?' disabled':'')+'>✕</button></div>';
+    h+='<div class="tit-sec">Experiment</div>'
+      +'<div class="mbc-f"><label for="titExpName">Name</label><input type="text" id="titExpName" value="'+escapeHtml(exp.name)+'" onchange="TIT.setF(\'name\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titExpDate">Date</label><input type="date" id="titExpDate" value="'+escapeHtml(exp.date||'')+'" onchange="TIT.setF(\'date\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titExpNotes">Notes</label><input type="text" id="titExpNotes" value="'+escapeHtml(exp.notes||'')+'" onchange="TIT.setF(\'notes\',this.value)"></div>';
+    h+='<div class="tit-sec">Assay defaults</div>'
+      +'<div class="mbc-f"><label for="titMode">Assay format</label><select id="titMode" onchange="TIT.setF(\'mode\',this.value)">'
+      +'<option value="plate"'+(exp.mode==='plate'?' selected':'')+'>Full plate (30–300 countable)</option>'
+      +'<option value="spot"'+(exp.mode==='spot'?' selected':'')+'>Spot assay (3–30 countable)</option></select></div>'
+      +'<div class="mbc-f"><label for="titVolDef">Default volume plated (µL)</label><input type="text" inputmode="decimal" id="titVolDef" value="'+escapeHtml(String(exp.volUl))+'" onchange="TIT.setF(\'volUl\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFactor">Dilution factor</label><input type="text" inputmode="decimal" id="titFactor" value="'+escapeHtml(String(exp.factor))+'" onchange="TIT.setF(\'factor\',this.value)"></div>';
+    h+='<div class="tit-sec">Conditions (hosts)</div>';
+    exp.conds.forEach(function(c){
+      h+='<div class="tit-row"><input type="radio" name="titRef" '+(exp.refId===c.id?'checked':'')+' onchange="TIT.setRef(\''+jsAttr(c.id)+'\')" aria-label="Use '+escapeHtml(c.name)+' as the EOP reference" title="EOP reference">'
+        +'<input type="text" value="'+escapeHtml(c.name)+'" aria-label="Condition name" onchange="TIT.renCond(\''+jsAttr(c.id)+'\',this.value)">'
+        +'<button class="tit-del" onclick="TIT.delCond(\''+jsAttr(c.id)+'\')" aria-label="Delete condition '+escapeHtml(c.name)+'"'+(exp.conds.length<2?' disabled':'')+'>✕</button></div>';
+    });
+    h+='<button class="btn" style="width:100%;justify-content:center;" onclick="TIT.addCond()">＋ Add condition</button>'
+      +'<div class="tit-mini" style="margin-top:4px;">The ⦿ radio marks the EOP reference (usually the permissive host).</div>';
+    h+='<div class="tit-sec">Lysates / phages</div>';
+    exp.lys.forEach(function(l){
+      h+='<div class="tit-row"><input type="text" value="'+escapeHtml(l.name)+'" aria-label="Lysate name" onchange="TIT.renLys(\''+jsAttr(l.id)+'\',this.value)">'
+        +'<button class="tit-del" onclick="TIT.delLys(\''+jsAttr(l.id)+'\')" aria-label="Delete lysate '+escapeHtml(l.name)+'"'+(exp.lys.length<2?' disabled':'')+'>✕</button></div>';
+    });
+    h+='<button class="btn" style="width:100%;justify-content:center;" onclick="TIT.addLys()">＋ Add lysate</button>';
+    var lib=(typeof lysAll==='function')?lysAll():[];
+    if(lib.length){
+      h+='<div class="mbc-f" style="margin-top:6px;"><label for="titLibSel">Add from lysate library</label><select id="titLibSel" onchange="TIT.addFromLib(this.value);this.value=\'\';">'
+        +'<option value="">— pick a saved lysate —</option>'
+        +lib.map(function(l){return '<option value="'+escapeHtml(l.id)+'">'+escapeHtml(l.name)+'</option>';}).join('')+'</select></div>';
+    }
+    document.getElementById('titSide').innerHTML=h;
+  }
+
+  function flagBadge(r,exp){
+    if(r.tntc)return '<span class="badge bd">TNTC</span>';
+    var f=countFlag(r.plaques,exp.mode);
+    if(f==='zero')return '<span class="badge bn">0 plaques</span>';
+    if(f==='low')return '<span class="badge bw">below window</span>';
+    if(f==='high')return '<span class="badge bw">above window</span>';
+    return '<span class="badge bg">countable</span>';
+  }
+
+  function renderMain(){
+    var exp=E();
+    var en=exp.entry||{};
+    if(!lysById(exp,en.lysId))en.lysId=(exp.lys[0]||{}).id;
+    if(!condById(exp,en.condId))en.condId=(exp.conds[0]||{}).id;
+    if(!(en.volUl>0))en.volUl=exp.volUl;
+    if(!(en.k>=0))en.k=6;
+    exp.entry=en;
+    var w=countWindow(exp.mode);
+    var h='<div class="mbc-head"><h2>'+escapeHtml(exp.name||'Titering')+'</h2>'
+      +'<p>Count plaques → PFU/mL with replicates, grouped by condition. Reference: '
+      +'<select id="titRefSel" aria-label="EOP reference condition" onchange="TIT.setRef(this.value)">'
+      +exp.conds.map(function(c){return '<option value="'+escapeHtml(c.id)+'"'+(c.id===exp.refId?' selected':'')+'>'+escapeHtml(c.name)+'</option>';}).join('')
+      +'</select></p></div>';
+
+    // Quick entry — Enter in the plaques box adds and keeps everything else.
+    var pv=titerFromPlaques(SCI.parse(String(en.plaquesDraft||''))||NaN,Math.pow(exp.factor,en.k),(en.volUl||0)/1000);
+    h+='<div class="tit-sec" style="margin-top:0;">Add a count</div><div class="tit-entry">'
+      +'<div class="mbc-f"><label for="titEnLys">Lysate</label><select id="titEnLys" onchange="TIT.entry(\'lysId\',this.value)">'+exp.lys.map(function(l){return '<option value="'+escapeHtml(l.id)+'"'+(l.id===en.lysId?' selected':'')+'>'+escapeHtml(l.name)+'</option>';}).join('')+'</select></div>'
+      +'<div class="mbc-f"><label for="titEnCond">Condition</label><select id="titEnCond" onchange="TIT.entry(\'condId\',this.value)">'+exp.conds.map(function(c){return '<option value="'+escapeHtml(c.id)+'"'+(c.id===en.condId?' selected':'')+'>'+escapeHtml(c.name)+'</option>';}).join('')+'</select></div>'
+      +'<div class="mbc-f"><label>Dilution</label><div class="tit-chips" role="group" aria-label="Dilution plated">'
+      +Array.from({length:10},function(_,k){return '<button class="tit-chip'+(en.k===k?' on':'')+'" aria-pressed="'+(en.k===k)+'" onclick="TIT.entry(\'k\',' +k+')">'+escapeHtml(dilLabel(k,exp.factor))+'</button>';}).join('')
+      +'</div></div>'
+      +'<div class="mbc-f"><label for="titEnVol">Vol plated (µL)</label><input type="text" inputmode="decimal" id="titEnVol" value="'+escapeHtml(String(en.volUl))+'" style="width:80px;" onchange="TIT.entry(\'volUl\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titEnPla">Plaques</label><input type="text" inputmode="numeric" id="titEnPla" value="'+escapeHtml(String(en.plaquesDraft==null?'':en.plaquesDraft))+'" style="width:80px;" oninput="TIT.entry(\'plaquesDraft\',this.value,true)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();TIT.addCount();}"></div>'
+      +'<button class="btn ac" onclick="TIT.addCount()">＋ Add (Enter)</button>'
+      +'<span class="tit-mini">'+(isFinite(pv)&&pv>0?('→ '+fmtT(pv)+' PFU/mL'):('countable window here: '+w[0]+'–'+w[1]))+'</span>'
+      +'</div>';
+
+    // Counts table.
+    h+='<div class="tit-sec">Counts ('+exp.counts.length+')</div>';
+    if(!exp.counts.length){
+      h+='<div class="mbc-empty">No counts yet — pick a lysate, a condition and a dilution above, type the plaque count and hit Enter. Replicates are just more rows.</div>';
+    } else {
+      h+='<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Lysate</th><th>Condition</th><th>Dilution</th><th>Vol (µL)</th><th>Plaques</th><th>Flag</th><th>Titer (PFU/mL)</th><th></th></tr></thead><tbody>';
+      exp.counts.forEach(function(r){
+        var t=rowTiter(exp,r);
+        h+='<tr><td>'+escapeHtml((lysById(exp,r.lysId)||{}).name||'?')+'</td>'
+          +'<td>'+escapeHtml((condById(exp,r.condId)||{}).name||'?')+'</td>'
+          +'<td style="font-family:var(--mono);">'+escapeHtml(dilLabel(r.k,exp.factor))+'</td>'
+          +'<td><input type="text" inputmode="decimal" value="'+escapeHtml(String(r.volUl))+'" style="width:64px;" aria-label="Volume plated (µL)" onchange="TIT.editCount(\''+jsAttr(r.id)+'\',\'volUl\',this.value)"></td>'
+          +'<td><input type="text" inputmode="numeric" value="'+escapeHtml(String(r.plaques))+'" style="width:64px;" aria-label="Plaque count" onchange="TIT.editCount(\''+jsAttr(r.id)+'\',\'plaques\',this.value)"></td>'
+          +'<td>'+flagBadge(r,exp)+'</td>'
+          +'<td style="font-family:var(--mono);">'+(r.tntc?'—':fmtT(t))+'</td>'
+          +'<td style="white-space:nowrap;"><button class="tit-del" onclick="TIT.toggleTntc(\''+jsAttr(r.id)+'\')" title="Toggle too-numerous-to-count" aria-label="Toggle TNTC">∞</button>'
+          +'<button class="tit-del" onclick="TIT.delCount(\''+jsAttr(r.id)+'\')" aria-label="Delete this count">✕</button></td></tr>';
+      });
+      h+='</tbody></table></div>';
+    }
+
+    // Summary matrix.
+    var ref=condById(exp,exp.refId);
+    h+='<div class="tit-sec">Titer &amp; EOP summary</div>'
+      +'<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Lysate</th>'
+      +exp.conds.map(function(c){return '<th'+(c.id===exp.refId?' class="tit-ref-col"':'')+'>'+escapeHtml(c.name)+(c.id===exp.refId?' ★':'')+'</th>';}).join('')
+      +'</tr></thead><tbody>';
+    exp.lys.forEach(function(l){
+      h+='<tr><td style="font-weight:700;">'+escapeHtml(l.name)
+        +' <button class="tit-del" onclick="TIT.pushTiter(\''+jsAttr(l.id)+'\')" title="Save this lysate\'s reference-condition titer to the lysate library" aria-label="Save '+escapeHtml(l.name)+' titer to the lysate library">→ 📚</button></td>';
+      exp.conds.forEach(function(c){
+        var cc=cellCalc(exp,l.id,c.id);
+        var cell;
+        if(cc.st.n){
+          cell='<strong>'+fmtT(cc.st.mean)+'</strong>'
+            +(cc.st.n>1?' ± '+fmtT(cc.st.sd):'')
+            +'<div class="tit-mini">n='+cc.st.n+(cc.st.n>1&&isFinite(cc.st.cv)?' · CV '+cc.st.cv.toFixed(1)+'%':'')+'</div>';
+          if(c.id!==exp.refId){
+            var refC=cellCalc(exp,l.id,exp.refId);
+            var eop=eopFrom(cc.st.mean,refC.st.mean);
+            var w2=welchVsRef(exp,l.id,c.id);
+            cell+='<div class="tit-cell-eop">EOP '+(isFinite(eop)?fmtT(eop):'—')
+              +(w2?' <span class="tit-stars" title="Welch t='+w2.t.toFixed(3)+', df='+w2.df.toFixed(2)+', p='+(w2.p<0.0001?w2.p.toExponential(2):w2.p.toFixed(4))+'">'+starsForP(w2.p)+'</span>':'')
+              +'</div>';
+          }
+        } else if(cc.limit>0){
+          cell='<span class="badge bn">&lt; '+fmtT(cc.limit)+'</span><div class="tit-mini">all counts zero</div>';
+        } else cell='<span class="badge bn">—</span>';
+        h+='<td'+(c.id===exp.refId?' class="tit-ref-col"':'')+'>'+cell+'</td>';
+      });
+      h+='</tr>';
+    });
+    h+='</tbody></table></div>'
+      +'<div class="tit-caption">Mean ± SD of replicate titers; each row of the counts table is one replicate. EOP = mean titer ÷ mean titer on '+escapeHtml(ref?ref.name:'the reference')+'. Stars: Welch\'s t-test on log₁₀ titers vs the reference — * p&lt;0.05, ** p&lt;0.01, *** p&lt;0.001 (needs n ≥ 2 on both sides; hover a star for t, df, p). → 📚 saves a lysate\'s titer to the library.</div>';
+
+    // Chart.
+    var cd=chartData(exp);
+    var chp=exp.chart;
+    h+='<div class="tit-sec">Chart</div>'
+      +'<div class="tit-row" style="flex-wrap:wrap;">'
+      +'<button class="tit-chip'+(chp.tab!=='eop'?' on':'')+'" aria-pressed="'+(chp.tab!=='eop')+'" onclick="TIT.chart(\'tab\',\'titer\')">Titers</button>'
+      +'<button class="tit-chip'+(chp.tab==='eop'?' on':'')+'" aria-pressed="'+(chp.tab==='eop')+'" onclick="TIT.chart(\'tab\',\'eop\')">EOP</button>'
+      +'<span style="width:10px;"></span>'
+      +'<button class="tit-chip'+(chp.log!==false?' on':'')+'" aria-pressed="'+(chp.log!==false)+'" onclick="TIT.chart(\'log\','+(chp.log!==false?'false':'true')+')">log scale</button>'
+      +'<button class="tit-chip'+(chp.dots!==false?' on':'')+'" aria-pressed="'+(chp.dots!==false)+'" onclick="TIT.chart(\'dots\','+(chp.dots!==false?'false':'true')+')">replicate dots</button>'
+      +'<button class="tit-chip'+(chp.stars!==false?' on':'')+'" aria-pressed="'+(chp.stars!==false)+'" onclick="TIT.chart(\'stars\','+(chp.stars!==false?'false':'true')+')">stars</button>'
+      +'<button class="tit-chip'+(chp.grid!==false?' on':'')+'" aria-pressed="'+(chp.grid!==false)+'" onclick="TIT.chart(\'grid\','+(chp.grid!==false?'false':'true')+')">grid</button>'
+      +'<button class="tit-chip'+(chp.legend!==false?' on':'')+'" aria-pressed="'+(chp.legend!==false)+'" onclick="TIT.chart(\'legend\','+(chp.legend!==false?'false':'true')+')">legend</button>'
+      +'</div>'
+      // Figure editor: everything the exported file will use, editable here.
+      +'<details style="margin:6px 0 10px;"'+(chp.edOpen?' open':'')+' ontoggle="TIT.chart(\'edOpen\',this.open)">'
+      +'<summary tabindex="0" style="font-family:var(--mono);font-size:11px;color:var(--text2);cursor:pointer;padding:4px 0;">✎ Figure editor — titles, colours, size, axis</summary>'
+      +'<div class="tit-entry" style="margin-top:6px;">'
+      +'<div class="mbc-f"><label for="titFigTitle">Title</label><input type="text" id="titFigTitle" value="'+escapeHtml(chp.title||'')+'" placeholder="auto" style="width:210px;" onchange="TIT.chart(\'title\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigYlab">Y-axis label</label><input type="text" id="titFigYlab" value="'+escapeHtml(chp.ylab||'')+'" placeholder="auto" style="width:160px;" onchange="TIT.chart(\'ylab\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigW">Width px</label><input type="text" inputmode="numeric" id="titFigW" value="'+(chp.w>0?chp.w:'')+'" placeholder="auto" style="width:64px;" onchange="TIT.chart(\'w\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigH">Height px</label><input type="text" inputmode="numeric" id="titFigH" value="'+(chp.h>0?chp.h:'')+'" placeholder="430" style="width:64px;" onchange="TIT.chart(\'h\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigF">Font px</label><input type="text" inputmode="numeric" id="titFigF" value="'+(chp.font>0?chp.font:'')+'" placeholder="11" style="width:56px;" onchange="TIT.chart(\'font\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigYmin">Y min (10^x)</label><input type="text" inputmode="decimal" id="titFigYmin" value="'+escapeHtml(chp.ymin||'')+'" placeholder="auto" style="width:64px;" onchange="TIT.chart(\'ymin\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="titFigYmax">Y max (10^x)</label><input type="text" inputmode="decimal" id="titFigYmax" value="'+escapeHtml(chp.ymax||'')+'" placeholder="auto" style="width:64px;" onchange="TIT.chart(\'ymax\',this.value)"></div>'
+      +'</div>'
+      +'<div class="tit-row" style="flex-wrap:wrap;align-items:center;">'
+      +'<span class="tit-mini">Condition colours:</span>'
+      +exp.conds.map(function(c,ci){
+        return '<label class="tit-mini" style="display:inline-flex;align-items:center;gap:4px;">'+escapeHtml(c.name)
+          +'<input type="color" value="'+escapeHtml(paletteFor(exp)[ci])+'" aria-label="Bar colour for '+escapeHtml(c.name)+'" style="width:26px;height:22px;border:none;padding:0;cursor:pointer;" onchange="TIT.chartColor(\''+jsAttr(c.id)+'\',this.value)"></label>';
+      }).join('')
+      +'<button class="tit-chip" onclick="TIT.chartColorReset()">↺ Okabe-Ito defaults</button>'
+      +'</div></details>'
+      +'<div class="tit-chart-wrap" role="img" aria-label="'+escapeHtml(cd.kind==='eop'?'EOP bar chart':'Titer bar chart')+'">'+svgFromModel(cd.model)+'</div>'
+      +'<div class="tit-caption">'+(cd.kind==='eop'
+          ?'EOP per lysate vs '+escapeHtml(ref?ref.name:'reference')+'; dashed line = EOP 1 (equal plating). Error bars: propagated spread from the two CVs.'
+          :'Bars: mean titer; error bars ± SD; dots: individual replicates.')
+      +' Stars: Welch\'s t on log₁₀ titers vs the reference. Exports are publication-styled (white ground, Helvetica, Okabe-Ito colours).</div>';
+
+    // Actions.
+    h+='<div class="mbc-actions" style="margin-top:12px;">'
+      +'<button class="btn" onclick="TIT.xlsx()">Excel (.xlsx)</button>'
+      +'<button class="btn" onclick="TIT.rawCsv()">Raw CSV</button>'
+      +'<button class="btn" onclick="TIT.sumCsv()">Summary CSV</button>'
+      +'<button class="btn" onclick="TIT.svg()">SVG</button>'
+      +'<button class="btn" onclick="TIT.pdf()">PDF</button>'
+      +'<button class="btn" onclick="TIT.png(300)">PNG 300 dpi</button>'
+      +'<button class="btn" onclick="TIT.png(600)">PNG 600 dpi</button>'
+      +'<button class="btn" onclick="TIT.copy()">Copy</button>'
+      +'<button class="btn ac" onclick="NB.capture(\'tit\')">＋ Notebook</button>'
+      +'</div>';
+    document.getElementById('titMain').innerHTML=h;
+  }
+
+  function render(){ renderSide(); renderMain(); save(); }
+
+  // ── CSVs (tidy long + summary), every cell through csvCell ────────
+  function rawCsvText(){
+    var exp=E();
+    var head=['experiment','date','lysate','condition','is_reference','mode','dilution_exponent','dilution_factor','volume_uL','plaques','flag','titer_pfu_ml'];
+    var lines=[head.join(',')];
+    exp.counts.forEach(function(r){
+      var t=rowTiter(exp,r);
+      var flag=r.tntc?'TNTC':countFlag(r.plaques,exp.mode);
+      lines.push([exp.name,exp.date,(lysById(exp,r.lysId)||{}).name||'',(condById(exp,r.condId)||{}).name||'',
+        r.condId===exp.refId?'yes':'no',exp.mode,r.k,exp.factor,r.volUl,r.plaques,flag,
+        (isFinite(t)&&t>0)?t.toExponential(4):''].map(csvCell).join(','));
+    });
+    return lines.join('\n')+'\n';
+  }
+  function sumCsvText(){
+    var exp=E();
+    var head=['experiment','lysate','condition','is_reference','n','mean_titer_pfu_ml','sd','cv_pct','detection_limit','eop','eop_spread','welch_t','welch_df','p_two_tailed','stars'];
+    var lines=[head.join(',')];
+    exp.lys.forEach(function(l){
+      exp.conds.forEach(function(c){
+        var cc=cellCalc(exp,l.id,c.id);
+        var refC=cellCalc(exp,l.id,exp.refId);
+        var eop=c.id===exp.refId?1:eopFrom(cc.st.mean,refC.st.mean);
+        var sp=c.id===exp.refId?'':eopSpread(eop,cc.st.cv,refC.st.cv);
+        var w2=welchVsRef(exp,l.id,c.id);
+        lines.push([exp.name,l.name,c.name,c.id===exp.refId?'yes':'no',cc.st.n,
+          cc.st.n?cc.st.mean.toExponential(4):'',cc.st.sd>0?cc.st.sd.toExponential(4):'',
+          isFinite(cc.st.cv)?cc.st.cv.toFixed(2):'',cc.limit>0?cc.limit.toExponential(4):'',
+          isFinite(eop)?(+eop).toExponential(4):'',(sp&&isFinite(sp))?(+sp).toExponential(4):'',
+          w2?w2.t.toFixed(4):'',w2?w2.df.toFixed(3):'',w2?w2.p.toExponential(4):'',w2?starsForP(w2.p):''
+        ].map(csvCell).join(','));
+      });
+    });
+    return lines.join('\n')+'\n';
+  }
+  function baseName(){ var exp=E(); return 'titering-'+(exp.name||'experiment').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,''); }
+
+  // ── notebook blocks, built from state (never scraped off the DOM) ──
+  function blocks(sel){
+    var exp=E(), out=[];
+    if(sel.header){
+      var ref=condById(exp,exp.refId);
+      out.push({type:'kv',title:'Titering — '+(exp.name||'experiment'),pairs:[
+        ['Date',exp.date||'—'],['Notes',exp.notes||'—'],
+        ['Assay',exp.mode==='spot'?'Spot assay (3–30 countable)':'Full plate (30–300 countable)'],
+        ['Dilution factor',String(exp.factor)],
+        ['Reference',ref?ref.name:'—'],
+        ['Counts',String(exp.counts.length)]]});
+    }
+    if(sel.counts&&exp.counts.length){
+      out.push({type:'table',title:'Raw plaque counts',cols:['Lysate','Condition','Dilution','Vol (µL)','Plaques','Flag','Titer (PFU/mL)'],
+        rows:exp.counts.map(function(r){
+          var t=rowTiter(exp,r);
+          return [(lysById(exp,r.lysId)||{}).name||'',(condById(exp,r.condId)||{}).name||'',
+            dilLabel(r.k,exp.factor),String(r.volUl),String(r.plaques),
+            r.tntc?'TNTC':(countFlag(r.plaques,exp.mode)||'ok'),
+            (isFinite(t)&&t>0)?t.toExponential(3):'—'];})});
+    }
+    if(sel.summary){
+      var rows=[];
+      exp.lys.forEach(function(l){ exp.conds.forEach(function(c){
+        var cc=cellCalc(exp,l.id,c.id), refC=cellCalc(exp,l.id,exp.refId);
+        var eop=c.id===exp.refId?1:eopFrom(cc.st.mean,refC.st.mean);
+        var w2=welchVsRef(exp,l.id,c.id);
+        rows.push([l.name,c.name+(c.id===exp.refId?' (ref)':''),String(cc.st.n),
+          cc.st.n?cc.st.mean.toExponential(3):(cc.limit>0?'< '+cc.limit.toExponential(2):'—'),
+          cc.st.sd>0?cc.st.sd.toExponential(3):'—',
+          isFinite(eop)?(+eop).toExponential(3):'—',
+          w2?(starsForP(w2.p)+' (p='+w2.p.toExponential(2)+')'):'—']);
+      });});
+      out.push({type:'table',title:'Titer & EOP summary',cols:['Lysate','Condition','n','Mean titer','SD','EOP','Welch vs ref'],rows:rows});
+      out.push({type:'text',title:'Methods note',md:'Titer per replicate = plaques × dilution ÷ mL plated. Mean ± SD across replicates; EOP = mean titer ÷ mean titer on the reference condition. Significance: Welch\'s t-test on log10-transformed replicate titers vs the reference (two-tailed).'});
+    }
+    if(sel.chart){
+      try{
+        var cd=chartData(E());
+        var cv=document.createElement('canvas'); cv.width=cd.model.w*2; cv.height=cd.model.h*2;
+        var ctx=cv.getContext('2d'); ctx.scale(2,2); paintModel(ctx,cd.model);
+        out.push({type:'image',title:cd.kind==='eop'?'EOP chart':'Titer chart',dataUrl:cv.toDataURL('image/png')});
+      }catch(e){}
+    }
+    return out;
+  }
+
+  // ── public surface ────────────────────────────────────────────────
+  window.TIT={
+    init:function(){ if(!S)S=load(); render(); },
+    render:function(){ if(S)render(); },
+    sel:function(i){ S.active=i; render(); },
+    addExp:function(){ S.experiments.push(defExp('Experiment '+(S.experiments.length+1))); S.active=S.experiments.length-1; render(); },
+    dupExp:function(){ var c=JSON.parse(JSON.stringify(E())); c.id='tx'+Date.now().toString(36); c.name=(c.name||'Experiment')+' (copy)'; S.experiments.splice(S.active+1,0,c); S.active++; render(); },
+    delExp:function(){ if(S.experiments.length<2)return; if(!confirm('Delete "'+E().name+'" and its '+E().counts.length+' counts?'))return; S.experiments.splice(S.active,1); S.active=Math.max(0,S.active-1); render(); },
+    setF:function(k,v){ var exp=E();
+      if(k==='volUl'||k==='factor'){ var n=SCI.parse(String(v)); if(k==='factor'&&!(n>1))n=10; if(k==='volUl'&&!(n>0))n=exp.volUl; exp[k]=n; }
+      else exp[k]=String(v).slice(0,120);
+      render(); },
+    setRef:function(id){ var exp=E(); if(condById(exp,id))exp.refId=id; render(); },
+    addCond:function(){ var exp=E(); exp.conds.push({id:_id(),name:'Condition '+(exp.conds.length+1)}); render(); },
+    renCond:function(id,v){ var c=condById(E(),id); if(c)c.name=String(v).slice(0,60)||c.name; render(); },
+    delCond:function(id){ var exp=E(); if(exp.conds.length<2)return;
+      var used=exp.counts.filter(function(r){return r.condId===id;}).length;
+      if(used&&!confirm('Delete this condition and its '+used+' counts?'))return;
+      exp.conds=exp.conds.filter(function(c){return c.id!==id;});
+      exp.counts=exp.counts.filter(function(r){return r.condId!==id;});
+      if(exp.refId===id)exp.refId=exp.conds[0].id;
+      render(); },
+    addLys:function(){ var exp=E(); exp.lys.push({id:_id(),name:'Phage '+(exp.lys.length+1),libId:''}); render(); },
+    renLys:function(id,v){ var l=lysById(E(),id); if(l)l.name=String(v).slice(0,60)||l.name; render(); },
+    delLys:function(id){ var exp=E(); if(exp.lys.length<2)return;
+      var used=exp.counts.filter(function(r){return r.lysId===id;}).length;
+      if(used&&!confirm('Delete this lysate and its '+used+' counts?'))return;
+      exp.lys=exp.lys.filter(function(l){return l.id!==id;});
+      exp.counts=exp.counts.filter(function(r){return r.lysId!==id;});
+      render(); },
+    addFromLib:function(libId){ if(!libId)return; var rec=(typeof lysGet==='function')?lysGet(libId):null; if(!rec)return;
+      var exp=E();
+      if(exp.lys.some(function(l){return l.name.toLowerCase()===rec.name.toLowerCase();})){ showToast('"'+rec.name+'" is already in this experiment','warn'); return; }
+      exp.lys.push({id:_id(),name:rec.name,libId:rec.id}); render(); },
+    entry:function(k,v,noRender){ var en=E().entry;
+      if(k==='k')en.k=+v;
+      else if(k==='volUl'){ var n=SCI.parse(String(v)); if(n>0)en.volUl=n; }
+      else if(k==='plaquesDraft')en.plaquesDraft=String(v);
+      else en[k]=v;
+      if(!noRender)render(); else save(); },
+    addCount:function(){ var exp=E(), en=exp.entry;
+      var p=SCI.parse(String(en.plaquesDraft==null?'':en.plaquesDraft));
+      if(!isFinite(p)||p<0){ showToast('Enter a plaque count (0 is allowed — it sets a detection limit)','warn'); return; }
+      exp.counts.push({id:_id(),lysId:en.lysId,condId:en.condId,k:en.k,volUl:en.volUl>0?en.volUl:exp.volUl,plaques:Math.round(p),tntc:false});
+      en.plaquesDraft='';
+      render();
+      var pl=document.getElementById('titEnPla'); if(pl)pl.focus(); },
+    editCount:function(id,k,v){ var exp=E(); var r=exp.counts.filter(function(x){return x.id===id;})[0]; if(!r)return;
+      var n=SCI.parse(String(v));
+      if(k==='plaques'&&isFinite(n)&&n>=0)r.plaques=Math.round(n);
+      if(k==='volUl'&&n>0)r.volUl=n;
+      render(); },
+    toggleTntc:function(id){ var r=E().counts.filter(function(x){return x.id===id;})[0]; if(r){r.tntc=!r.tntc; render();} },
+    delCount:function(id){ var exp=E(); exp.counts=exp.counts.filter(function(x){return x.id!==id;}); render(); },
+    chart:function(k,v){ var ch=E().chart;
+      // edOpen must NOT re-render: render() rebuilds the <details open>, the
+      // parser fires toggle again, and the ontoggle handler loops forever
+      // (~660 renders/s, found by the stress probe). The DOM is already in
+      // the right state — just remember it.
+      if(k==='edOpen'){ v=!!v; if(ch.edOpen===v)return; ch.edOpen=v; save(); return; }
+      if(k==='w'||k==='h'||k==='font'){ var n=SCI.parse(String(v)); ch[k]=n>0?n:0;
+        // Clamp to what a canvas can actually rasterise at 600 dpi.
+        if(k==='w'&&ch.w>0)ch.w=Math.max(280,Math.min(4000,ch.w));
+        if(k==='h'&&ch.h>0)ch.h=Math.max(200,Math.min(2500,ch.h));
+        if(k==='font'&&ch.font>0)ch.font=Math.max(6,Math.min(32,ch.font)); }
+      else if(k==='ymin'||k==='ymax'){ ch[k]=String(v).trim(); }
+      else if(k==='title'||k==='ylab'){ ch[k]=String(v).slice(0,140); }
+      else ch[k]=v;
+      render(); },
+    rawCsv:function(){ _dl(rawCsvText(),baseName()+'-raw.csv','text/csv'); showToast('✓ Raw CSV downloaded','green'); },
+    sumCsv:function(){ _dl(sumCsvText(),baseName()+'-summary.csv','text/csv'); showToast('✓ Summary CSV downloaded','green'); },
+    svg:function(){ var cd=chartData(E()); _dl(svgFromModel(cd.model),baseName()+'-'+cd.kind+'.svg','image/svg+xml'); showToast('✓ SVG downloaded','green'); },
+    png:function(dpi){ var cd=chartData(E()); var scale=dpi/96;
+      var cv=document.createElement('canvas'); cv.width=Math.round(cd.model.w*scale); cv.height=Math.round(cd.model.h*scale);
+      var ctx=cv.getContext('2d'); ctx.scale(scale,scale); paintModel(ctx,cd.model);
+      dlCanvasPngDpi(cv,dpi,baseName()+'-'+cd.kind+'-'+dpi+'dpi.png'); },
+    pdf:function(){ var cd=chartData(E());
+      _dl(pdfFromModel(cd.model),baseName()+'-'+cd.kind+'.pdf','application/pdf');
+      showToast('✓ PDF downloaded','green'); },
+    xlsx:function(){ try{
+        _dl(buildXlsx(xlsxSheets()),baseName()+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        showToast('✓ Excel workbook downloaded','green');
+      }catch(e){ showToast('Excel export failed: '+e.message,'warn'); } },
+    chartColor:function(condId,hex){ var ch=E().chart; ch.colors=ch.colors||{};
+      if(/^#[0-9a-fA-F]{6}$/.test(hex))ch.colors[condId]=hex; render(); },
+    chartColorReset:function(){ E().chart.colors={}; render(); },
+    copy:function(){ var exp=E();
+      var t='TITERING — '+(exp.name||'experiment')+' ('+(exp.date||'')+')\n'+sumCsvText().replace(/,/g,'\t');
+      dcCopyText(t); },
+    // Push the reference-condition titer (falling back to the first condition
+    // with data) into the persistent lysate library via lysUpsert — the same
+    // record the Phage Planner and the plate's stock editor read.
+    pushTiter:function(lysId){ var exp=E(); var l=lysById(exp,lysId); if(!l)return;
+      var cc=cellCalc(exp,l.id,exp.refId);
+      if(!cc.st.n){ var withData=exp.conds.map(function(c){return cellCalc(exp,l.id,c.id);}).filter(function(x){return x.st.n;});
+        if(!withData.length){ showToast('No countable rows for '+l.name+' yet','warn'); return; }
+        cc=withData[0]; }
+      var rec=lysUpsert({id:l.libId||'',name:l.name,titer:cc.st.mean,date:exp.date||''});
+      if(rec){ l.libId=rec.id; save();
+        // Keep an open plate in sync if it carries a stock of the same name.
+        try{ if(window.phages){ var m=phages.filter(function(p){return p.name.toLowerCase()===l.name.toLowerCase();})[0];
+          if(m){ m.titer=cc.st.mean; if(typeof renderPhageList==='function')renderPhageList(); if(typeof saveToStorage==='function')saveToStorage(); } } }catch(e){}
+        if(window.PHG&&PHG.render)try{PHG.render();}catch(e){}
+        showToast('✓ '+l.name+' → library at '+cc.st.mean.toExponential(2)+' PFU/mL','green');
+      } },
+    blocks:blocks,
+    _model:{cellCalc:cellCalc,rowTiter:rowTiter,chartData:chartData,svgFromModel:svgFromModel,
+            pdfFromModel:pdfFromModel,buildXlsx:buildXlsx,xlsxSheets:xlsxSheets,pngWithDpi:pngWithDpi}
+  };
+})();
+
 /* ══════════════════════════ LAB NOTEBOOK ══════════════════════════ */
 (function(){
   var css=`
@@ -7489,11 +8637,13 @@ function dyeWorking(o){
     proto:   {label:'Protocols',     mod:'PROTOBLK', items:[['reagents','Reagents needed'],['steps','Steps (with ticks)']]},
     gel:     {label:'Gel Sim',       mod:'GELBLK',   items:[['image','Gel image'],['table','Band table'],['warn','Gel check notes']]},
     phg:     {label:'Phage Planner', mod:'PHGBLK',   items:[['plan','Infection plan'],['ladder','Dilution ladder'],['recipe','Dilution recipe']]},
-    mic:     {label:'Microscopy',    mod:'MICBLK',   items:[['dye','Dye sheet + directions'],['dilution','Working dilution recipe'],['panel','Panel & channel check']]}
+    mic:     {label:'Microscopy',    mod:'MICBLK',   items:[['dye','Dye sheet + directions'],['dilution','Working dilution recipe'],['panel','Panel & channel check']]},
+    tit:     {label:'Titering & EOP',mod:'TITBLK',   items:[['header','Experiment info'],['counts','Raw plaque counts'],['summary','Titer & EOP summary + methods note'],['chart','Chart (image)']]}
   };
   function providerFn(src){
     if(src==='gel'&&window.GEL&&GEL.blocks) return GEL.blocks;
     if(src==='mic'&&window.MIC&&MIC.blocks) return MIC.blocks;
+    if(src==='tit'&&window.TIT&&TIT.blocks) return TIT.blocks;
     var m=window[PROVIDERS[src]&&PROVIDERS[src].mod];
     return (typeof m==='function')?m:null;
   }
