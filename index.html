@@ -8485,7 +8485,16 @@ function dyeWorking(o){
     toggleTntc:function(id){ var r=E().counts.filter(function(x){return x.id===id;})[0]; if(r){r.tntc=!r.tntc; render();} },
     delCount:function(id){ var exp=E(); exp.counts=exp.counts.filter(function(x){return x.id!==id;}); render(); },
     chart:function(k,v){ var ch=E().chart;
-      if(k==='w'||k==='h'||k==='font'){ var n=SCI.parse(String(v)); ch[k]=n>0?n:0; }
+      // edOpen must NOT re-render: render() rebuilds the <details open>, the
+      // parser fires toggle again, and the ontoggle handler loops forever
+      // (~660 renders/s, found by the stress probe). The DOM is already in
+      // the right state — just remember it.
+      if(k==='edOpen'){ v=!!v; if(ch.edOpen===v)return; ch.edOpen=v; save(); return; }
+      if(k==='w'||k==='h'||k==='font'){ var n=SCI.parse(String(v)); ch[k]=n>0?n:0;
+        // Clamp to what a canvas can actually rasterise at 600 dpi.
+        if(k==='w'&&ch.w>0)ch.w=Math.max(280,Math.min(4000,ch.w));
+        if(k==='h'&&ch.h>0)ch.h=Math.max(200,Math.min(2500,ch.h));
+        if(k==='font'&&ch.font>0)ch.font=Math.max(6,Math.min(32,ch.font)); }
       else if(k==='ymin'||k==='ymax'){ ch[k]=String(v).trim(); }
       else if(k==='title'||k==='ylab'){ ch[k]=String(v).slice(0,140); }
       else ch[k]=v;
