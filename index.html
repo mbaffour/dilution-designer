@@ -5108,6 +5108,19 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
         n++; if(/\([^)]*\?[^)]*\) Tj/.test(_pdf2)) fails.push('pdf: a label degraded to "?"');
       }catch(e){ n++; fails.push('pdf build threw — '+e.message); }
     }
+    // Replicate-set parsing: all-or-nothing on bad tokens, and replicate
+    // numbering must follow entry order within each lysate × condition group.
+    if(window.TIT&&TIT._model&&TIT._model.parseCounts){
+      n++; var _pc=TIT._model.parseCounts('100, 120 80');
+      if(!_pc||_pc.join(',')!=='100,120,80') fails.push('parseCounts("100, 120 80") = '+JSON.stringify(_pc)+', want [100,120,80]');
+      n++; if(TIT._model.parseCounts('100 12O 80')!==null) fails.push('parseCounts must reject the whole set on one bad token, not log a partial replicate set');
+      n++; var _p0=TIT._model.parseCounts('0');
+      if(!_p0||_p0.length!==1||_p0[0]!==0) fails.push('parseCounts("0") must give [0] — zero counts set detection limits');
+      n++; if(TIT._model.parseCounts('')!==null||TIT._model.parseCounts('-5')!==null) fails.push('parseCounts must reject empty and negative input');
+      n++; var _rm=TIT._model.repIndexMap({counts:[{id:'a',lysId:'L1',condId:'C1'},{id:'b',lysId:'L1',condId:'C2'},{id:'c',lysId:'L1',condId:'C1'},{id:'d',lysId:'L2',condId:'C1'},{id:'e',lysId:'L1',condId:'C1'}]});
+      if(_rm.a!==1||_rm.c!==2||_rm.e!==3||_rm.b!==1||_rm.d!==1)
+        fails.push('repIndexMap numbering wrong: '+JSON.stringify(_rm)+' (want a=1,c=2,e=3 within L1×C1; b,d start their own groups)');
+    }
     if(window.TIT&&TIT._model&&TIT._model.buildXlsx&&window.NBDOCX){
       try{
         var _xb=TIT._model.buildXlsx([{name:'T',rows:[['a',1],[2,'b']]}]);
@@ -7849,6 +7862,38 @@ function dyeWorking(o){
     return welchT(a.logs,b.logs);
   }
 
+  // ── replicates as first-class citizens ────────────────────────────
+  // "100 120 80" (or comma/semicolon separated) → [100,120,80]. ALL tokens
+  // must parse — a typo like "12O" rejects the whole entry rather than
+  // silently logging two of three replicates.
+  function parseCounts(str){
+    var toks=String(str==null?'':str).trim().split(/[\s,;]+/).filter(Boolean);
+    if(!toks.length)return null;
+    var out=[];
+    for(var i=0;i<toks.length;i++){
+      // SCI.parse is deliberately suffix-tolerant ("2e8 PFU/mL" → 2e8), which
+      // here would turn the typo "12O" into 12. Reject any token carrying a
+      // character that is not part of a number (digits, . e + - ^ ×/x and
+      // superscripts are the accepted notation set).
+      if(/[^0-9.eE+\-^×xX⁰¹²³⁴⁵⁶⁷⁸⁹⁻]/.test(toks[i]))return null;
+      var n=SCI.parse(toks[i]);
+      if(!isFinite(n)||n<0)return null;
+      out.push(Math.round(n));
+    }
+    return out;
+  }
+  // Replicate number per count row: R1..Rn within its lysate × condition
+  // group, in entry order — the same n the stats report.
+  function repIndexMap(exp){
+    var seen={}, map={};
+    exp.counts.forEach(function(r){
+      var key=r.lysId+'|'+r.condId;
+      seen[key]=(seen[key]||0)+1;
+      map[r.id]=seen[key];
+    });
+    return map;
+  }
+
   // ── chart data → shared layout model ──────────────────────────────
   function chartData(exp){
     var kind=exp.chart.tab==='eop'?'eop':'titer';
@@ -7888,19 +7933,24 @@ function dyeWorking(o){
     var linMax=vals.length?Math.max.apply(null,vals)*1.08:1;
     // Figure-editor overrides (empty/auto values fall back to the computed ones).
     var ch=exp.chart||{};
+    // hideRef strips every reference/comparison mark from the FIGURE — the
+    // "(reference)" legend tag, the Welch stars, and the "vs …" axis label —
+    // for graphs where the comparison is not the story. EOP values themselves
+    // are still computed against the chosen reference.
+    var hideRef=ch.hideRef===true;
     if(isFinite(+ch.ymin)&&String(ch.ymin).trim()!=='')lo=+ch.ymin;
     if(isFinite(+ch.ymax)&&String(ch.ymax).trim()!==''&&+ch.ymax>lo)hi=+ch.ymax;
     _pal=paletteFor(exp);
     return {model:titChartModel(
       {kind:kind,
        title:(ch.title&&ch.title.trim())||((exp.name||'Experiment')+(kind==='eop'?' — efficiency of plating':' — titers')),
-       yLabel:(ch.ylab&&ch.ylab.trim())||(kind==='eop'?'EOP (vs '+(ref?ref.name:'reference')+')':'Titer (PFU/mL)'),
+       yLabel:(ch.ylab&&ch.ylab.trim())||(kind==='eop'?(hideRef?'EOP':'EOP (vs '+(ref?ref.name:'reference')+')'):'Titer (PFU/mL)'),
        condNames:exp.conds.map(function(c){return c.name;}),
-       refName:ref?ref.name:null, groups:groups},
+       refName:hideRef?null:(ref?ref.name:null), groups:groups},
       {w:ch.w>0?+ch.w:Math.max(560,150+exp.lys.length*Math.max(120,exp.conds.length*64)),
        h:ch.h>0?+ch.h:430,
        fontScale:ch.font>0?ch.font/11:1,
-       grid:ch.grid!==false,legend:ch.legend!==false,stars:ch.stars!==false,
+       grid:ch.grid!==false,legend:ch.legend!==false,stars:ch.stars!==false&&!hideRef,
        log:ch.log!==false,logMin:lo,logMax:hi,linMax:linMax,dots:ch.dots!==false}),
       kind:kind};
   }
@@ -8130,12 +8180,12 @@ function dyeWorking(o){
   // The workbook mirrors the two CSVs, but numbers stay numeric (full
   // precision) so Excel can compute on them without parsing "1.0e+9" text.
   function xlsxSheets(){
-    var exp=E();
-    var raw=[['experiment','date','lysate','condition','is_reference','mode','dilution_exponent','dilution_factor','volume_uL','plaques','flag','titer_pfu_ml']];
+    var exp=E(), reps=repIndexMap(exp);
+    var raw=[['experiment','date','lysate','condition','is_reference','replicate','mode','dilution_exponent','dilution_factor','volume_uL','plaques','flag','titer_pfu_ml']];
     exp.counts.forEach(function(r){
       var t=rowTiter(exp,r);
       raw.push([exp.name,exp.date,(lysById(exp,r.lysId)||{}).name||'',(condById(exp,r.condId)||{}).name||'',
-        r.condId===exp.refId?'yes':'no',exp.mode,r.k,exp.factor,r.volUl,r.plaques,
+        r.condId===exp.refId?'yes':'no',reps[r.id],exp.mode,r.k,exp.factor,r.volUl,r.plaques,
         r.tntc?'TNTC':countFlag(r.plaques,exp.mode),(isFinite(t)&&t>0)?t:'']);
     });
     var sum=[['experiment','lysate','condition','is_reference','n','mean_titer_pfu_ml','sd','cv_pct','detection_limit','eop','eop_spread','welch_t','welch_df','p_two_tailed','stars']];
@@ -8221,7 +8271,14 @@ function dyeWorking(o){
       +'</select></p></div>';
 
     // Quick entry — Enter in the plaques box adds and keeps everything else.
-    var pv=titerFromPlaques(SCI.parse(String(en.plaquesDraft||''))||NaN,Math.pow(exp.factor,en.k),(en.volUl||0)/1000);
+    // The live preview understands replicate sets: "100 120 80" previews the
+    // mean titer of the three, matching what Add will log.
+    var pvCounts=parseCounts(en.plaquesDraft);
+    var pvTxt='countable window here: '+countWindow(exp.mode)[0]+'–'+countWindow(exp.mode)[1];
+    if(pvCounts&&pvCounts.length){
+      var pvT=titerStats(pvCounts.map(function(p){return titerFromPlaques(p,Math.pow(exp.factor,en.k),(en.volUl||0)/1000);}));
+      if(pvT.n)pvTxt='→ '+(pvCounts.length>1?pvCounts.length+' reps, mean ':'')+fmtT(pvT.mean)+' PFU/mL';
+    }
     h+='<div class="tit-sec" style="margin-top:0;">Add a count</div><div class="tit-entry">'
       +'<div class="mbc-f"><label for="titEnLys">Lysate</label><select id="titEnLys" onchange="TIT.entry(\'lysId\',this.value)">'+exp.lys.map(function(l){return '<option value="'+escapeHtml(l.id)+'"'+(l.id===en.lysId?' selected':'')+'>'+escapeHtml(l.name)+'</option>';}).join('')+'</select></div>'
       +'<div class="mbc-f"><label for="titEnCond">Condition</label><select id="titEnCond" onchange="TIT.entry(\'condId\',this.value)">'+exp.conds.map(function(c){return '<option value="'+escapeHtml(c.id)+'"'+(c.id===en.condId?' selected':'')+'>'+escapeHtml(c.name)+'</option>';}).join('')+'</select></div>'
@@ -8229,28 +8286,48 @@ function dyeWorking(o){
       +Array.from({length:10},function(_,k){return '<button class="tit-chip'+(en.k===k?' on':'')+'" aria-pressed="'+(en.k===k)+'" onclick="TIT.entry(\'k\',' +k+')">'+escapeHtml(dilLabel(k,exp.factor))+'</button>';}).join('')
       +'</div></div>'
       +'<div class="mbc-f"><label for="titEnVol">Vol plated (µL)</label><input type="text" inputmode="decimal" id="titEnVol" value="'+escapeHtml(String(en.volUl))+'" style="width:80px;" onchange="TIT.entry(\'volUl\',this.value)"></div>'
-      +'<div class="mbc-f"><label for="titEnPla">Plaques</label><input type="text" inputmode="numeric" id="titEnPla" value="'+escapeHtml(String(en.plaquesDraft==null?'':en.plaquesDraft))+'" style="width:80px;" oninput="TIT.entry(\'plaquesDraft\',this.value,true)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();TIT.addCount();}"></div>'
+      +'<div class="mbc-f"><label for="titEnPla">Plaques — one count or a replicate set</label><input type="text" inputmode="numeric" id="titEnPla" value="'+escapeHtml(String(en.plaquesDraft==null?'':en.plaquesDraft))+'" placeholder="100 120 80" style="width:130px;" oninput="TIT.entry(\'plaquesDraft\',this.value,true)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();TIT.addCount();}"></div>'
       +'<button class="btn ac" onclick="TIT.addCount()">＋ Add (Enter)</button>'
-      +'<span class="tit-mini">'+(isFinite(pv)&&pv>0?('→ '+fmtT(pv)+' PFU/mL'):('countable window here: '+w[0]+'–'+w[1]))+'</span>'
+      +'<span class="tit-mini">'+(pvTxt)+'</span>'
       +'</div>';
 
-    // Counts table.
+    // Counts table — grouped by lysate × condition so a replicate set reads
+    // as one block: R1..Rn rows under a header that carries the group's
+    // mean ± SD. Entry order within a group is the replicate number.
     h+='<div class="tit-sec">Counts ('+exp.counts.length+')</div>';
     if(!exp.counts.length){
-      h+='<div class="mbc-empty">No counts yet — pick a lysate, a condition and a dilution above, type the plaque count and hit Enter. Replicates are just more rows.</div>';
+      h+='<div class="mbc-empty">No counts yet — pick a lysate, a condition and a dilution above, then type the plaque counts and hit Enter. Type several numbers ("100 120 80") to log a replicate set in one go.</div>';
     } else {
-      h+='<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Lysate</th><th>Condition</th><th>Dilution</th><th>Vol (µL)</th><th>Plaques</th><th>Flag</th><th>Titer (PFU/mL)</th><th></th></tr></thead><tbody>';
-      exp.counts.forEach(function(r){
-        var t=rowTiter(exp,r);
-        h+='<tr><td>'+escapeHtml((lysById(exp,r.lysId)||{}).name||'?')+'</td>'
-          +'<td>'+escapeHtml((condById(exp,r.condId)||{}).name||'?')+'</td>'
-          +'<td style="font-family:var(--mono);">'+escapeHtml(dilLabel(r.k,exp.factor))+'</td>'
-          +'<td><input type="text" inputmode="decimal" value="'+escapeHtml(String(r.volUl))+'" style="width:64px;" aria-label="Volume plated (µL)" onchange="TIT.editCount(\''+jsAttr(r.id)+'\',\'volUl\',this.value)"></td>'
-          +'<td><input type="text" inputmode="numeric" value="'+escapeHtml(String(r.plaques))+'" style="width:64px;" aria-label="Plaque count" onchange="TIT.editCount(\''+jsAttr(r.id)+'\',\'plaques\',this.value)"></td>'
-          +'<td>'+flagBadge(r,exp)+'</td>'
-          +'<td style="font-family:var(--mono);">'+(r.tntc?'—':fmtT(t))+'</td>'
-          +'<td style="white-space:nowrap;"><button class="tit-del" onclick="TIT.toggleTntc(\''+jsAttr(r.id)+'\')" title="Toggle too-numerous-to-count" aria-label="Toggle TNTC">∞</button>'
-          +'<button class="tit-del" onclick="TIT.delCount(\''+jsAttr(r.id)+'\')" aria-label="Delete this count">✕</button></td></tr>';
+      var reps=repIndexMap(exp);
+      h+='<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Rep</th><th>Dilution</th><th>Vol (µL)</th><th>Plaques</th><th>Flag</th><th>Titer (PFU/mL)</th><th></th></tr></thead><tbody>';
+      exp.lys.forEach(function(l){ exp.conds.forEach(function(c){
+        var rows=exp.counts.filter(function(r){return r.lysId===l.id&&r.condId===c.id;});
+        if(!rows.length)return;
+        var cc=cellCalc(exp,l.id,c.id);
+        var stat=cc.st.n
+          ? 'n='+cc.st.n+' · mean '+fmtT(cc.st.mean)+(cc.st.n>1?' ± '+fmtT(cc.st.sd)+(isFinite(cc.st.cv)?' (CV '+cc.st.cv.toFixed(1)+'%)':''):'')
+          : (cc.limit>0?'&lt; '+fmtT(cc.limit)+' (all zero)':'no countable rows');
+        h+='<tr><td colspan="7" style="background:var(--surface2);font-weight:700;">'
+          +escapeHtml(l.name)+' <span style="color:var(--text3);">×</span> '+escapeHtml(c.name)
+          +(c.id===exp.refId?' <span class="badge bb">reference</span>':'')
+          +' <span class="tit-mini" style="font-weight:400;">'+stat+'</span></td></tr>';
+        rows.forEach(function(r){
+          var t=rowTiter(exp,r);
+          h+='<tr><td style="font-family:var(--mono);font-weight:700;">R'+reps[r.id]+'</td>'
+            +'<td style="font-family:var(--mono);">'+escapeHtml(dilLabel(r.k,exp.factor))+'</td>'
+            +'<td><input type="text" inputmode="decimal" value="'+escapeHtml(String(r.volUl))+'" style="width:64px;" aria-label="Volume plated (µL), replicate '+reps[r.id]+' of '+escapeHtml(l.name)+' on '+escapeHtml(c.name)+'" onchange="TIT.editCount(\''+jsAttr(r.id)+'\',\'volUl\',this.value)"></td>'
+            +'<td><input type="text" inputmode="numeric" value="'+escapeHtml(String(r.plaques))+'" style="width:64px;" aria-label="Plaque count, replicate '+reps[r.id]+' of '+escapeHtml(l.name)+' on '+escapeHtml(c.name)+'" onchange="TIT.editCount(\''+jsAttr(r.id)+'\',\'plaques\',this.value)"></td>'
+            +'<td>'+flagBadge(r,exp)+'</td>'
+            +'<td style="font-family:var(--mono);">'+(r.tntc?'—':fmtT(t))+'</td>'
+            +'<td style="white-space:nowrap;"><button class="tit-del" onclick="TIT.toggleTntc(\''+jsAttr(r.id)+'\')" title="Toggle too-numerous-to-count" aria-label="Toggle TNTC on replicate '+reps[r.id]+'">∞</button>'
+            +'<button class="tit-del" onclick="TIT.delCount(\''+jsAttr(r.id)+'\')" aria-label="Delete replicate '+reps[r.id]+' of '+escapeHtml(l.name)+' on '+escapeHtml(c.name)+'">✕</button></td></tr>';
+        });
+      });});
+      // Orphans (counts whose lysate/condition was hand-edited away) still shown.
+      var orphans=exp.counts.filter(function(r){return !lysById(exp,r.lysId)||!condById(exp,r.condId);});
+      orphans.forEach(function(r){
+        h+='<tr><td>?</td><td style="font-family:var(--mono);">'+escapeHtml(dilLabel(r.k,exp.factor))+'</td><td>'+escapeHtml(String(r.volUl))+'</td><td>'+escapeHtml(String(r.plaques))+'</td><td><span class="badge bd">orphan</span></td><td>—</td>'
+          +'<td><button class="tit-del" onclick="TIT.delCount(\''+jsAttr(r.id)+'\')" aria-label="Delete orphan count">✕</button></td></tr>';
       });
       h+='</tbody></table></div>';
     }
@@ -8302,6 +8379,7 @@ function dyeWorking(o){
       +'<button class="tit-chip'+(chp.stars!==false?' on':'')+'" aria-pressed="'+(chp.stars!==false)+'" onclick="TIT.chart(\'stars\','+(chp.stars!==false?'false':'true')+')">stars</button>'
       +'<button class="tit-chip'+(chp.grid!==false?' on':'')+'" aria-pressed="'+(chp.grid!==false)+'" onclick="TIT.chart(\'grid\','+(chp.grid!==false?'false':'true')+')">grid</button>'
       +'<button class="tit-chip'+(chp.legend!==false?' on':'')+'" aria-pressed="'+(chp.legend!==false)+'" onclick="TIT.chart(\'legend\','+(chp.legend!==false?'false':'true')+')">legend</button>'
+      +'<button class="tit-chip'+(!chp.hideRef?' on':'')+'" aria-pressed="'+(!chp.hideRef)+'" onclick="TIT.chart(\'hideRef\','+(chp.hideRef?'false':'true')+')" title="Show or hide the (reference) tag, significance stars and vs-reference labels on the figure">reference marks</button>'
       +'</div>'
       // Figure editor: everything the exported file will use, editable here.
       +'<details style="margin:6px 0 10px;"'+(chp.edOpen?' open':'')+' ontoggle="TIT.chart(\'edOpen\',this.open)">'
@@ -8325,9 +8403,10 @@ function dyeWorking(o){
       +'</div></details>'
       +'<div class="tit-chart-wrap" role="img" aria-label="'+escapeHtml(cd.kind==='eop'?'EOP bar chart':'Titer bar chart')+'">'+svgFromModel(cd.model)+'</div>'
       +'<div class="tit-caption">'+(cd.kind==='eop'
-          ?'EOP per lysate vs '+escapeHtml(ref?ref.name:'reference')+'; dashed line = EOP 1 (equal plating). Error bars: propagated spread from the two CVs.'
+          ?(chp.hideRef?'EOP per lysate; dashed line = EOP 1 (equal plating).':'EOP per lysate vs '+escapeHtml(ref?ref.name:'reference')+'; dashed line = EOP 1 (equal plating).')+' Error bars: propagated spread from the two CVs.'
           :'Bars: mean titer; error bars ± SD; dots: individual replicates.')
-      +' Stars: Welch\'s t on log₁₀ titers vs the reference. Exports are publication-styled (white ground, Helvetica, Okabe-Ito colours).</div>';
+      +((chp.stars!==false&&!chp.hideRef)?' Stars: Welch\'s t on log₁₀ titers vs the reference.':'')
+      +' Exports are publication-styled (white ground, Helvetica, Okabe-Ito colours).</div>';
 
     // Actions.
     h+='<div class="mbc-actions" style="margin-top:12px;">'
@@ -8348,14 +8427,14 @@ function dyeWorking(o){
 
   // ── CSVs (tidy long + summary), every cell through csvCell ────────
   function rawCsvText(){
-    var exp=E();
-    var head=['experiment','date','lysate','condition','is_reference','mode','dilution_exponent','dilution_factor','volume_uL','plaques','flag','titer_pfu_ml'];
+    var exp=E(), reps=repIndexMap(exp);
+    var head=['experiment','date','lysate','condition','is_reference','replicate','mode','dilution_exponent','dilution_factor','volume_uL','plaques','flag','titer_pfu_ml'];
     var lines=[head.join(',')];
     exp.counts.forEach(function(r){
       var t=rowTiter(exp,r);
       var flag=r.tntc?'TNTC':countFlag(r.plaques,exp.mode);
       lines.push([exp.name,exp.date,(lysById(exp,r.lysId)||{}).name||'',(condById(exp,r.condId)||{}).name||'',
-        r.condId===exp.refId?'yes':'no',exp.mode,r.k,exp.factor,r.volUl,r.plaques,flag,
+        r.condId===exp.refId?'yes':'no',reps[r.id],exp.mode,r.k,exp.factor,r.volUl,r.plaques,flag,
         (isFinite(t)&&t>0)?t.toExponential(4):''].map(csvCell).join(','));
     });
     return lines.join('\n')+'\n';
@@ -8396,10 +8475,11 @@ function dyeWorking(o){
         ['Counts',String(exp.counts.length)]]});
     }
     if(sel.counts&&exp.counts.length){
-      out.push({type:'table',title:'Raw plaque counts',cols:['Lysate','Condition','Dilution','Vol (µL)','Plaques','Flag','Titer (PFU/mL)'],
+      var reps=repIndexMap(exp);
+      out.push({type:'table',title:'Raw plaque counts',cols:['Lysate','Condition','Rep','Dilution','Vol (µL)','Plaques','Flag','Titer (PFU/mL)'],
         rows:exp.counts.map(function(r){
           var t=rowTiter(exp,r);
-          return [(lysById(exp,r.lysId)||{}).name||'',(condById(exp,r.condId)||{}).name||'',
+          return [(lysById(exp,r.lysId)||{}).name||'',(condById(exp,r.condId)||{}).name||'','R'+reps[r.id],
             dilLabel(r.k,exp.factor),String(r.volUl),String(r.plaques),
             r.tntc?'TNTC':(countFlag(r.plaques,exp.mode)||'ok'),
             (isFinite(t)&&t>0)?t.toExponential(3):'—'];})});
@@ -8471,11 +8551,16 @@ function dyeWorking(o){
       else en[k]=v;
       if(!noRender)render(); else save(); },
     addCount:function(){ var exp=E(), en=exp.entry;
-      var p=SCI.parse(String(en.plaquesDraft==null?'':en.plaquesDraft));
-      if(!isFinite(p)||p<0){ showToast('Enter a plaque count (0 is allowed — it sets a detection limit)','warn'); return; }
-      exp.counts.push({id:_id(),lysId:en.lysId,condId:en.condId,k:en.k,volUl:en.volUl>0?en.volUl:exp.volUl,plaques:Math.round(p),tntc:false});
+      // One count or a whole replicate set: "100 120 80" logs three rows at
+      // the same lysate/condition/dilution/volume in one Enter.
+      var ps=parseCounts(en.plaquesDraft);
+      if(!ps){ showToast('Enter plaque count(s) — e.g. "120" or "100 120 80" for three replicates (0 sets a detection limit)','warn'); return; }
+      ps.forEach(function(p){
+        exp.counts.push({id:_id(),lysId:en.lysId,condId:en.condId,k:en.k,volUl:en.volUl>0?en.volUl:exp.volUl,plaques:p,tntc:false});
+      });
       en.plaquesDraft='';
       render();
+      if(ps.length>1)showToast('✓ '+ps.length+' replicates logged','green');
       var pl=document.getElementById('titEnPla'); if(pl)pl.focus(); },
     editCount:function(id,k,v){ var exp=E(); var r=exp.counts.filter(function(x){return x.id===id;})[0]; if(!r)return;
       var n=SCI.parse(String(v));
@@ -8537,7 +8622,8 @@ function dyeWorking(o){
       } },
     blocks:blocks,
     _model:{cellCalc:cellCalc,rowTiter:rowTiter,chartData:chartData,svgFromModel:svgFromModel,
-            pdfFromModel:pdfFromModel,buildXlsx:buildXlsx,xlsxSheets:xlsxSheets,pngWithDpi:pngWithDpi}
+            pdfFromModel:pdfFromModel,buildXlsx:buildXlsx,xlsxSheets:xlsxSheets,pngWithDpi:pngWithDpi,
+            parseCounts:parseCounts,repIndexMap:repIndexMap}
   };
 })();
 
