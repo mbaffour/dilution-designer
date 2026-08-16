@@ -608,6 +608,19 @@ body.print-plate-mode .excl-bar{display:none!important;}
   </div>
 </div>
 
+<!-- ══════════ WORKSPACE RESTORE PREVIEW ══════════ -->
+<div class="modal-overlay" id="wsPrev" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal-box" style="max-width:620px;">
+    <div class="modal-title">Restore workspace</div>
+    <div class="tit-mini" style="margin-bottom:9px;">Backup taken <span id="wsPrevWhen">—</span></div>
+    <div id="wsPrevBody"></div>
+    <div class="modal-footer">
+      <button class="modal-btn" onclick="document.getElementById('wsPrev').style.display='none'">Cancel</button>
+      <button class="modal-btn primary" onclick="WS.confirmRestore()">Restore &amp; reload</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════ TITERING / EOP ══════════ -->
 <div id="titView" style="display:none;padding:16px 20px 60px;max-width:1180px;margin:0 auto;">
   <div class="mbc-grid">
@@ -1077,6 +1090,101 @@ function csvCell(c){
 let _lsWarned=false;
 function lsWarnOnce(){ if(_lsWarned) return; _lsWarned=true;
   try{ showToast('Couldn’t save to this browser’s storage (private mode or full). Export your work to keep it.','warn',6000); }catch(e){} }
+/* Save and warn in one call. Several modules used to do a bare lsSet() and
+   throw the false away, so a full or private-mode browser lost their data
+   with no message at all. */
+function lsSetWarn(k,v){ var ok=lsSet(k,v); if(!ok) lsWarnOnce(); return ok; }
+
+/* The reagent and dye libraries are fetched lazily on first visit to their
+   module, so anything that indexes them (the command palette) has to know
+   when they land. One event, no module-specific coupling. */
+function ddLibraryLoaded(which){
+  try{ document.dispatchEvent(new CustomEvent('dd:library',{detail:{which:which}})); }catch(e){}
+}
+/* Kick off those fetches without needing the user to visit the module.
+   Both loaders are idempotent and write into their own (hidden) views. */
+function ddWarmLibraries(){
+  try{ if(typeof rpLoaded!=='undefined'&&!rpLoaded&&typeof rpInit==='function') rpInit(); }catch(e){}
+  try{ if(window.MIC&&MIC.init&&(!MIC.list||!MIC.list.length)) MIC.init(); }catch(e){}
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   WORKSPACE — every localStorage key this app owns, in one place.
+   Everything you have ever entered lives in this browser and nowhere
+   else; clearing site data wipes it with no warning. This table is what
+   makes a single-file backup possible, and it is the ONLY list — a new
+   module adds its key here or it silently misses every backup.
+   ══════════════════════════════════════════════════════════════════ */
+const DD_KEYS=[
+  {k:'dd_state',          label:'Plate layout (current)',     json:true},
+  {k:'dd_layouts',        label:'Saved plate layouts',        json:true},
+  {k:'dd_titer',          label:'Titering experiments',       json:true},
+  {k:'dd_lysates',        label:'Lysate library',             json:true},
+  {k:'dd_notebook',       label:'Lab notebook entries',       json:true},
+  {k:'dd_reagent_custom', label:'Custom reagent recipes',     json:true},
+  {k:'dd_gel',            label:'Gel simulator setup',        json:true},
+  {k:'dd_gel_ladders',    label:'Custom gel ladders',         json:true},
+  {k:'dd_phg',            label:'Phage planner settings',     json:true},
+  {k:'dd_mic_panel',      label:'Microscopy panel',           json:true},
+  {k:'dd_mic_dyes',       label:'Custom dyes',                json:true},
+  {k:'dd_sci',            label:'Notation preference',        json:false},
+  {k:'dd_welcomed',       label:'Welcome dismissed',          json:false},
+  {k:'mbc_last',          label:'Last calculator',            json:false},
+  {k:'pr_last',           label:'Last protocol',              json:false},
+  {k:'mic_last',          label:'Last dye',                   json:false}
+];
+
+// How many top-level records a key holds, for the backup preview. Objects
+// keyed by name (dd_layouts) count their keys; arrays count length; the
+// versioned wrappers count the collection inside them.
+function _ddCount(key,raw){
+  if(raw==null)return 0;
+  try{
+    var v=JSON.parse(raw);
+    if(Array.isArray(v))return v.length;
+    if(v&&typeof v==='object'){
+      if(Array.isArray(v.experiments))return v.experiments.length;
+      if(Array.isArray(v.lysates))return v.lysates.length;
+      return Object.keys(v).length;
+    }
+  }catch(e){}
+  return 1;
+}
+function workspaceSnapshot(){
+  var data={},present=0,bytes=0;
+  DD_KEYS.forEach(function(d){
+    var raw=lsGet(d.k);
+    if(raw==null)return;
+    data[d.k]=raw;                       // stored verbatim: no reserialisation, no drift
+    present++; bytes+=d.k.length+raw.length;
+  });
+  return {app:'dilution-designer',kind:'workspace',v:1,
+          savedAt:new Date().toISOString(),appVersion:(typeof MB_VERSION!=='undefined'?MB_VERSION:''),
+          keys:present,bytes:bytes,data:data};
+}
+// What a file WOULD change, without changing anything — the import preview.
+function workspacePlan(payload){
+  if(!payload||payload.kind!=='workspace'||!payload.data||typeof payload.data!=='object')
+    throw new Error('not a Dilution Designer workspace file');
+  var rows=[];
+  DD_KEYS.forEach(function(d){
+    var incoming=payload.data[d.k], current=lsGet(d.k);
+    if(incoming==null&&current==null)return;
+    rows.push({key:d.k,label:d.label,
+      action: incoming==null?'kept' : current==null?'added' : (incoming===current?'same':'replaced'),
+      from:_ddCount(d.k,current), to:_ddCount(d.k,incoming==null?current:incoming)});
+  });
+  return rows;
+}
+function workspaceRestore(payload){
+  var rows=workspacePlan(payload),n=0;
+  rows.forEach(function(r){
+    if(r.action==='kept')return;
+    var v=payload.data[r.key];
+    if(typeof v==='string'&&lsSetWarn(r.key,v))n++;
+  });
+  return n;
+}
 
 /* ══════════════════════════════════════════════════════════════════
    SCIENTIFIC NOTATION — one parser + formatter for the whole app.
@@ -3798,7 +3906,8 @@ function rpInit(){
 function rpFinishLoad(){ rpLoaded=true; rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes';
   // The library is fetched lazily, so the Home hub's recipe count starts as a literal.
   // Once the real number is known, refresh the hub so the two can never disagree.
-  if(appMode==='home'&&window.renderHome) renderHome(); }
+  if(appMode==='home'&&window.renderHome) renderHome();
+  ddLibraryLoaded('reagent'); }
 function rpFlatten(){ rpAllRecipes=[]; (rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ rpAllRecipes.push(Object.assign({_cat:c.title,_catKey:c.key}, r)); }); }); }
 function rpCustom(){ try{ return JSON.parse(lsGet('dd_reagent_custom')||'[]'); }catch(e){ return []; } }
 function rpMergeCustom(){ var cust=rpCustom(); var cat=(rpLib.categories||[]).find(function(c){return c.key==='custom';}); if(cust.length){ if(!cat){ cat={key:'custom',title:'My recipes',recipes:[]}; rpLib.categories.push(cat);} cat.recipes=cust; } else if(cat){ cat.recipes=[]; } }
@@ -5132,6 +5241,40 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
           fails.push('xlsx: numeric and string cells not both encoded');
       }catch(e){ n++; fails.push('xlsx build threw — '+e.message); }
     }
+    // ── workspace backup: the table must cover every key the app writes, and
+    // a restore plan must never claim to change something it isn't changing.
+    // NB: guard on the lexical bindings, not on window — a top-level `const`
+    // is script-scoped and never becomes a window property, so `window.DD_KEYS`
+    // is undefined and this whole block would silently never run.
+    if(typeof DD_KEYS!=='undefined'&&typeof workspacePlan==='function'){
+      n++; var _dup={},_dupes=[];
+      DD_KEYS.forEach(function(d){ if(_dup[d.k])_dupes.push(d.k); _dup[d.k]=1; });
+      if(_dupes.length) fails.push('DD_KEYS has duplicate entries: '+_dupes.join(','));
+      // Every key any module persists must be in DD_KEYS or it misses backups.
+      n++; var _known=['dd_state','dd_layouts','dd_titer','dd_lysates','dd_notebook','dd_reagent_custom',
+        'dd_gel','dd_gel_ladders','dd_phg','dd_mic_panel','dd_mic_dyes','dd_sci','dd_welcomed',
+        'mbc_last','pr_last','mic_last'];
+      var _missing=_known.filter(function(k){ return !DD_KEYS.some(function(d){return d.k===k;}); });
+      if(_missing.length) fails.push('DD_KEYS is missing keys that modules write: '+_missing.join(','));
+      n++; try{ workspacePlan({kind:'nope'}); fails.push('workspacePlan accepted a non-workspace file'); }
+      catch(e){ /* expected */ }
+      n++; try{ workspacePlan({kind:'workspace',data:'notanobject'}); fails.push('workspacePlan accepted a malformed data block'); }
+      catch(e){ /* expected */ }
+      // A plan against the CURRENT storage must mark identical values "same",
+      // never "replaced" — otherwise the preview scares the user for nothing.
+      n++; var _snap=workspaceSnapshot();
+      var _selfPlan=workspacePlan(_snap);
+      var _wrong=_selfPlan.filter(function(r){return r.action!=='same';});
+      if(_wrong.length) fails.push('restoring the current state should be a no-op, got: '+
+        _wrong.map(function(r){return r.key+':'+r.action;}).join(','));
+      // Record counting: array, keyed object, and the versioned wrappers.
+      n++; if(_ddCount('x','[1,2,3]')!==3||_ddCount('x','{"a":1,"b":2}')!==2||
+              _ddCount('x','{"v":1,"experiments":[1,2]}')!==2||_ddCount('x',null)!==0)
+        fails.push('_ddCount wrong: '+[_ddCount('x','[1,2,3]'),_ddCount('x','{"a":1,"b":2}'),
+                   _ddCount('x','{"v":1,"experiments":[1,2]}'),_ddCount('x',null)].join('/'));
+      n++; if(_snap.app!=='dilution-designer'||_snap.kind!=='workspace'||_snap.v!==1)
+        fails.push('workspace snapshot header wrong');
+    }
     return {total:n, passed:n-fails.length, failures:fails};
   }
 
@@ -5166,7 +5309,9 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     el.innerHTML='<div class="home-hero"><h1>Molecular Biology Bench Toolkit</h1><p>One place for dilutions, reagents, plate layouts, protocols and the everyday molecular-biology math. Everything is computed on your own machine — visit once and it keeps working with no network, so it is usable in a cold room or a BSL suite.</p></div>'+
       '<div class="home-cards">'+mods.map(function(x){return '<button class="home-card" onclick="setMode(\''+x.m+'\')"><div class="home-ico" aria-hidden="true">'+x.icon+'</div><div class="home-ct"><div class="home-ctitle">'+escapeHtml(x.title)+'</div><div class="home-cdesc">'+escapeHtml(x.desc)+'</div></div></button>';}).join('')+'</div>'+
       '<div class="home-sub">Jump to a calculator</div><div class="home-chips">'+featured.filter(function(id){return byId[id];}).map(function(id){return '<button class="home-chip" onclick="MBC._cur=\''+id+'\';setMode(\'calc\')">'+escapeHtml(byId[id].name)+'</button>';}).join('')+'</div>'+
-      '<div style="text-align:center;margin-top:26px;font:11px var(--mono);color:var(--text3);line-height:1.7;">Dilution Designer · '+MB_VERSION+'<br>Every calculation runs on your machine — nothing is uploaded.<br>Offline: '+escapeHtml(window.ddPwaStatus?ddPwaStatus():'—')+'</div>';
+      '<div class="home-sub">Your data</div><div id="homeWs"></div>'+
+      '<div style="text-align:center;margin-top:26px;font:11px var(--mono);color:var(--text3);line-height:1.7;">Dilution Designer · '+MB_VERSION+'<br>Every calculation runs on your machine — nothing is uploaded.<br>Offline: '+escapeHtml(window.ddPwaStatus?ddPwaStatus():'—')+'<br>Press <kbd>Ctrl</kbd>+<kbd>K</kbd> to search everything.</div>';
+    if(window.WS) WS.renderHome();
   };
 
   // Self-test on ?selftest=1 (numeric assertions on every formula).
@@ -6613,9 +6758,9 @@ function dyeWorking(o){
   var P={n:6, volPer:200, volUnit:'µL', over:10, minPip:2, factor:10, target:null, targetUnit:null, vialMg:1};
 
   function lsPanel(){ try{ return JSON.parse(lsGet('dd_mic_panel')||'[]'); }catch(e){ return []; } }
-  function savePanel(){ try{ lsSet('dd_mic_panel',JSON.stringify(panelIds)); }catch(e){} }
+  function savePanel(){ try{ lsSetWarn('dd_mic_panel',JSON.stringify(panelIds)); }catch(e){} }
   function custom(){ try{ return JSON.parse(lsGet('dd_mic_dyes')||'[]'); }catch(e){ return []; } }
-  function saveCustom(l){ try{ lsSet('dd_mic_dyes',JSON.stringify(l)); }catch(e){} }
+  function saveCustom(l){ try{ lsSetWarn('dd_mic_dyes',JSON.stringify(l)); }catch(e){} }
 
   // ── library load: same shape and the same graceful failure as rpInit() ──
   function init(){
@@ -6644,6 +6789,7 @@ function dyeWorking(o){
     // The hub renders before this fetch resolves, so its dye count starts as a
     // literal. Refresh it now the real number exists, so the two cannot disagree.
     if(typeof appMode!=='undefined'&&appMode==='home'&&window.renderHome) try{ renderHome(); }catch(e){}
+    ddLibraryLoaded('dye');
   }
   function flatten(){
     all=[]; byId={};
@@ -7177,7 +7323,7 @@ function dyeWorking(o){
   function defState(){ return { type:'dna', pct:'1', ladder:'neb-1kb', look:'dark',
     lanes:[ {name:'Sample 1', sizes:'5000, 3000, 1000'}, {name:'Sample 2', sizes:'4200, 4000'} ] }; }
   function load(){ try{ var j=JSON.parse(lsGet('dd_gel')||'null'); if(j&&j.lanes) return j; }catch(e){} return defState(); }
-  function save(){ try{ lsSet('dd_gel',JSON.stringify(S)); }catch(e){} }
+  function save(){ try{ lsSetWarn('dd_gel',JSON.stringify(S)); }catch(e){} }
 
   function parseSizes(str){ return String(str||'').split(/[,;\s]+/).map(function(x){return SCI.parse(x);}).filter(function(n){return isFinite(n)&&n>0;}); }
   function unit(){ return S.type==='dna'?'bp':'kDa'; }
@@ -7378,7 +7524,7 @@ function dyeWorking(o){
       if(!n||!b.length){ showToast('Give the ladder a name and some band sizes','warn'); return; }
       var list=customLadders(); var id='cust-'+Date.now();
       list.push({id:id, v:'Custom', t:S.type, n:n, b:b, ref:[]});
-      try{ lsSet('dd_gel_ladders',JSON.stringify(list)); }catch(e){}
+      try{ lsSetWarn('dd_gel_ladders',JSON.stringify(list)); }catch(e){}
       S.ladder=id; renderControls(); render(); showToast('✓ Ladder saved','green');
     },
     png:function(dpi){
@@ -7435,7 +7581,7 @@ function dyeWorking(o){
 
   function load(){ try{ var j=JSON.parse(lsGet('dd_phg')||'null');
       if(j&&typeof j==='object') return Object.assign({},DEF,j); }catch(e){} return Object.assign({},DEF); }
-  function persist(){ try{ lsSet('dd_phg',JSON.stringify(S)); }catch(e){} }
+  function persist(){ try{ lsSetWarn('dd_phg',JSON.stringify(S)); }catch(e){} }
   function el(id){ return document.getElementById(id); }
   function n(x){ return SCI.parse(x); }
   function f(x,p){ return SCI.fmt(x,p||4); }
@@ -9172,6 +9318,226 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   // exposed so the archive can be verified structurally without downloading it
   window.NBDOCX.build=buildDocx;
   window.NBDOCX._zip={zip:zip,crc32:crc32,enc:enc};
+})();
+
+/* ════════════ WORKSPACE BACKUP + COMMAND PALETTE (Ctrl/⌘+K) ════════════
+   Everything you own lives in this browser. These two make it durable and
+   findable: one file that carries the whole workspace, and one search box
+   that reaches every module. ════════════════════════════════════════════ */
+(function(){
+  var css=`
+  .ws-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-bottom:10px;}
+  .ws-card{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:11px 13px;}
+  .ws-v{font-size:17px;font-weight:800;color:var(--accent);letter-spacing:-.02em;}
+  .ws-l{font:10px var(--mono);color:var(--text3);margin-top:3px;text-transform:uppercase;letter-spacing:.1em;}
+  .ws-bar{height:7px;border-radius:4px;background:var(--surface2);overflow:hidden;margin-top:7px;}
+  .ws-bar i{display:block;height:100%;background:var(--accent2);}
+  .ws-tbl{width:100%;border-collapse:collapse;font:11px var(--mono);}
+  .ws-tbl th,.ws-tbl td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);}
+  .cp-bg{position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.42);display:flex;align-items:flex-start;justify-content:center;padding-top:11vh;}
+  .cp-box{width:min(640px,94vw);background:var(--surface);border:1px solid var(--border2);border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.34);overflow:hidden;}
+  .cp-in{width:100%;border:0;border-bottom:1px solid var(--border);background:transparent;color:var(--text);font:15px var(--sans);padding:14px 16px;outline:none;}
+  .cp-list{max-height:52vh;overflow:auto;}
+  .cp-it{display:flex;gap:10px;align-items:center;padding:9px 16px;cursor:pointer;border:0;background:none;width:100%;text-align:left;color:var(--text);}
+  .cp-it[aria-selected="true"]{background:var(--accent-bg);}
+  .cp-ic{width:20px;text-align:center;flex-shrink:0;}
+  .cp-nm{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cp-kind{font:9.5px var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:.09em;flex-shrink:0;}
+  .cp-empty{padding:18px 16px;font:12px var(--mono);color:var(--text3);}
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  function fmtBytes(b){ return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(2)+' MB'; }
+
+  // ── workspace panel on the Home hub ──
+  function renderHome(){
+    var el=document.getElementById('homeWs'); if(!el)return;
+    var snap=workspaceSnapshot();
+    var rows=DD_KEYS.map(function(d){
+      var raw=lsGet(d.k); if(raw==null)return null;
+      return {label:d.label,n:_ddCount(d.k,raw),bytes:d.k.length+raw.length};
+    }).filter(Boolean).sort(function(a,b){return b.bytes-a.bytes;});
+    el.innerHTML=
+      '<div class="ws-grid">'
+      +'<div class="ws-card"><div class="ws-v">'+fmtBytes(snap.bytes)+'</div><div class="ws-l">Stored in this browser</div>'
+        +'<div class="ws-bar"><i id="wsQuotaBar" style="width:0%"></i></div><div class="ws-l" id="wsQuota" style="text-transform:none;letter-spacing:0;">measuring…</div></div>'
+      +'<div class="ws-card"><div class="ws-v">'+snap.keys+' / '+DD_KEYS.length+'</div><div class="ws-l">Data sets in use</div></div>'
+      +'<div class="ws-card"><div class="ws-v">'+(rows[0]?escapeHtml(rows[0].label):'—')+'</div><div class="ws-l">Largest ('+(rows[0]?fmtBytes(rows[0].bytes):'—')+')</div></div>'
+      +'</div>'
+      +'<div class="ibox w" style="font-size:11px;">This data lives only in this browser profile. Clearing site data, a fresh device or a different browser will not have it — <strong>keep a backup file</strong>.</div>'
+      +'<div class="mbc-actions" style="margin-top:9px;">'
+        +'<button class="btn ac" onclick="WS.backup()">⬇ Back up everything</button>'
+        +'<button class="btn" onclick="document.getElementById(\'wsFile\').click()">⬆ Restore from file…</button>'
+        +'<input type="file" id="wsFile" accept="application/json,.json" style="display:none" onchange="WS.pick(event)" aria-label="Choose a workspace backup file">'
+      +'</div>'
+      +'<details style="margin-top:9px;"><summary tabindex="0" style="font:11px var(--mono);color:var(--text2);cursor:pointer;padding:4px 0;">What is in the backup</summary>'
+      +'<div class="mbc-tblwrap" style="margin-top:6px;"><table class="ws-tbl"><thead><tr><th>Data set</th><th>Records</th><th>Size</th></tr></thead><tbody>'
+      +rows.map(function(r){return '<tr><td>'+escapeHtml(r.label)+'</td><td>'+r.n+'</td><td>'+fmtBytes(r.bytes)+'</td></tr>';}).join('')
+      +'</tbody></table></div></details>';
+    // Quota is async and unsupported on some browsers — never block the panel on it.
+    if(navigator.storage&&navigator.storage.estimate){
+      navigator.storage.estimate().then(function(q){
+        var lab=document.getElementById('wsQuota'), bar=document.getElementById('wsQuotaBar');
+        if(!lab||!q||!q.quota)return;
+        var pct=Math.min(100,q.usage/q.quota*100);
+        bar.style.width=pct.toFixed(1)+'%';
+        lab.textContent=fmtBytes(q.usage)+' of '+fmtBytes(q.quota)+' browser storage ('+pct.toFixed(1)+'%)';
+        if(pct>80){ bar.style.background='var(--warn)'; lab.textContent+=' — running low, back up now'; }
+      }).catch(function(){ var l=document.getElementById('wsQuota'); if(l)l.textContent='Browser storage limit unknown'; });
+    } else { var l0=document.getElementById('wsQuota'); if(l0)l0.textContent='Browser storage limit unknown'; }
+  }
+
+  function backup(){
+    var snap=workspaceSnapshot();
+    var d=new Date().toISOString().slice(0,10);
+    _dl(JSON.stringify(snap,null,2),'dilution-designer-workspace-'+d+'.json','application/json');
+    showToast('✓ Workspace backed up ('+snap.keys+' data sets, '+fmtBytes(snap.bytes)+')','green');
+  }
+
+  // Restore is destructive, so it always previews first and never merges
+  // silently. The file is untrusted: every label rendered through escapeHtml.
+  var _pending=null;
+  function pick(ev){
+    var f=ev.target.files&&ev.target.files[0]; ev.target.value='';
+    if(!f)return;
+    var rd=new FileReader();
+    rd.onload=function(){
+      var payload;
+      try{ payload=JSON.parse(rd.result); }catch(e){ showToast('That file is not valid JSON','warn'); return; }
+      var rows;
+      try{ rows=workspacePlan(payload); }catch(e){ showToast('Restore failed: '+e.message,'warn'); return; }
+      _pending=payload;
+      var changing=rows.filter(function(r){return r.action==='replaced'||r.action==='added';});
+      document.getElementById('wsPrevWhen').textContent=payload.savedAt?String(payload.savedAt).slice(0,16).replace('T',' '):'unknown date';
+      document.getElementById('wsPrevBody').innerHTML=
+        (changing.length?'':'<div class="ibox">This backup matches what you already have — nothing would change.</div>')
+        +'<div class="mbc-tblwrap"><table class="ws-tbl"><thead><tr><th>Data set</th><th>Now</th><th>After</th><th></th></tr></thead><tbody>'
+        +rows.map(function(r){
+          var b=r.action==='replaced'?'bw':r.action==='added'?'bg':'bn';
+          return '<tr><td>'+escapeHtml(r.label)+'</td><td>'+r.from+'</td><td>'+r.to+'</td>'
+                +'<td><span class="badge '+b+'">'+r.action+'</span></td></tr>';}).join('')
+        +'</tbody></table></div>'
+        +(changing.length?'<div class="ibox d" style="margin-top:8px;">Restoring <strong>replaces</strong> the data sets marked above. Back up first if the current data matters.</div>':'');
+      document.getElementById('wsPrev').style.display='flex';
+    };
+    rd.readAsText(f);
+  }
+  function confirmRestore(){
+    if(!_pending)return;
+    var n=workspaceRestore(_pending);
+    _pending=null;
+    document.getElementById('wsPrev').style.display='none';
+    showToast('✓ Restored '+n+' data set'+(n===1?'':'s')+' — reloading…','green');
+    setTimeout(function(){ location.reload(); },700);   // simplest correct way to re-read every module's state
+  }
+
+  // ── command palette ──
+  var _cpItems=null,_cpSel=0;
+  function build(){
+    var out=[];
+    [['home','🏠','Home'],['plasmid','🧫','Plate Planner'],['phage','🧫','Plate Planner — phage mode'],
+     ['dilcalc','💧','Dilution & Molarity'],['reagent','⚗️','Reagent Prep'],['calc','🧬','Calculators'],
+     ['proto','📋','Protocols'],['phg','🦠','Phage Planner'],['titer','⭕','Titering & EOP'],
+     ['mic','🔬','Microscopy & Dyes'],['gel','🧪','Gel Simulator'],['notebook','📓','Lab Notebook']]
+      .forEach(function(m){ out.push({kind:'module',icon:m[1],name:m[2],hay:m[2],go:function(){setMode(m[0]);}}); });
+    try{ (window.MBC&&MBC.calcs||[]).forEach(function(c){
+      out.push({kind:'calculator',icon:'🧮',name:c.name,hay:c.name+' '+(c.tags||'')+' '+(c.blurb||''),
+                go:function(){ MBC._cur=c.id; setMode('calc'); }}); }); }catch(e){}
+    try{ (window.PROTO&&PROTO.list||[]).forEach(function(p){
+      out.push({kind:'protocol',icon:'📋',name:p.name,hay:p.name+' '+(p.tags||''),
+                go:function(){ setMode('proto'); if(PROTO.open)PROTO.open(p.id); }}); }); }catch(e){}
+    try{ (window.MIC&&MIC.list||[]).forEach(function(d){
+      out.push({kind:'dye',icon:'🔬',name:d.name,hay:d.name+' '+((d.aka||[]).join(' '))+' '+(d.target||''),
+                go:function(){ setMode('mic'); if(MIC.open)MIC.open(d.id); }}); }); }catch(e){}
+    try{ (window.rpLib&&rpLib.categories||[]).forEach(function(cat){
+      (cat.recipes||[]).forEach(function(r){
+        out.push({kind:'recipe',icon:'⚗️',name:r.name,hay:r.name+' '+(cat.name||''),
+                  go:function(){ setMode('reagent'); if(window.rpOpen)rpOpen(r.id); }}); }); }); }catch(e){}
+    try{ lysAll().forEach(function(l){
+      out.push({kind:'lysate',icon:'🦠',name:l.name+(l.titer>0?' — '+SCI.fmt(l.titer,3)+' PFU/mL':''),
+                hay:l.name+' '+(l.host||''), go:function(){ setMode('phg'); }}); }); }catch(e){}
+    try{ var t=JSON.parse(lsGet('dd_titer')||'null');
+      if(t&&t.experiments) t.experiments.forEach(function(x,i){
+        out.push({kind:'experiment',icon:'⭕',name:x.name||('Experiment '+(i+1)),
+                  hay:(x.name||'')+' '+(x.date||''), go:function(){ setMode('titer'); if(window.TIT)TIT.sel(i); }}); }); }catch(e){}
+    try{ (window.GEL&&GEL._model&&GEL._model.ladders()||[]).forEach(function(l){
+      out.push({kind:'ladder',icon:'🧪',name:l.n,hay:l.n+' '+(l.v||''), go:function(){ setMode('gel'); }}); }); }catch(e){}
+    out.push({kind:'action',icon:'⬇',name:'Back up my whole workspace',hay:'backup export save data',go:backup});
+    out.forEach(function(o){ o.hay=(o.hay||o.name).toLowerCase(); });
+    return out;
+  }
+  function results(q){
+    if(!_cpItems)_cpItems=build();
+    q=(q||'').toLowerCase().trim();
+    if(!q)return _cpItems.filter(function(o){return o.kind==='module';});
+    // All terms must appear, in any order — the module nav filters match one
+    // contiguous substring, which means "lb broth" misses "LB (Lysogeny
+    // Broth), Miller". Word-wise AND is what makes typed-from-memory queries
+    // land. Ranking then favours a whole-phrase hit, then a name hit.
+    var terms=q.split(/\s+/).filter(Boolean);
+    return _cpItems.filter(function(o){
+        return terms.every(function(t){ return o.hay.indexOf(t)>=0; });
+      })
+      .sort(function(a,b){
+        var al=a.name.toLowerCase(), bl=b.name.toLowerCase();
+        var ap=al.indexOf(q), bp=bl.indexOf(q);                    // whole phrase in the name
+        var as=ap===0?0:ap>0?1:(al.indexOf(terms[0])>=0?2:3);
+        var bs=bp===0?0:bp>0?1:(bl.indexOf(terms[0])>=0?2:3);
+        return as-bs || a.name.length-b.name.length;
+      }).slice(0,60);
+  }
+  function paint(){
+    var q=document.getElementById('cpIn').value, list=results(q);
+    _cpSel=Math.max(0,Math.min(_cpSel,list.length-1));
+    document.getElementById('cpList').innerHTML=list.length?list.map(function(o,i){
+      return '<button class="cp-it" role="option" aria-selected="'+(i===_cpSel)+'" onclick="WS.run('+i+')">'
+        +'<span class="cp-ic" aria-hidden="true">'+o.icon+'</span>'
+        +'<span class="cp-nm">'+escapeHtml(o.name)+'</span>'
+        +'<span class="cp-kind">'+escapeHtml(o.kind)+'</span></button>';}).join('')
+      :'<div class="cp-empty">Nothing matches “'+escapeHtml(q)+'”.</div>';
+    var sel=document.querySelector('.cp-it[aria-selected="true"]');
+    if(sel&&sel.scrollIntoView)sel.scrollIntoView({block:'nearest'});
+  }
+  function open(){
+    _cpItems=null; _cpSel=0;                        // rebuilt each open so new data shows up
+    ddWarmLibraries();                              // so dyes/recipes are searchable before you ever open those tabs
+    document.getElementById('cpBg').style.display='flex';
+    var i=document.getElementById('cpIn'); i.value=''; paint(); i.focus();
+  }
+  // A lazily-fetched library landing mid-search must appear without retyping.
+  document.addEventListener('dd:library',function(){
+    _cpItems=null;
+    if(document.getElementById('cpBg')&&document.getElementById('cpBg').style.display==='flex') paint();
+  });
+  function close(){ document.getElementById('cpBg').style.display='none'; }
+  function run(i){ var list=results(document.getElementById('cpIn').value); var o=list[i]; if(!o)return; close(); try{ o.go(); }catch(e){} }
+
+  var bg=document.createElement('div');
+  bg.className='cp-bg'; bg.id='cpBg'; bg.style.display='none';
+  bg.setAttribute('role','dialog'); bg.setAttribute('aria-modal','true'); bg.setAttribute('aria-label','Search everything');
+  bg.innerHTML='<div class="cp-box"><input id="cpIn" class="cp-in" placeholder="Search calculators, protocols, recipes, dyes, lysates, experiments…" '
+    +'aria-label="Search everything" aria-controls="cpList" autocomplete="off" spellcheck="false">'
+    +'<div class="cp-list" id="cpList" role="listbox" aria-label="Results"></div></div>';
+  bg.addEventListener('click',function(e){ if(e.target===bg)close(); });
+  document.addEventListener('DOMContentLoaded',function(){ document.body.appendChild(bg); });
+  if(document.readyState!=='loading')document.body.appendChild(bg);
+
+  // Deliberately NOT the app's other keydown handler: that one returns early
+  // when focus is in a field, which would make Ctrl+K dead exactly when you
+  // are mid-entry and want to jump somewhere.
+  document.addEventListener('keydown',function(e){
+    if((e.ctrlKey||e.metaKey)&&(e.key==='k'||e.key==='K')){ e.preventDefault();
+      if(document.getElementById('cpBg').style.display==='flex')close(); else open(); return; }
+    if(document.getElementById('cpBg').style.display!=='flex')return;
+    if(e.key==='Escape'){ e.preventDefault(); close(); }
+    else if(e.key==='ArrowDown'){ e.preventDefault(); _cpSel++; paint(); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); _cpSel--; paint(); }
+    else if(e.key==='Enter'){ e.preventDefault(); run(_cpSel); }
+  },true);
+  document.addEventListener('input',function(e){ if(e.target&&e.target.id==='cpIn'){ _cpSel=0; paint(); } });
+
+  window.WS={renderHome:renderHome,backup:backup,pick:pick,confirmRestore:confirmRestore,
+             open:open,close:close,run:run,_results:results,_snapshot:workspaceSnapshot};
 })();
 
 /* ══════════════════════════ PWA / OFFLINE ══════════════════════════ */
