@@ -268,7 +268,15 @@ tbody tr:hover{background:var(--bg);}
 
 /* ── MODAL ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:500;display:flex;align-items:center;justify-content:center;}
-.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:26px 30px;width:380px;max-width:92vw;box-shadow:0 8px 40px rgba(0,0,0,0.22);}
+/* max-height + overflow are load-bearing: the overlay centres the box, so a
+   tall body (a long titer history) would otherwise push the Save/Cancel
+   footer off BOTH ends of the screen with no scrollbar and no way out. */
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:26px 30px;width:380px;max-width:92vw;max-height:88vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.22);}
+.phg-hrow{display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text2);}
+.phg-hrow:last-child{border-bottom:0;}
+.phg-hv{font-weight:700;color:var(--text);}
+.phg-hm{margin-left:auto;font-size:10px;color:var(--text3);text-align:right;}
+#phgEditHist{max-height:150px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:4px 9px;background:var(--bg);}
 .modal-title{font-size:16px;font-weight:800;margin-bottom:20px;letter-spacing:-0.02em;}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:22px;}
 .modal-btn{font-family:var(--mono);font-size:11px;padding:7px 16px;border-radius:5px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;}
@@ -603,8 +611,42 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <button class="btn ac" onclick="PHG.addLysate()" style="width:100%;justify-content:center;">＋ Add lysate</button>
       <div id="phgList" class="mbc-list" role="listbox" aria-label="Saved phage lysates"></div>
       <div id="phgLibTools"></div>
+      <div class="sl" style="margin-top:14px;">Host strains</div>
+      <button class="btn" onclick="HOSTUI.edit(null)" style="width:100%;justify-content:center;">＋ Add strain</button>
+      <div id="hostList" class="mbc-list" role="list" aria-label="Registered host strains"></div>
+      <div id="hostTools"></div>
     </aside>
     <section class="mbc-main" id="phgMain"></section>
+  </div>
+</div>
+
+<!-- ══════════ HOST / STRAIN EDITOR ══════════ -->
+<div class="modal-overlay" id="hostEdit" style="display:none;" onclick="if(event.target===this)HOSTUI.close()">
+  <div class="modal-box">
+    <div class="modal-title" id="hostEditTitle">Add strain</div>
+    <input type="hidden" id="hostEditId">
+    <div class="f">
+      <label for="hostEditName">Name</label>
+      <input id="hostEditName" placeholder="e.g. E. coli MG1655">
+    </div>
+    <div class="r2">
+      <div class="f"><label for="hostEditSpecies">Species</label><input id="hostEditSpecies" placeholder="e.g. Escherichia coli"></div>
+      <div class="f"><label for="hostEditMarkers">Markers / selection</label><input id="hostEditMarkers" placeholder="e.g. Amp&lt;sup&gt;R&lt;/sup&gt;, none"></div>
+    </div>
+    <div class="r2">
+      <div class="f"><label for="hostEditSource">Source / collection no.</label><input id="hostEditSource" placeholder="e.g. CGSC 6300, lab freezer B2"></div>
+      <div class="f"><label for="hostEditDate">Acquired</label><input type="date" id="hostEditDate"></div>
+    </div>
+    <div class="f">
+      <label for="hostEditNote">Note (optional)</label>
+      <input id="hostEditNote" placeholder="e.g. grows at 30 °C, slow on minimal">
+    </div>
+    <div class="ibox" style="font-size:10.5px;">Strains you register here autocomplete in every host field across the app, so the same organism is spelled the same way everywhere.</div>
+    <div class="modal-footer">
+      <button class="modal-btn" id="hostEditDelete" onclick="HOSTUI.del()" style="margin-right:auto;">Delete</button>
+      <button class="modal-btn" onclick="HOSTUI.close()">Cancel</button>
+      <button class="modal-btn primary" onclick="HOSTUI.save()">Save</button>
+    </div>
   </div>
 </div>
 
@@ -643,12 +685,16 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div class="f"><label for="phgEditVol">Vol available (µL)</label><input type="number" id="phgEditVol" value="1000" min="0" step="any"></div>
     </div>
     <div class="r2">
-      <div class="f"><label for="phgEditHost">Propagating host</label><input id="phgEditHost" placeholder="e.g. E. coli MG1655"></div>
+      <div class="f"><label for="phgEditHost">Propagating host</label><input id="phgEditHost" list="ddHosts" placeholder="e.g. E. coli MG1655"><input type="hidden" id="phgEditHostId"></div>
       <div class="f"><label for="phgEditDate">Titered on</label><input type="date" id="phgEditDate"></div>
     </div>
     <div class="f">
       <label for="phgEditNote">Note (optional)</label>
       <input id="phgEditNote" placeholder="e.g. CsCl-purified, stored 4 °C">
+    </div>
+    <div class="f" id="phgEditHistWrap" style="display:none;">
+      <label>Titer history</label>
+      <div id="phgEditHist"></div>
     </div>
     <!-- Same math as the Phage titer calculator and the plate's stock editor. -->
     <details id="phgEditAssay" style="margin-bottom:11px;">
@@ -721,7 +767,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div class="f"><label>Vol per well (µL)</label><input type="number" id="cultureVol" value="200" min="1" step="any" oninput="update()"></div>
       <div class="f"><label>Total available (µL)</label><input type="number" id="cultureTotal" value="25000" min="0" step="any" oninput="update()"></div>
     </div>
-    <div class="f"><label>Sample / culture name</label><input id="cultureName" placeholder="E.g. E. coli, HeLa…" oninput="update()"></div>
+    <div class="f"><label>Sample / culture name</label><input id="cultureName" list="ddHosts" placeholder="E.g. E. coli, HeLa…" oninput="update()"><input type="hidden" id="cultureHostId"></div>
     <div class="sl" style="margin-top:4px;">Intermediate stock</div>
     <div class="tg">
       <button class="tb on" id="tgDir" onclick="setIntm('direct')">Direct from stock</button>
@@ -746,7 +792,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div class="f"><label>Culture vol/well (µL)</label><input type="number" id="infVol" value="200" min="1" step="any" oninput="update()"></div>
       <div class="f"><label>Culture available (µL)</label><input type="number" id="infTotal" value="25000" min="0" step="any" oninput="update()"></div>
     </div>
-    <div class="f"><label>Culture / host name</label><input id="hostName" placeholder="e.g. E. coli BL21" oninput="update()"></div>
+    <div class="f"><label>Culture / host name</label><input id="hostName" list="ddHosts" placeholder="e.g. E. coli BL21" oninput="update()"><input type="hidden" id="hostHostId"></div>
     <div class="sl" style="margin-top:4px;">Phage stocks</div>
     <div id="phageList"></div>
     <button class="addbtn" onclick="openPhageModal(null)" style="width:100%;padding:7px;margin-top:4px;">＋ Add phage stock</button>
@@ -1120,6 +1166,7 @@ const DD_KEYS=[
   {k:'dd_layouts',        label:'Saved plate layouts',        json:true},
   {k:'dd_titer',          label:'Titering experiments',       json:true},
   {k:'dd_lysates',        label:'Lysate library',             json:true},
+  {k:'dd_hosts',          label:'Host / strain registry',     json:true},
   {k:'dd_notebook',       label:'Lab notebook entries',       json:true},
   {k:'dd_reagent_custom', label:'Custom reagent recipes',     json:true},
   {k:'dd_gel',            label:'Gel simulator setup',        json:true},
@@ -1420,7 +1467,7 @@ function setMode(m) {
   if(m==='proto'){ if(window.PROTO) PROTO.init(); return; }
   if(m==='gel'){ if(window.GEL) GEL.init(); return; }
   if(m==='notebook'){ if(window.NB) NB.init(); return; }
-  if(m==='phg'){ if(window.PHG) PHG.init(); return; }
+  if(m==='phg'){ if(window.PHG) PHG.init(); if(window.HOSTUI) HOSTUI.render(); return; }
   if(m==='mic'){ if(window.MIC) MIC.init(); return; }
   if(m==='titer'){ if(window.TIT) TIT.init(); return; }
   document.getElementById('sbPlasmid').style.display = m==='plasmid'?'':'none';
@@ -2049,6 +2096,7 @@ function _applyCompact(s){
   if(!plates.length) plates=[{fmt:'96',name:'Plate 1',assign:Array.from({length:8},()=>Array(12).fill(null)),excluded:new Set()}];
   activePlate=Math.min(s.ap||0,plates.length-1); loadPlate(activePlate);
   if(s.fl)Object.entries(s.fl).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
+  _applyHostLink(s.fl);
   setMode(appMode);setTheme(appTheme);setTool(activeTool);setIntm(intmMode);
   const rn=document.getElementById('repNDisplay'); if(rn)rn.textContent=repToolN;
   const ar=document.getElementById('autoRepsDisplay'); if(ar)ar.textContent=autoReps;
@@ -2608,16 +2656,65 @@ function dlCanvasPngDpi(canvas,dpi,name){
 
 var LYS_KEY='dd_lysates';
 
-// A lysate is a plate stock plus the two things you want to remember about
-// it a month later: what you propagated it on, and when you titered it.
+// One recorded titer measurement. Short keys because this lives in
+// localStorage, which the app already fights for quota.
+//   v  value (PFU/mL)      d  bench date        at  machine timestamp
+//   src where it came from ref the run identity  host what it was plated on
+//   n/sd replicate count + SD, so a 3-replicate measurement is
+//        distinguishable from a number somebody typed
+var TITER_HIST_MAX=40;
+function _coerceTiterEntry(e){
+  if(!e||typeof e!=='object')return null;
+  var v=Number(e.v); if(!(isFinite(v)&&v>0))return null;   // reject the whole entry, never a {} that renders NaN
+  var n=Number(e.n), sd=Number(e.sd);
+  return { v:v,
+    d:   String(e.d==null?'':e.d).slice(0,10),
+    at:  String(e.at==null?'':e.at).slice(0,24),
+    src: String(e.src==null?'':e.src).slice(0,16),
+    ref: String(e.ref==null?'':e.ref).slice(0,64),
+    host:String(e.host==null?'':e.host).slice(0,80),
+    n:   isFinite(n)&&n>0?Math.min(999,Math.round(n)):0,
+    sd:  isFinite(sd)&&sd>0?sd:0,
+    note:String(e.note==null?'':e.note).slice(0,120) };
+}
+
+// A lysate is a plate stock plus the things you want to remember about it a
+// month later: what you propagated it on, when you titered it, which
+// registered strain that was, and how the titer has moved.
 // Everything here is untrusted (imported files, a hand-edited localStorage).
+//
+// ⚠ This is a TOTAL REBUILD from a fixed field list, not a merge. Every read
+// and every write funnels through it, so a field that is not named here is
+// silently erased on the very next lysAll(). That is why titerHistory has to
+// be coerced HERE and not just written by the callers.
 function _coerceLysate(x,i){
   if(!x||typeof x!=='object')return null;
   var o=_coercePhageFields(x,i);
   o.id  = String(x.id||'').trim();                      // callers mint one when empty
   o.host= String(x.host==null?'':x.host).slice(0,80);
   o.date= String(x.date==null?'':x.date).slice(0,20);
+  o.hostId = String(x.hostId==null?'':x.hostId).slice(0,40);
+  // Cap on READ, not on write: an imported file can carry thousands of
+  // entries and lysAll() re-parses the whole library on every render.
+  o.titerHistory = (Array.isArray(x.titerHistory)?x.titerHistory:[])
+                     .map(_coerceTiterEntry).filter(Boolean).slice(-TITER_HIST_MAX);
   return o;
+}
+
+// Append a measurement, or update the one already recorded for the same run.
+// Re-pushing the same titering experiment after adding a replicate is the
+// commonest repeat action; appending would manufacture a fake time series of
+// re-measurements, which is worse than no provenance because it looks real.
+// Manual edits carry ref:'' and always append — a human typing a number
+// twice is two decisions.
+function _pushTiterEntry(h,e){
+  h=Array.isArray(h)?h.slice():[];
+  var x=_coerceTiterEntry(e); if(!x)return h;
+  if(!x.at) x.at=new Date().toISOString();
+  if(!x.d)  x.d=x.at.slice(0,10);
+  var k=-1; if(x.ref) h.forEach(function(y,j){ if(y.src===x.src&&y.ref===x.ref)k=j; });
+  if(k>=0) h[k]=x; else h.push(x);
+  return h.slice(-TITER_HIST_MAX);
 }
 function _lysId(){ return 'L'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 
@@ -2637,6 +2734,12 @@ function lysGet(id){ var f=lysAll().filter(function(x){return x.id===id;}); retu
 
 // Save or update. Without an id, an existing lysate of the same name is
 // updated rather than duplicated — re-titering a stock is the common case.
+//
+// `o` may carry throwaway hints that never reach storage (_coerceLysate
+// rebuilds from a fixed list, so it drops them for free):
+//   _src  where this titer came from ('titering' | 'plate' | 'edit')
+//   _ref  run identity, for dedupe    _host what it was plated on
+//   _n/_sd replicate count and SD     _log  false to suppress the entry
 function lysUpsert(o){
   var list=lysAll(), rec=_coerceLysate(o,list.length);
   if(!rec)return null;
@@ -2645,6 +2748,23 @@ function lysUpsert(o){
     rec.id = same.length?same[0].id:_lysId();
   }
   var i=-1; list.forEach(function(x,j){ if(x.id===rec.id)i=j; });
+  var prev = i>=0 ? list[i] : null;
+  // `list[i]=rec` is a FULL REPLACE and most callers pass only a subset, so
+  // anything they omit must be carried over or it is silently destroyed.
+  // Before this, pushing a titer erased the lysate's host, volume and note.
+  if(prev){
+    if(!Array.isArray(o.titerHistory)) rec.titerHistory = prev.titerHistory;
+    if(!o.hostId) rec.hostId = prev.hostId;
+    ['host','vol','note','date'].forEach(function(k){
+      if(o[k]===undefined||o[k]===''||(k==='vol'&&!o.vol)) rec[k]=prev[k];
+    });
+  }
+  // Only log when the titer actually MOVED. Otherwise saving a note, or the
+  // bulk "pull from plate" loop, would fabricate measurements that look real.
+  if(o._log!==false && rec.titer>0 && (!prev || prev.titer!==rec.titer))
+    rec.titerHistory=_pushTiterEntry(rec.titerHistory,{v:rec.titer,d:rec.date||'',
+      src:String(o._src||'edit'), ref:String(o._ref||''),
+      host:String(o._host||rec.host||''), n:o._n, sd:o._sd});
   if(i>=0) list[i]=rec; else list.push(rec);
   return lysSave(list)?rec:null;
 }
@@ -2668,12 +2788,126 @@ function lysImportJson(text){
   arr.forEach(function(x,i){
     var r=_coerceLysate(x,i); if(!r)return;
     if(!r.id)r.id=_lysId();
+    // A file written by an older build has no titerHistory. Without this the
+    // import would wipe the local history of every id it matches and still
+    // report success.
+    if(byId[r.id]&&!Array.isArray(x.titerHistory)) r.titerHistory=byId[r.id].titerHistory;
+    if(byId[r.id]&&!r.hostId) r.hostId=byId[r.id].hostId;
     if(!byId[r.id])order.push(r.id);
     byId[r.id]=r; n++;
   });
   if(!n) throw new Error('no readable lysates in that file');
   if(!lysSave(order.map(function(k){return byId[k];}))) throw new Error('browser storage is full');
   return n;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// HOST / STRAIN REGISTRY — the bacteria, as records instead of typing.
+//
+// A host was free text in four unrelated places: the plate's culture and
+// host name fields, every Titering condition, the `host` string on a
+// lysate, and the lysate editor. Two experiments on the same strain shared
+// nothing, so "every phage I have plated on MG1655" was unanswerable.
+//
+// Same design as the lysate library above and for the same reason: its own
+// key, referenced by id, never embedded in a plate payload. Linking is
+// ALWAYS additive — the free-text name stays authoritative for display, so
+// legacy data and hand-typed one-offs keep working untouched.
+// ══════════════════════════════════════════════════════════════════
+
+var HOST_KEY='dd_hosts';
+
+// Untrusted input (imported files, hand-edited localStorage): coerce, never trust.
+function _coerceHost(x,i){
+  if(!x||typeof x!=='object')return null;
+  var nm=String(x.name==null?'':x.name).trim().slice(0,80);
+  if(!nm) nm='Strain '+((i||0)+1);
+  return {
+    id:      String(x.id||'').trim(),                      // callers mint one when empty
+    name:    nm,
+    species: String(x.species==null?'':x.species).slice(0,80),
+    source:  String(x.source==null?'':x.source).slice(0,80),   // where it came from / collection no.
+    markers: String(x.markers==null?'':x.markers).slice(0,80), // selection markers, e.g. Amp^R
+    note:    String(x.note==null?'':x.note).slice(0,200),
+    date:    String(x.date==null?'':x.date).slice(0,20)
+  };
+}
+function _hostId(){ return 'H'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+
+function hostAll(){
+  var raw; try{ raw=JSON.parse(lsGet(HOST_KEY)||'[]'); }catch(e){ raw=[]; }
+  if(!Array.isArray(raw)) raw=[];
+  return raw.map(_coerceHost).filter(Boolean).map(function(r){ if(!r.id)r.id=_hostId(); return r; });
+}
+function hostSave(list){
+  var clean=(list||[]).map(_coerceHost).filter(Boolean);
+  clean.forEach(function(r){ if(!r.id)r.id=_hostId(); });
+  return lsSetWarn(HOST_KEY,JSON.stringify(clean));
+}
+function hostGet(id){ var f=hostAll().filter(function(x){return x.id===id;}); return f.length?f[0]:null; }
+// Resolve a free-text name to a registered strain, case-insensitively. This
+// is how legacy data (which only ever had a name) finds its record.
+function hostByName(name){
+  var n=String(name==null?'':name).trim().toLowerCase();
+  if(!n)return null;
+  var f=hostAll().filter(function(x){return x.name.toLowerCase()===n;});
+  return f.length?f[0]:null;
+}
+// Save or update; without an id, an existing strain of the same name is
+// updated rather than duplicated — same rule as lysUpsert.
+function hostUpsert(o){
+  var list=hostAll(), rec=_coerceHost(o,list.length);
+  if(!rec)return null;
+  if(!rec.id){
+    var same=list.filter(function(x){return x.name.toLowerCase()===rec.name.toLowerCase();});
+    rec.id = same.length?same[0].id:_hostId();
+  }
+  var i=-1; list.forEach(function(x,j){ if(x.id===rec.id)i=j; });
+  if(i>=0) list[i]=rec; else list.push(rec);
+  return hostSave(list)?rec:null;
+}
+function hostDelete(id){ return hostSave(hostAll().filter(function(x){return x.id!==id;})); }
+
+// Register a name seen in the wild (a typed host, an imported lysate's host
+// string) without disturbing anything if it is already known. Returns the
+// record so callers can store its id.
+function hostEnsure(name,extra){
+  var n=String(name==null?'':name).trim();
+  if(!n)return null;
+  var found=hostByName(n);
+  if(found)return found;
+  var rec=Object.assign({name:n},extra||{});
+  return hostUpsert(rec);
+}
+
+function hostExportJson(){
+  return JSON.stringify({app:'dilution-designer',kind:'host-strains',v:1,hosts:hostAll()},null,2);
+}
+// Accepts a bare array or our own export.
+function hostImportJson(text){
+  var d=JSON.parse(text);
+  var arr = Array.isArray(d) ? d : (d&&Array.isArray(d.hosts)) ? d.hosts : null;
+  if(!arr) throw new Error('no strains found in that file');
+  var list=hostAll(), byId={}, order=[];
+  list.forEach(function(x){ if(!byId[x.id])order.push(x.id); byId[x.id]=x; });
+  var n=0;
+  arr.forEach(function(x,i){
+    var r=_coerceHost(x,i); if(!r)return;
+    if(!r.id)r.id=_hostId();
+    if(!byId[r.id])order.push(r.id);
+    byId[r.id]=r; n++;
+  });
+  if(!n) throw new Error('no readable strains in that file');
+  if(!hostSave(order.map(function(k){return byId[k];}))) throw new Error('browser storage is full');
+  return n;
+}
+
+// One <datalist> the whole app shares, so every host field gets the same
+// autocomplete without each module maintaining its own copy.
+function hostDatalistHtml(id){
+  return '<datalist id="'+(id||'ddHosts')+'">'
+    +hostAll().map(function(h){ return '<option value="'+escapeHtml(h.name)+'">'+escapeHtml(h.species||h.markers||'')+'</option>'; }).join('')
+    +'</datalist>';
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -3440,7 +3674,33 @@ function redo(){if(!_redoStack.length)return;_undoStack.push(_snap());_restoreSn
 const _FIELDS=['stockConc','stockVol','cultureVol','cultureTotal','intmConc','intmPrepVol',
   'expName','researcher','expNotes','expDate','inducerName','cultureName','concUnits',
   'bacterialConc','infVol','infTotal','hostName',
+  // Optional links into the host registry, carried as hidden inputs so they
+  // ride the generic field persistence into dd_state / #s= / JSON with no
+  // further plumbing. The free-text name stays authoritative.
+  'cultureHostId','hostHostId',
   'sdTarget','sdFactor','sdMinPip','sdMaxPip','sdPctCap','sdStepVol','fillSelect'];
+
+// The three restore loops iterate the PAYLOAD's keys, so a key a payload
+// LACKS is never visited and the live element keeps whatever was there. For
+// ordinary fields that is invisible; for a host link it is a silent lie —
+// load a pre-change layout on top of a session with a host selected and the
+// old strain stays attached to the new layout, then gets autosaved onto it.
+// Clear-then-set, always.
+function _applyHostLink(f){
+  ['cultureHostId','hostHostId'].forEach(function(id){
+    var el=document.getElementById(id); if(!el)return;
+    el.value = (f && typeof f[id]==='string') ? f[id].slice(0,40) : '';
+  });
+}
+// The plate's registered strain, if any. Precedence mirrors P().cultureName
+// (culture first, host second) so the id and the name can never disagree.
+// An id that does not resolve is KEPT, not cleared — a colleague's registry
+// may arrive later via a workspace import — so always tolerate null.
+function plateHost(){
+  var idEl=document.getElementById('cultureHostId'), nmEl=document.getElementById('cultureName');
+  if(!idEl||!idEl.value){ idEl=document.getElementById('hostHostId'); nmEl=document.getElementById('hostName'); }
+  return (idEl&&idEl.value&&hostGet(idEl.value)) || hostByName(nmEl?nmEl.value:'') || null;
+}
 
 function saveToStorage(){
   if(!_ready||_sharedSession)return;
@@ -3470,6 +3730,7 @@ function restoreFromStorage(){
     if(s._condIdCounter!=null)_condIdCounter=s._condIdCounter;
     _adoptPhages(s.phages,(s.fields||{}).phageTiter,(s.fields||{}).phageVol);
     if(s.fields)Object.entries(s.fields).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
+    _applyHostLink(s.fields);
     return true;
   }catch(e){return false;}
 }
@@ -3633,6 +3894,7 @@ function _applyState(s){
   _condIdCounter=s._condIdCounter||0;
   _adoptPhages(s.phages,(s.fields||{}).phageTiter,(s.fields||{}).phageVol);
   if(s.fields)Object.entries(s.fields).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
+  _applyHostLink(s.fields);
   setMode(appMode);setTheme(appTheme);setTool(activeTool);setIntm(intmMode);
   document.getElementById('repNDisplay').textContent=repToolN;
   document.getElementById('autoRepsDisplay').textContent=autoReps;
@@ -5033,7 +5295,10 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       // riding along inside share links and undo snapshots.
       n++; if(Object.keys(_coercePhageFields({},0)).sort().join(',')!=='id,name,note,titer,vol')
         fails.push('phage record key set drifted: '+Object.keys(_coercePhageFields({},0)).sort().join(','));
-      n++; if(Object.keys(_coerceLysate({},0)).sort().join(',')!=='date,host,id,name,note,titer,vol')
+      // The lysate is the phage 5 + host/date + the Stage-2 additions
+      // (hostId, titerHistory). Keep asserting the exact set: this is the
+      // only thing stopping a future field from riding along unnoticed.
+      n++; if(Object.keys(_coerceLysate({},0)).sort().join(',')!=='date,host,hostId,id,name,note,titer,titerHistory,vol')
         fails.push('lysate record key set drifted: '+Object.keys(_coerceLysate({},0)).sort().join(','));
       n++; var bad=_coerceLysate({name:new Array(300).join('x'),titer:'abc',vol:-3,note:new Array(500).join('z'),host:1},0);
       if(bad.name.length!==80||bad.titer!==0||bad.vol!==0||bad.note.length!==200)
@@ -5251,7 +5516,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       DD_KEYS.forEach(function(d){ if(_dup[d.k])_dupes.push(d.k); _dup[d.k]=1; });
       if(_dupes.length) fails.push('DD_KEYS has duplicate entries: '+_dupes.join(','));
       // Every key any module persists must be in DD_KEYS or it misses backups.
-      n++; var _known=['dd_state','dd_layouts','dd_titer','dd_lysates','dd_notebook','dd_reagent_custom',
+      n++; var _known=['dd_state','dd_layouts','dd_titer','dd_lysates','dd_hosts','dd_notebook','dd_reagent_custom',
         'dd_gel','dd_gel_ladders','dd_phg','dd_mic_panel','dd_mic_dyes','dd_sci','dd_welcomed',
         'mbc_last','pr_last','mic_last'];
       var _missing=_known.filter(function(k){ return !DD_KEYS.some(function(d){return d.k===k;}); });
@@ -5262,8 +5527,11 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       catch(e){ /* expected */ }
       // A plan against the CURRENT storage must mark identical values "same",
       // never "replaced" — otherwise the preview scares the user for nothing.
-      n++; var _snap=workspaceSnapshot();
-      var _selfPlan=workspacePlan(_snap);
+      // NB _wsSnap, not _snap: a local `var _snap` hoists over the GLOBAL
+      // _snap() (the undo snapshotter) for this whole function scope, so any
+      // later test that snapshots undo state would call a plain object.
+      n++; var _wsSnap=workspaceSnapshot();
+      var _selfPlan=workspacePlan(_wsSnap);
       var _wrong=_selfPlan.filter(function(r){return r.action!=='same';});
       if(_wrong.length) fails.push('restoring the current state should be a no-op, got: '+
         _wrong.map(function(r){return r.key+':'+r.action;}).join(','));
@@ -5272,8 +5540,129 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
               _ddCount('x','{"v":1,"experiments":[1,2]}')!==2||_ddCount('x',null)!==0)
         fails.push('_ddCount wrong: '+[_ddCount('x','[1,2,3]'),_ddCount('x','{"a":1,"b":2}'),
                    _ddCount('x','{"v":1,"experiments":[1,2]}'),_ddCount('x',null)].join('/'));
-      n++; if(_snap.app!=='dilution-designer'||_snap.kind!=='workspace'||_snap.v!==1)
+      n++; if(_wsSnap.app!=='dilution-designer'||_wsSnap.kind!=='workspace'||_wsSnap.v!==1)
         fails.push('workspace snapshot header wrong');
+    }
+    // ── host/strain registry. Runs against a scratch copy of dd_hosts and
+    // restores whatever was there, so ?selftest=1 never eats real data.
+    if(typeof hostUpsert==='function'){
+      var _hSaved=lsGet('dd_hosts');
+      try{
+        lsDel('dd_hosts');
+        var _h1=hostUpsert({name:'E. coli MG1655',species:'Escherichia coli'});
+        n++; if(!_h1||!/^H/.test(_h1.id)) fails.push('hostUpsert did not mint an H id');
+        // Same name, different case, no id → must UPDATE, not duplicate.
+        var _h2=hostUpsert({name:'e. coli mg1655',markers:'Amp^R'});
+        n++; if(hostAll().length!==1||_h2.id!==_h1.id)
+          fails.push('hostUpsert duplicated a same-name strain instead of updating it ('+hostAll().length+' records)');
+        n++; if(hostGet(_h1.id).markers!=='Amp^R') fails.push('hostUpsert did not apply the update');
+        n++; if(!hostByName('E. COLI MG1655')||hostByName('E. COLI MG1655').id!==_h1.id)
+          fails.push('hostByName is not case-insensitive');
+        n++; if(hostByName('')!==null||hostByName(null)!==null) fails.push('hostByName should return null for an empty name');
+        // hostEnsure is how legacy free-text names get registered — it must be
+        // idempotent or every render would mint another strain.
+        n++; hostEnsure('E. coli MG1655'); hostEnsure('E. coli MG1655');
+        if(hostAll().length!==1) fails.push('hostEnsure duplicated an existing strain ('+hostAll().length+')');
+        n++; if(hostEnsure('')!==null) fails.push('hostEnsure should ignore a blank name');
+        // Untrusted input: clipped, never thrown.
+        var _hb=_coerceHost({name:'x'.repeat(500),note:'y'.repeat(999)},0);
+        n++; if(_hb.name.length!==80||_hb.note.length!==200) fails.push('_coerceHost did not clip long strings');
+        n++; if(_coerceHost(null,0)!==null||_coerceHost('nope',0)!==null) fails.push('_coerceHost accepted a non-object');
+        // Round trip must preserve ids, or every link into the registry breaks.
+        var _hJson=hostExportJson(); lsDel('dd_hosts');
+        n++; var _hn=hostImportJson(_hJson);
+        if(_hn!==1||!hostGet(_h1.id)||hostGet(_h1.id).markers!=='Amp^R')
+          fails.push('host export→import lost data or ids');
+        n++; try{ hostImportJson('{"kind":"nope"}'); fails.push('hostImportJson accepted a foreign file'); }catch(e){}
+        n++; if(hostDatalistHtml('t').indexOf('&lt;')<0&&hostUpsert({name:'<b>x</b>'})&&hostDatalistHtml('t').indexOf('<b>')>=0)
+          fails.push('hostDatalistHtml did not escape a hostile strain name');
+      }catch(e){ n++; fails.push('host registry threw — '+e.message); }
+      finally{ if(_hSaved==null) lsDel('dd_hosts'); else lsSet('dd_hosts',_hSaved); }
+    }
+    // ── titer provenance. Every failure mode here is SILENT — the app keeps
+    // working and the record is quietly wrong — so each one is pinned.
+    if(typeof _pushTiterEntry==='function'){
+      var _lSaved=lsGet('dd_lysates');
+      try{
+        lsDel('dd_lysates');
+        var _p=lysUpsert({name:'Prov λ',titer:1e9,vol:500,host:'MG1655',note:'CsCl',_src:'edit'});
+        // #1 the chokepoint: _coerceLysate rebuilds from a fixed list, so an
+        // un-named field is erased on the very next read.
+        n++; if(lysGet(_p.id).titerHistory.length!==1||lysGet(_p.id).titerHistory[0].v!==1e9)
+          fails.push('titerHistory did not survive a read — _coerceLysate is dropping it');
+        // #2 lysUpsert is a FULL REPLACE; a partial upsert must not erase.
+        lysUpsert({id:_p.id,name:'Prov λ',titer:2e9,date:'2026-08-16',_src:'titering',_ref:'tx1/tl1/tc1',_n:3,_sd:2e8});
+        var _r=lysGet(_p.id);
+        n++; if(_r.titerHistory.length!==2) fails.push('partial upsert reset titerHistory ('+_r.titerHistory.length+' entries)');
+        n++; if(_r.host!=='MG1655'||_r.vol!==500||_r.note!=='CsCl')
+          fails.push('partial upsert erased host/vol/note: '+_r.host+'/'+_r.vol+'/'+_r.note);
+        n++; if(_r.titerHistory[1].n!==3||_r.titerHistory[1].sd!==2e8)
+          fails.push('replicate count/SD not recorded — a measured titer is indistinguishable from a typed one');
+        // #3 an unchanged titer must not fabricate a measurement.
+        lysUpsert({id:_p.id,name:'Prov λ',titer:2e9,note:'note only',_src:'plate'});
+        n++; if(lysGet(_p.id).titerHistory.length!==2) fails.push('a note-only save fabricated a titer measurement');
+        // Same run re-pushed updates in place; manual edits always append.
+        lysUpsert({id:_p.id,name:'Prov λ',titer:2.5e9,_src:'titering',_ref:'tx1/tl1/tc1'});
+        n++; if(lysGet(_p.id).titerHistory.length!==2||lysGet(_p.id).titerHistory[1].v!==2.5e9)
+          fails.push('re-pushing the same run should update in place, not append');
+        lysUpsert({id:_p.id,name:'Prov λ',titer:3e9,_src:'edit'});
+        lysUpsert({id:_p.id,name:'Prov λ',titer:4e9,_src:'edit'});
+        n++; if(lysGet(_p.id).titerHistory.length!==4) fails.push('manual edits must always append');
+        // #4 an old-build import must not wipe local history.
+        lysImportJson(JSON.stringify({lysates:[{id:_p.id,name:'Prov λ',titer:9e9}]}));
+        n++; if(lysGet(_p.id).titerHistory.length!==4||lysGet(_p.id).titer!==9e9)
+          fails.push('import from an older build wiped titerHistory');
+        // Round trip.
+        var _lj=lysExportJson(); lsDel('dd_lysates'); lysImportJson(_lj);
+        n++; if(lysGet(_p.id).titerHistory.length!==4) fails.push('export→import lost titerHistory');
+        // Junk entries rejected outright, never a {} that renders NaN.
+        var _jk=lysUpsert({name:'Junk',titer:1e8,titerHistory:[{v:'abc'},{},null,{v:5e8}]});
+        n++; if(!lysGet(_jk.id).titerHistory.every(function(e){return isFinite(e.v)&&e.v>0;}))
+          fails.push('a malformed history entry survived and will render as NaN');
+        // Cap applies on READ, so an imported file cannot bloat every render.
+        // _log:false so the assertion is about the CAP, not about the extra
+        // entry a brand-new record's own titer would legitimately add.
+        var _cap=lysUpsert({name:'Cap',titer:1,_log:false,
+          titerHistory:Array.from({length:120},function(_,i){return {v:i+1};})});
+        n++; if(lysGet(_cap.id).titerHistory.length!==TITER_HIST_MAX)
+          fails.push('titerHistory not capped on read: '+lysGet(_cap.id).titerHistory.length);
+        n++; if(lysGet(_cap.id).titerHistory[TITER_HIST_MAX-1].v!==120) fails.push('the cap discarded the newest entries');
+      }catch(e){ n++; fails.push('titer provenance threw — '+e.message); }
+      finally{ if(_lSaved==null) lsDel('dd_lysates'); else lsSet('dd_lysates',_lSaved); }
+    }
+    // ── the plate's 5-key freeze, checked on the LIVE array, not just the
+    // factory: three sites mint phage records as literals and the factory
+    // test cannot see them.
+    if(typeof phages!=='undefined'&&Array.isArray(phages)){
+      n++; var _drift=phages.filter(function(p){return Object.keys(p).sort().join(',')!=='id,name,note,titer,vol';});
+      if(_drift.length) fails.push('a live phages[] record grew extra keys: '+Object.keys(_drift[0]).sort().join(','));
+    }
+    // ── host link must be CLEARED by a payload that lacks it, not inherited.
+    if(typeof _applyHostLink==='function'&&document.getElementById('hostHostId')){
+      var _hh=document.getElementById('hostHostId');
+      var _keep=_hh.value;
+      n++; _hh.value='Hstale'; _applyHostLink({});
+      if(_hh.value!=='') fails.push('a legacy payload left a stale host link attached ("'+_hh.value+'")');
+      n++; _applyHostLink({hostHostId:'Habc'});
+      if(_hh.value!=='Habc') fails.push('_applyHostLink did not set a present link');
+      _hh.value=_keep;
+    }
+    // ── notebook provenance resolvers must all exist and never throw.
+    if(window.NB&&NB._origin){
+      n++; var _missing=Object.keys(NB._providers||{}).filter(function(k){return typeof NB._origin[k]!=='function';});
+      if(_missing.length) fails.push('no provenance resolver for: '+_missing.join(','));
+      n++; var _bad=[];
+      Object.keys(NB._origin).forEach(function(k){
+        try{ var o=NB._origin[k](); if(!o||typeof o.id!=='string'||typeof o.label!=='string') _bad.push(k); }
+        catch(e){ _bad.push(k+'(threw)'); }
+      });
+      if(_bad.length) fails.push('provenance resolver returned badly or threw: '+_bad.join(','));
+      // Stamping is additive and must not overwrite an imported block's origin.
+      n++; var _b1={type:'text',md:'x'}; NB._stamp([_b1],'tit');
+      if(_b1.src!=='tit'||!_b1.capturedAt||typeof _b1.entityId!=='string')
+        fails.push('stamp() did not attach provenance');
+      n++; var _b2={type:'text',md:'x',src:'imported'}; NB._stamp([_b2],'plate');
+      if(_b2.src!=='imported') fails.push('stamp() overwrote an existing src');
     }
     return {total:n, passed:n-fails.length, failures:fails};
   }
@@ -7789,11 +8178,34 @@ function dyeWorking(o){
     el('phgEditTiter').value=l?l.titer:'1e10';
     el('phgEditVol').value=l?l.vol:1000;
     el('phgEditHost').value=l?l.host:'';
+    // Must be set on the ADD path too, or the last edited strain leaks onto
+    // a brand-new lysate.
+    el('phgEditHostId').value=(l&&l.hostId)||'';
     el('phgEditDate').value=l&&/^\d{4}-\d{2}-\d{2}$/.test(l.date)?l.date:'';
     el('phgEditNote').value=l?l.note:'';
     el('phgEditDelete').style.display=l?'':'none';
+    renderHist(l);
     el('phgEdit').style.display='flex';
     setTimeout(function(){ try{ el('phgEditName').focus(); }catch(e){} },0);
+  }
+  // Where each titer came from. Newest first; every field escaped because
+  // history can arrive from an imported file.
+  function renderHist(l){
+    var wrap=el('phgEditHistWrap'), box=el('phgEditHist');
+    if(!wrap||!box)return;
+    var h=(l&&Array.isArray(l.titerHistory))?l.titerHistory.slice():[];
+    if(!h.length){ wrap.style.display='none'; box.innerHTML=''; return; }
+    h.sort(function(a,b){ return String(b.at||'').localeCompare(String(a.at||'')); });
+    var SRC={titering:'Titering',plate:'Plate',edit:'Typed'};
+    box.innerHTML=h.map(function(e){
+      var bits=[];
+      if(e.n>1) bits.push('n='+e.n+(e.sd>0&&e.v>0?' · CV '+(e.sd/e.v*100).toFixed(1)+'%':''));
+      if(e.host) bits.push('on '+e.host);
+      return '<div class="phg-hrow"><span class="phg-hv">'+escapeHtml(SCI.fmt(e.v,3))+'</span> PFU/mL'
+        +'<span class="phg-hm">'+escapeHtml((e.d||String(e.at||'').slice(0,10))+' · '+(SRC[e.src]||e.src||'—')
+        +(bits.length?' · '+bits.join(' · '):''))+'</span></div>';
+    }).join('');
+    wrap.style.display='';
   }
 
   window.PHG={
@@ -7812,8 +8224,12 @@ function dyeWorking(o){
         titer:SCI.parse(el('phgEditTiter').value),
         vol:parseFloat(el('phgEditVol').value)||0,
         host:el('phgEditHost').value.trim(),
+        // Registering on an explicit Save only. From an oninput path this
+        // would mint a strain for every keystroke prefix: E, E., E. c, …
+        hostId:(hostEnsure(el('phgEditHost').value.trim())||{}).id||'',
         date:el('phgEditDate').value,
-        note:el('phgEditNote').value.trim()
+        note:el('phgEditNote').value.trim(),
+        _src:'edit'
       });
       if(!rec){ showToast('Couldn’t save — browser storage is full or unavailable.','warn',6000); return; }
       S.lysId=rec.id; persist();
@@ -7964,7 +8380,7 @@ function dyeWorking(o){
     var c1='tc1',c2='tc2',l1='tl1';
     return {id:'tx'+Date.now().toString(36),name:n||'Experiment 1',date:new Date().toISOString().slice(0,10),notes:'',
       mode:'plate',volUl:100,factor:10,refId:c1,
-      conds:[{id:c1,name:'Reference host'},{id:c2,name:'Test host'}],
+      conds:[{id:c1,name:'Reference host',hostId:''},{id:c2,name:'Test host',hostId:''}],
       lys:[{id:l1,name:'Phage 1',libId:''}],
       counts:[],
       entry:{lysId:l1,condId:c1,k:6,volUl:100},
@@ -8372,7 +8788,7 @@ function dyeWorking(o){
     h+='<div class="tit-sec">Conditions (hosts)</div>';
     exp.conds.forEach(function(c){
       h+='<div class="tit-row"><input type="radio" name="titRef" '+(exp.refId===c.id?'checked':'')+' onchange="TIT.setRef(\''+jsAttr(c.id)+'\')" aria-label="Use '+escapeHtml(c.name)+' as the EOP reference" title="EOP reference">'
-        +'<input type="text" value="'+escapeHtml(c.name)+'" aria-label="Condition name" onchange="TIT.renCond(\''+jsAttr(c.id)+'\',this.value)">'
+        +'<input type="text" list="ddHostsTit" value="'+escapeHtml(c.name)+'" aria-label="Condition name" title="'+(c.hostId&&hostGet(c.hostId)?'Linked to the registered strain '+escapeHtml(hostGet(c.hostId).name):'Type a registered strain name to link it')+'" onchange="TIT.renCond(\''+jsAttr(c.id)+'\',this.value)">'
         +'<button class="tit-del" onclick="TIT.delCond(\''+jsAttr(c.id)+'\')" aria-label="Delete condition '+escapeHtml(c.name)+'"'+(exp.conds.length<2?' disabled':'')+'>✕</button></div>';
     });
     h+='<button class="btn" style="width:100%;justify-content:center;" onclick="TIT.addCond()">＋ Add condition</button>'
@@ -8389,6 +8805,9 @@ function dyeWorking(o){
         +'<option value="">— pick a saved lysate —</option>'
         +lib.map(function(l){return '<option value="'+escapeHtml(l.id)+'">'+escapeHtml(l.name)+'</option>';}).join('')+'</select></div>';
     }
+    // A DISTINCT id from the app-wide #ddHosts: two elements sharing one id
+    // means getElementById returns whichever comes first and the other dies.
+    h+=hostDatalistHtml('ddHostsTit');
     document.getElementById('titSide').innerHTML=h;
   }
 
@@ -8669,8 +9088,12 @@ function dyeWorking(o){
       else exp[k]=String(v).slice(0,120);
       render(); },
     setRef:function(id){ var exp=E(); if(condById(exp,id))exp.refId=id; render(); },
-    addCond:function(){ var exp=E(); exp.conds.push({id:_id(),name:'Condition '+(exp.conds.length+1)}); render(); },
-    renCond:function(id,v){ var c=condById(E(),id); if(c)c.name=String(v).slice(0,60)||c.name; render(); },
+    addCond:function(){ var exp=E(); exp.conds.push({id:_id(),name:'Condition '+(exp.conds.length+1),hostId:''}); render(); },
+    // Set the registry link when the typed name resolves; NEVER clear it
+    // otherwise, or renaming a condition to a nickname would silently destroy
+    // an explicit link.
+    renCond:function(id,v){ var c=condById(E(),id); if(c){ c.name=String(v).slice(0,60)||c.name;
+      var h=hostByName(c.name); if(h)c.hostId=h.id; } render(); },
     delCond:function(id){ var exp=E(); if(exp.conds.length<2)return;
       var used=exp.counts.filter(function(r){return r.condId===id;}).length;
       if(used&&!confirm('Delete this condition and its '+used+' counts?'))return;
@@ -8754,11 +9177,21 @@ function dyeWorking(o){
     // with data) into the persistent lysate library via lysUpsert — the same
     // record the Phage Planner and the plate's stock editor read.
     pushTiter:function(lysId){ var exp=E(); var l=lysById(exp,lysId); if(!l)return;
-      var cc=cellCalc(exp,l.id,exp.refId);
-      if(!cc.st.n){ var withData=exp.conds.map(function(c){return cellCalc(exp,l.id,c.id);}).filter(function(x){return x.st.n;});
+      // Track WHICH condition supplied the number. The old fallback silently
+      // took the first condition with data, so a titer could come from a
+      // non-reference host and the library would never say so.
+      var cc=cellCalc(exp,l.id,exp.refId), condId=exp.refId;
+      if(!cc.st.n){ var withData=exp.conds.map(function(c){return {c:c,cc:cellCalc(exp,l.id,c.id)};})
+                       .filter(function(x){return x.cc.st.n;});
         if(!withData.length){ showToast('No countable rows for '+l.name+' yet','warn'); return; }
-        cc=withData[0]; }
-      var rec=lysUpsert({id:l.libId||'',name:l.name,titer:cc.st.mean,date:exp.date||''});
+        cc=withData[0].cc; condId=withData[0].c.id; }
+      var cond=condById(exp,condId);
+      // _ref uses exp.id (minted per experiment), never the active index —
+      // duplicating an experiment would otherwise collide with the original.
+      var rec=lysUpsert({id:l.libId||'',name:l.name,titer:cc.st.mean,date:exp.date||'',
+        hostId:(cond&&cond.hostId)||'',
+        _src:'titering', _ref:exp.id+'/'+l.id+'/'+condId,
+        _host:(cond?cond.name:''), _n:cc.st.n, _sd:cc.st.sd});
       if(rec){ l.libId=rec.id; save();
         // Keep an open plate in sync if it carries a stock of the same name.
         try{ if(window.phages){ var m=phages.filter(function(p){return p.name.toLowerCase()===l.name.toLowerCase();})[0];
@@ -8766,6 +9199,11 @@ function dyeWorking(o){
         if(window.PHG&&PHG.render)try{PHG.render();}catch(e){}
         showToast('✓ '+l.name+' → library at '+cc.st.mean.toExponential(2)+' PFU/mL','green');
       } },
+    // Titering is the only provider with a real, stable entity id ('tx…');
+    // reading dd_titer from storage would be stale between saves.
+    // Null-safe: state is lazy, so this is called before init() on a cold
+    // load (e.g. capturing to the notebook without opening Titering first).
+    _exp:function(){ return S?E():null; },
     blocks:blocks,
     _model:{cellCalc:cellCalc,rowTiter:rowTiter,chartData:chartData,svgFromModel:svgFromModel,
             pdfFromModel:pdfFromModel,buildXlsx:buildXlsx,xlsxSheets:xlsxSheets,pngWithDpi:pngWithDpi,
@@ -8782,6 +9220,9 @@ function dyeWorking(o){
   .nb-bhead{display:flex;align-items:center;gap:8px;padding:7px 11px;border-bottom:1px solid var(--border);background:var(--surface2);border-radius:10px 10px 0 0;}
   .nb-btype{font:600 9.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text3);}
   .nb-btitle{font-weight:700;font-size:12.5px;color:var(--text);flex:1;}
+  /* Theme tokens only — a literal colour here fails in night mode. */
+  .nb-borig{font:600 9.5px var(--mono);letter-spacing:.04em;color:var(--text3);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 8px;white-space:nowrap;max-width:42%;overflow:hidden;text-overflow:ellipsis;}
+  @media(max-width:640px){.nb-borig{display:none;}}
   .nb-bctl{margin-left:auto;display:flex;gap:2px;}
   .nb-bctl button{border:1px solid var(--border);background:var(--surface);color:var(--text2);border-radius:5px;cursor:pointer;font-size:11px;min-width:26px;min-height:26px;}
   .nb-bctl button:hover{background:var(--surface2);}
@@ -8880,6 +9321,48 @@ function dyeWorking(o){
     return (typeof m==='function')?m:null;
   }
 
+  // ── block provenance ──────────────────────────────────────────────
+  // A captured block used to keep no record of where it came from: the only
+  // trace was a human-readable title, so a table in a notebook entry could
+  // not be traced back to the experiment that produced it. One resolver per
+  // provider, each returning {id,label}. Three modules genuinely have no
+  // entity id (the plate, the gel and the dilution calculator are singletons
+  // or unnamed) — those return '' and rely on the label.
+  var ORIGIN={
+    tit:    function(){ var e=window.TIT&&TIT._exp&&TIT._exp();
+                        return {id:(e&&e.id)||'',label:(e&&e.name)||'Titering'}; },
+    phg:    function(){ var s=PHG._state&&PHG._state(); var id=(s&&s.lysId)||'';
+                        var l=id&&typeof lysGet==='function'?lysGet(id):null;
+                        return {id:id,label:l?l.name:'Phage Planner'}; },
+    calc:   function(){ var id=(window.MBC&&MBC._cur)||'';
+                        var c=(window.MBC&&MBC.calcs||[]).filter(function(x){return x.id===id;})[0];
+                        return {id:id,label:c?c.name:'Calculators'}; },
+    reagent:function(){ var id=(typeof rpSelectedId!=='undefined'&&rpSelectedId)||'';
+                        var r=(typeof rpAllRecipes!=='undefined'?rpAllRecipes:[]).filter(function(x){return x.id===id;})[0];
+                        return {id:id,label:r?r.name:'Reagent Prep'}; },
+    proto:  function(){ var id=lsGet('pr_last')||'';
+                        var p=(window.PROTO&&PROTO.list||[]).filter(function(x){return x.id===id;})[0];
+                        return {id:id,label:p?p.name:'Protocols'}; },
+    mic:    function(){ var id=lsGet('mic_last')||'';
+                        var d=(window.MIC&&MIC.list||[]).filter(function(x){return x.id===id;})[0];
+                        return {id:id,label:d?d.name:'Microscopy'}; },
+    plate:  function(){ var nm=''; try{ nm=P().expName||(plates[activePlate]&&plates[activePlate].name)||''; }catch(e){}
+                        return {id:'',label:nm||'Plate'}; },
+    gel:    function(){ var s=null; try{ s=GEL._model.state(); }catch(e){}
+                        return {id:'',label:s?(s.pct+'% '+(s.type==='dna'?'agarose':'SDS-PAGE')):'Gel'}; },
+    dilcalc:function(){ return {id:'',label:'Dilution & Molarity'}; }
+  };
+  // Stamp at capture time — the only moment the source is known. `!b.src`
+  // preserves provenance on blocks that arrived from an imported entry.
+  function stamp(bl,src){
+    var o={}; try{ o=(ORIGIN[src]&&ORIGIN[src]())||{}; }catch(e){}
+    var at=new Date().toISOString();
+    (bl||[]).forEach(function(b){ if(b&&typeof b==='object'&&!b.src){
+      b.src=src; b.srcLabel=(PROVIDERS[src]&&PROVIDERS[src].label)||src;
+      b.entityId=o.id||''; b.entityName=o.label||''; b.capturedAt=at; } });
+    return bl;
+  }
+
   // ── rendering
   function blockHtml(b,i){
     var body='';
@@ -8888,7 +9371,11 @@ function dyeWorking(o){
     else if(b.type==='image') body='<img class="nb-img" src="'+safeDataUrl(b.dataUrl)+'" alt="'+escapeHtml(b.title||'figure')+'">';
     else if(b.type==='kv') body='<div class="mbc-rows">'+(b.pairs||[]).map(function(p){return '<div class="mbc-row"><span class="mbc-rl">'+escapeHtml(p[0])+'</span><span class="mbc-rv">'+escapeHtml(String(p[1]))+'</span></div>';}).join('')+'</div>';
     else if(b.type==='steps') body='<ol class="nb-steps">'+(b.items||[]).map(function(s){return '<li class="'+(s.done?'done':'')+'"><b>'+escapeHtml(s.t)+'</b> — '+escapeHtml(String(s.d).replace(/<[^>]+>/g,''))+'</li>';}).join('')+'</ol>';
+    // Where this block came from. Entries captured before Stage 2 have no
+    // src and simply show nothing.
+    var og=b.src?((b.srcLabel||b.src)+(b.entityName?' · '+b.entityName:'')):'';
     return '<div class="nb-blk"><div class="nb-bhead"><span class="nb-btype">'+escapeHtml(b.type)+'</span><span class="nb-btitle">'+escapeHtml(b.title||(b.type==='text'?'Note':''))+'</span>'+
+      (og?'<span class="nb-borig" title="'+escapeHtml(og+(b.capturedAt?' · captured '+b.capturedAt:''))+'">'+escapeHtml(og)+'</span>':'')+
       '<span class="nb-bctl"><button onclick="NB.move('+i+',-1)" title="Move up" aria-label="Move block up">↑</button><button onclick="NB.move('+i+',1)" title="Move down" aria-label="Move block down">↓</button><button onclick="NB.delBlock('+i+')" title="Remove" aria-label="Remove block">✕</button></span></div>'+
       '<div class="nb-bbody">'+body+'</div></div>';
   }
@@ -8931,6 +9418,10 @@ function dyeWorking(o){
     L.push('*'+[e.date,e.author,(e.tags||[]).join(', ')].filter(Boolean).join(' · ')+'*','');
     (e.blocks||[]).forEach(function(b){
       if(b.title&&b.type!=='text') L.push('## '+b.title,'');
+      // After the heading, never before — a text block would otherwise get an
+      // orphan italic line above it.
+      if(b.src) L.push('*Captured from '+(b.srcLabel||b.src)+(b.entityName?' — '+b.entityName:'')
+                       +(b.capturedAt?' on '+b.capturedAt.slice(0,10):'')+'*','');
       if(b.type==='text') L.push(b.md||'','');
       else if(b.type==='table'){ // pipes must be escaped in the HEADER too, or the column count
         // stops matching the separator row and every viewer renders a broken table.
@@ -8980,6 +9471,9 @@ function dyeWorking(o){
   }
 
   window.NB={
+    // exposed so the self-test can assert every provider has a working
+    // provenance resolver, without opening the capture modal
+    _origin:ORIGIN, _stamp:stamp, _providers:PROVIDERS,
     init:function(){ var l=all(); if(!l.length){ } else if(!cur) cur=l[0].id; render(); },
     newEntry:function(){ var e={id:'nb'+Date.now(), title:'Experiment '+today(), date:today(), author:'', tags:[], blocks:[]};
       var l=all(); l.unshift(e); persist(l); cur=e.id; render(); showToast('✓ New entry','green'); },
@@ -9019,7 +9513,7 @@ function dyeWorking(o){
       var bg=btn.closest('.nb-modal-bg'), sel={};
       bg.querySelectorAll('input[type=checkbox]').forEach(function(cb){ if(cb.checked){ (sel[cb.dataset.src]=sel[cb.dataset.src]||{})[cb.dataset.k]=true; } });
       var blocks=[];
-      Object.keys(sel).forEach(function(k){ var fn=providerFn(k); if(fn){ try{ blocks=blocks.concat(fn(sel[k])||[]); }catch(e){} } });
+      Object.keys(sel).forEach(function(k){ var fn=providerFn(k); if(fn){ try{ blocks=blocks.concat(stamp(fn(sel[k])||[],k)); }catch(e){} } });
       bg.remove();
       if(!blocks.length){ showToast('Nothing selected','warn'); return; }
       NB.addBlocks(blocks);
@@ -9320,6 +9814,93 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   window.NBDOCX._zip={zip:zip,crc32:crc32,enc:enc};
 })();
 
+/* ══════════ HOST / STRAIN REGISTRY UI (lives in the Phage Planner) ══════════
+   Thin CRUD over hostAll/hostUpsert/hostDelete. Kept out of the PHG IIFE so
+   the sidebar list can be re-rendered from anywhere that changes a strain. */
+(function(){
+  function render(){
+    var el=document.getElementById('hostList'); if(!el)return;
+    var list=hostAll();
+    el.innerHTML=list.length?list.map(function(h){
+      var meta=[h.species,h.markers,h.source].filter(Boolean).join(' · ');
+      return '<div class="pal-item">'
+        +'<span class="pal-name" title="'+escapeHtml(h.note||h.name)+'">'+escapeHtml(h.name)+'</span>'
+        +(meta?'<span class="pal-val">'+escapeHtml(meta)+'</span>':'')
+        +'<div class="pal-actions" style="opacity:1;">'
+        +'<button class="pal-icobtn" onclick="HOSTUI.edit(\''+jsAttr(h.id)+'\')" aria-label="Edit strain '+escapeHtml(h.name)+'" title="Edit">✎</button>'
+        +'</div></div>';
+    }).join(''):'<div class="mbc-hint">No strains yet. Registering them makes host names autocomplete everywhere.</div>';
+    var t=document.getElementById('hostTools');
+    if(t) t.innerHTML='<div class="tit-row" style="margin-top:5px;">'
+      +'<button class="btn" style="flex:1;justify-content:center;" onclick="HOSTUI.exportJson()" title="Download the strain registry as JSON">⬇ Export</button>'
+      +'<button class="btn" style="flex:1;justify-content:center;" onclick="document.getElementById(\'hostImp\').click()" title="Merge strains from a JSON file">⬆ Import</button>'
+      +'<input type="file" id="hostImp" accept="application/json,.json" style="display:none" onchange="HOSTUI.importFile(event)" aria-label="Choose a strain registry file"></div>';
+    syncDatalist();
+  }
+  // One shared <datalist> the whole app points at, refreshed whenever the
+  // registry changes so every host input sees new strains immediately.
+  function syncDatalist(){
+    var dl=document.getElementById('ddHosts');
+    if(!dl){ var d=document.createElement('div'); d.innerHTML=hostDatalistHtml('ddHosts');
+      document.body.appendChild(d.firstChild); return; }
+    dl.innerHTML=hostAll().map(function(h){
+      return '<option value="'+escapeHtml(h.name)+'">'+escapeHtml(h.species||h.markers||'')+'</option>'; }).join('');
+  }
+  function edit(id){
+    var h=id?hostGet(id):null;
+    document.getElementById('hostEditTitle').textContent=h?'Edit strain':'Add strain';
+    document.getElementById('hostEditId').value=h?h.id:'';
+    document.getElementById('hostEditName').value=h?h.name:'';
+    document.getElementById('hostEditSpecies').value=h?h.species:'';
+    document.getElementById('hostEditMarkers').value=h?h.markers:'';
+    document.getElementById('hostEditSource').value=h?h.source:'';
+    document.getElementById('hostEditDate').value=h?h.date:'';
+    document.getElementById('hostEditNote').value=h?h.note:'';
+    document.getElementById('hostEditDelete').style.display=h?'':'none';
+    document.getElementById('hostEdit').style.display='flex';
+    document.getElementById('hostEditName').focus();
+  }
+  function close(){ document.getElementById('hostEdit').style.display='none'; }
+  function save(){
+    var name=document.getElementById('hostEditName').value.trim();
+    if(!name){ showToast('Give the strain a name','warn'); return; }
+    var rec=hostUpsert({id:document.getElementById('hostEditId').value,name:name,
+      species:document.getElementById('hostEditSpecies').value.trim(),
+      markers:document.getElementById('hostEditMarkers').value.trim(),
+      source:document.getElementById('hostEditSource').value.trim(),
+      date:document.getElementById('hostEditDate').value,
+      note:document.getElementById('hostEditNote').value.trim()});
+    if(!rec){ showToast('Could not save the strain','warn'); return; }
+    close(); render();
+    showToast('✓ '+rec.name+' saved','green');
+  }
+  function del(){
+    var id=document.getElementById('hostEditId').value; if(!id)return;
+    var h=hostGet(id); if(!h)return;
+    if(!confirm('Delete the strain "'+h.name+'"? Experiments keep the typed name — only the registry entry goes.'))return;
+    hostDelete(id); close(); render();
+    showToast('Strain deleted','green');
+  }
+  function exportJson(){
+    _dl(hostExportJson(),'dd-host-strains-'+new Date().toISOString().slice(0,10)+'.json','application/json');
+    showToast('✓ '+hostAll().length+' strains exported','green');
+  }
+  function importFile(ev){
+    var f=ev.target.files&&ev.target.files[0]; ev.target.value='';
+    if(!f)return;
+    var rd=new FileReader();
+    rd.onload=function(){
+      try{ var n=hostImportJson(rd.result); render(); showToast('✓ '+n+' strain'+(n===1?'':'s')+' merged','green'); }
+      catch(e){ showToast('Import failed: '+e.message,'warn'); }
+    };
+    rd.readAsText(f);
+  }
+  window.HOSTUI={render:render,edit:edit,close:close,save:save,del:del,
+                 exportJson:exportJson,importFile:importFile,syncDatalist:syncDatalist};
+  if(document.readyState!=='loading') syncDatalist();
+  else document.addEventListener('DOMContentLoaded',syncDatalist);
+})();
+
 /* ════════════ WORKSPACE BACKUP + COMMAND PALETTE (Ctrl/⌘+K) ════════════
    Everything you own lives in this browser. These two make it durable and
    findable: one file that carries the whole workspace, and one search box
@@ -9456,6 +10037,10 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     try{ lysAll().forEach(function(l){
       out.push({kind:'lysate',icon:'🦠',name:l.name+(l.titer>0?' — '+SCI.fmt(l.titer,3)+' PFU/mL':''),
                 hay:l.name+' '+(l.host||''), go:function(){ setMode('phg'); }}); }); }catch(e){}
+    try{ hostAll().forEach(function(h){
+      out.push({kind:'strain',icon:'🧫',name:h.name,
+                hay:h.name+' '+(h.species||'')+' '+(h.markers||'')+' '+(h.source||''),
+                go:function(){ setMode('phg'); if(window.HOSTUI){ HOSTUI.render(); HOSTUI.edit(h.id); } }}); }); }catch(e){}
     try{ var t=JSON.parse(lsGet('dd_titer')||'null');
       if(t&&t.experiments) t.experiments.forEach(function(x,i){
         out.push({kind:'experiment',icon:'⭕',name:x.name||('Experiment '+(i+1)),
