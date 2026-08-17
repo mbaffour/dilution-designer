@@ -2998,6 +2998,36 @@ function parseGff3(text){
   });
   return feats;
 }
+// NCBI GFF3 writes a `gene` record AND a `CDS` record for the same gene, at
+// identical coordinates. Drawn as-is that is every gene twice, stacked. Merge
+// records that share start/end/strand into one, keeping the CDS type (what the
+// thing IS) and the gene-level name (a locus tag like EPNV4_gp01, which is
+// what a bench scientist reads) over the CDS's protein accession (YP_950479.1).
+var _ACCESSION_RE=/^[A-Z]{2}_?\d{5,}(\.\d+)?$|^[A-Z]{1,3}\d{5,}(\.\d+)?$/;
+function mergeFeats(feats){
+  var order=[], by=Object.create(null);
+  (feats||[]).forEach(function(f){
+    if(!(f.end>f.start))return;
+    var k=f.start+':'+f.end+':'+f.strand;
+    if(!by[k]){ by[k]={start:f.start,end:f.end,strand:f.strand,type:'',name:'',product:'',locusTag:''}; order.push(k); }
+    var g=by[k];
+    // Type: CDS wins, then a named RNA/repeat, then whatever came first.
+    if(/^CDS$/i.test(f.type)) g.type='CDS';
+    else if(!g.type||/^gene$/i.test(g.type)) g.type=g.type&&!/^gene$/i.test(f.type)?g.type:(f.type||g.type);
+    if(!g.locusTag&&f.locusTag) g.locusTag=f.locusTag;
+    if(!g.product&&f.product) g.product=f.product;
+    // Name: a locus tag beats a plain name, and any plain name beats an accession.
+    var cand=f.locusTag||f.name||'';
+    if(cand&&(!g.name || (_ACCESSION_RE.test(g.name)&&!_ACCESSION_RE.test(cand)) || (f.locusTag&&!g._fromTag))){
+      g.name=cand; g._fromTag=!!f.locusTag;
+    }
+  });
+  return order.map(function(k){
+    var g=by[k];
+    return {type:g.type||'feature', name:g.name||g.product||g.type||'feature',
+            start:g.start, end:g.end, strand:g.strand};
+  }).sort(function(a,b){return a.start-b.start||a.end-b.end;});
+}
 // GenBank: ORIGIN block + the common FEATURES lines. Enough to open an NCBI
 // download without a converter, not a full parser.
 function parseGenbank(text){
@@ -3412,6 +3442,22 @@ function genomeAlign(a,b,opts){
   if(cs2)covered+=cs2[1]-cs2[0];
   return {blocks:blocks,k:k,aLen:s.length,bLen:t.length,covered:covered,
           coverage:s.length?Math.min(100,covered/s.length*100):0,truncated:dp.truncated};
+}
+// Deterministic Fisher-Yates on a sequence, preserving base composition.
+// Used as the null model for a local alignment: Smith-Waterman ALWAYS returns
+// its best window, so "56 % identity" means nothing until you know what two
+// unrelated sequences of this length and GC content would have scored. Seeded
+// from the sequence itself so the reported number does not change on re-render,
+// and Math.imul keeps the LCG in exact 32-bit arithmetic (a plain multiply
+// silently loses low bits past 2^53 and makes the "shuffle" periodic).
+function shuffleSeq(seq,seed){
+  var a=seqClean(seq).split(''), x=(seed|0)||1;
+  for(var i=0;i<a.length;i++) x=(Math.imul(x,1664525)+1013904223)>>>0;   // warm up
+  for(var j=a.length-1;j>0;j--){
+    x=(Math.imul(x,1664525)+1013904223)>>>0;
+    var k=x%(j+1), t=a[j]; a[j]=a[k]; a[k]=t;
+  }
+  return a.join('');
 }
 // Progressive multiple alignment: align to the longest sequence as a centre,
 // then pad every row to a common length. Honest about what it is — a centre-
@@ -6385,6 +6431,36 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
         fails.push('genome-align covered ('+_gm2.covered+') exceeds the sequence length ('+_self.length+') — overlaps are being double-counted');
       n++; var _dp=dotPlot(_self,_self,{k:14});
       if(!_dp.points.some(function(p){return p[0]===p[1]&&p[2]===1;})) fails.push('self dot plot lost the main diagonal');
+      // Local alignment must expose the reference span, because coverage
+      // computed from the aligned LENGTH includes gap columns and can exceed
+      // the reference (a real 110 % that shipped for one build).
+      n++; var _lc=alignPair('ACGTACGTACGTACGTACGT','TTTTTTACGTACGTACGTACGTACGTTTTTT',{mode:'local'});
+      if(!(_lc.aEnd-_lc.aStart<=20)) fails.push('local hit span on the reference exceeds the reference length');
+      // NCBI GFF3/GenBank pair a `gene` and a `CDS` record for the SAME gene at
+      // identical coordinates. Drawn as-is that is every gene twice.
+      n++; var _mf=mergeFeats([
+        {type:'gene',name:'EPNV4_gp01',locusTag:'EPNV4_gp01',product:'',start:152,end:480,strand:1},
+        {type:'CDS', name:'YP_950479.1',locusTag:'',product:'hypothetical protein',start:152,end:480,strand:1},
+        {type:'CDS', name:'YP_950480.1',locusTag:'',product:'',start:584,end:1071,strand:-1}]);
+      if(_mf.length!==2) fails.push('mergeFeats kept '+_mf.length+' features, want 2 (gene+CDS at the same coords are ONE gene)');
+      else {
+        if(_mf[0].type!=='CDS') fails.push('mergeFeats must keep the CDS type, got '+_mf[0].type);
+        if(_mf[0].name!=='EPNV4_gp01') fails.push('mergeFeats must prefer the locus tag over the protein accession, got '+_mf[0].name);
+        if(_mf[1].strand!==-1) fails.push('mergeFeats lost the strand');
+      }
+      n++; var _mf2=mergeFeats([{type:'CDS',name:'x',start:5,end:5,strand:1},{type:'CDS',name:'y',start:9,end:4,strand:1}]);
+      if(_mf2.length!==0) fails.push('mergeFeats must drop zero-length and inverted features');
+      // The shuffle null model must preserve length and base composition
+      // exactly, and must NOT be periodic (a plain LCG multiply loses low bits
+      // past 2^53 and produces a sequence with long internal repeats).
+      n++; var _sh0='ACGTTGCAAGGCTTACGATCCGTTAAGCTGACATTGCCAGG'.repeat(6);
+      var _sh1=shuffleSeq(_sh0,7919);
+      function _comp(s){ return ['A','C','G','T'].map(function(b){return s.split(b).length-1;}).join('/'); }
+      if(_sh1.length!==_sh0.length) fails.push('shuffleSeq changed the length');
+      if(_comp(_sh1)!==_comp(_sh0)) fails.push('shuffleSeq changed base composition: '+_comp(_sh1)+' vs '+_comp(_sh0));
+      n++; if(shuffleSeq(_sh0,7919)!==_sh1) fails.push('shuffleSeq must be deterministic for a given seed');
+      n++; if(shuffleSeq(_sh0,104729)===_sh1) fails.push('shuffleSeq gave the same result for two different seeds');
+      n++; if(_sh1===_sh0) fails.push('shuffleSeq returned the input unchanged');
       // Parsers
       n++; var _fa=parseFasta('>a desc here\nACGT\nACGT\n>b\nTTTT');
       if(_fa.length!==2||_fa[0].seq!=='ACGTACGT'||_fa[0].name!=='a'||_fa[0].desc!=='desc here')
@@ -10884,16 +10960,26 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     return v+' bp';
   }
   // Linear map: one lane per strand, features as boxes, cut sites as ticks.
-  function linearModel(rec,feats,cuts,title){
+  // `win` is an optional {from,to} in 0-based bp — at 70 kb across 920 px a
+  // gene is 12 px wide and no label fits, so reading one means zooming in.
+  function linearModel(rec,feats,cuts,title,win){
     var W=920, padL=52, padR=22, w=W-padL-padR, L=rec.seq.length;
+    var v0=win?Math.max(0,Math.min(win.from,L-1)):0;
+    var v1=win?Math.max(v0+1,Math.min(win.to,L)):L;
+    var span=v1-v0, zoomed=(v0>0||v1<L);
     var yAx=132, prims=P();
     tx(prims,padL,26,title||rec.name,{size:14,bold:true});
-    tx(prims,padL,44,L.toLocaleString('en-US')+' bp · '+(rec.circular?'circular':'linear')+' · '+seqGC(rec.seq).toFixed(1)+' % GC',{size:10});
-    var X=function(p){ return padL+(L?p/L*w:0); };
+    tx(prims,padL,44,L.toLocaleString('en-US')+' bp · '+(rec.circular?'circular':'linear')+' · '+seqGC(rec.seq).toFixed(1)+' % GC'
+      +(zoomed?'   —   showing '+(v0+1).toLocaleString('en-US')+'–'+v1.toLocaleString('en-US')+' ('+bpLabel(span)+')':''),{size:10});
+    var X=function(p){ return padL+(span?(p-v0)/span*w:0); };
+    // Clip to the window; features that only partly overlap are still drawn,
+    // cut off at the edge, so you can see something continues past the view.
+    feats=feats.filter(function(f){return f.end>v0&&f.start<v1;});
+    cuts=cuts.filter(function(c){return c.cut>=v0&&c.cut<=v1;});
     // axis + ticks
     ln(prims,padL,yAx,padL+w,yAx,'axis');
-    niceTicks(L,8).forEach(function(v){
-      if(v>L)return;
+    niceTicks(span,8).forEach(function(d){
+      var v=v0+d; if(v>v1)return;
       ln(prims,X(v),yAx,X(v),yAx+5,'axis');
       tx(prims,X(v),yAx+17,bpLabel(v),{size:9,anchor:'middle'});
     });
@@ -10909,16 +10995,16 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     var sorted=feats.slice().sort(function(a,b){return a.start-b.start;});
     place(sorted,1); place(sorted,-1);
     var LH=15;
-    rows[0].forEach(function(r){
-      var y=yAx-24-r.lane*LH;
-      bx(prims,X(r.f.start),y,X(r.f.end)-X(r.f.start),11,r.f.ci||0);
-      if(X(r.f.end)-X(r.f.start)>26) tx(prims,(X(r.f.start)+X(r.f.end))/2,y+8.5,r.f.name,{size:8,anchor:'middle'});
-    });
-    rows[1].forEach(function(r){
-      var y=yAx+26+r.lane*LH;
-      bx(prims,X(r.f.start),y,X(r.f.end)-X(r.f.start),11,r.f.ci||0);
-      if(X(r.f.end)-X(r.f.start)>26) tx(prims,(X(r.f.start)+X(r.f.end))/2,y+8.5,r.f.name,{size:8,anchor:'middle'});
-    });
+    function drawRow(r,y){
+      // Clamp to the drawing area: a feature can start before the window or
+      // run past it, and an unclamped box would spill off the canvas.
+      var x1=Math.max(padL,X(r.f.start)), x2=Math.min(padL+w,X(r.f.end));
+      if(x2<=x1)return;
+      bx(prims,x1,y,x2-x1,11,r.f.ci||0);
+      if(x2-x1>26) tx(prims,(x1+x2)/2,y+8.5,r.f.name,{size:8,anchor:'middle'});
+    }
+    rows[0].forEach(function(r){ drawRow(r,yAx-24-r.lane*LH); });
+    rows[1].forEach(function(r){ drawRow(r,yAx+26+r.lane*LH); });
     var topLanes=rows[0].reduce(function(a,r){return Math.max(a,r.lane+1);},0);
     var botLanes=rows[1].reduce(function(a,r){return Math.max(a,r.lane+1);},0);
     if(feats.length){
@@ -11071,7 +11157,13 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     var cuts=enz.length?digest(rec.seq,enz,rec.circular).cuts:[];
     var feats=featsForMap(rec);
     var shape=U('mapShape',rec.circular?'circ':'lin');
-    var model=shape==='circ'?circularModel(rec,feats,cuts):linearModel(rec,feats,cuts);
+    var L=rec.seq.length;
+    // Region window. Stored per sequence id so switching sequences does not
+    // carry a window that means nothing on the new one.
+    var wk='win_'+rec.id, win=U(wk,null);
+    if(win&&(!(win.to>win.from)||win.from<0||win.to>L)) win=null;
+    var model=shape==='circ'?circularModel(rec,feats,cuts):linearModel(rec,feats,cuts,null,win);
+    var shown=win?(win.to-win.from):L;
     var h='<div class="sq-row">'
       +'<div class="mbc-f"><label for="sqShape">Map</label><select id="sqShape" onchange="SEQ.set(\'mapShape\',this.value)">'
         +'<option value="lin"'+(shape==='lin'?' selected':'')+'>Linear</option>'
@@ -11080,14 +11172,37 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       +'<div class="mbc-f"><label for="sqMapOrfs">If no annotations</label><select id="sqMapOrfs" onchange="SEQ.set(\'mapOrfs\',this.value===\'y\')">'
         +'<option value="y"'+(U('mapOrfs',true)?' selected':'')+'>Draw predicted ORFs</option>'
         +'<option value="n"'+(U('mapOrfs',true)?'':' selected')+'>Draw nothing</option></select></div>'
-      +'</div>'
-      +'<div class="mbc-f" style="margin-bottom:10px;"><label>Show cut sites for</label>'+enzPicker('mapEnz')+'</div>'
+      +'</div>';
+    // ── region controls (linear only — a "region" of a circle is a linear view) ──
+    if(shape==='lin'){
+      h+='<div class="sq-row">'
+        +'<div class="mbc-f"><label for="sqWinA">View from (bp)</label><input id="sqWinA" type="text" inputmode="decimal" value="'+(win?win.from+1:1)+'" onchange="SEQ.win(this.value,document.getElementById(\'sqWinB\').value)"></div>'
+        +'<div class="mbc-f"><label for="sqWinB">to (bp)</label><input id="sqWinB" type="text" inputmode="decimal" value="'+(win?win.to:L)+'" onchange="SEQ.win(document.getElementById(\'sqWinA\').value,this.value)"></div>';
+      if(feats.length){
+        h+='<div class="mbc-f"><label for="sqJump">Jump to feature</label><select id="sqJump" onchange="SEQ.jump(this.value)">'
+          +'<option value="">— '+feats.length+' features —</option>'
+          +feats.slice(0,1500).map(function(f,i){
+              return '<option value="'+i+'">'+escapeHtml(f.name)+'  ('+(f.start+1).toLocaleString('en-US')+'–'+f.end.toLocaleString('en-US')+')</option>'; }).join('')
+          +'</select></div>';
+      }
+      h+='</div><div class="mbc-actions" style="margin-top:0;margin-bottom:10px;">'
+        +'<button class="btn" onclick="SEQ.win(1,'+L+')">⤢ Whole sequence</button>'
+        +'<button class="btn" onclick="SEQ.zoom(0.5)">🔍 Zoom in</button>'
+        +'<button class="btn" onclick="SEQ.zoom(2)">🔍 Zoom out</button>'
+        +'<button class="btn" onclick="SEQ.pan(-1)">◀ Pan</button>'
+        +'<button class="btn" onclick="SEQ.pan(1)">Pan ▶</button>'
+        +'</div>';
+    }
+    h+='<div class="mbc-f" style="margin-bottom:10px;"><label>Show cut sites for</label>'+enzPicker('mapEnz')+'</div>'
       +'<div class="sq-fig" id="sqFig"></div>'+figBar()
       +'<div class="sq-stat" style="margin-top:10px;">'
-        +'<span><b>'+feats.length+'</b> features drawn</span>'
+        +'<span><b>'+feats.length+'</b> features on this sequence</span>'
         +'<span><b>'+cuts.length+'</b> cut sites</span>'
-        +(rec.feats.length?'<span>from the imported annotation</span>':'<span>predicted, not annotated</span>')
-      +'</div>';
+        +(shape==='lin'&&win?'<span>viewing <b>'+bpLabel(shown)+'</b> of '+bpLabel(L)+'</span>':'<span>whole sequence</span>')
+        +(rec.feats.length?'<span>from the imported annotation</span>':'<span>predicted ORFs, not annotated</span>')
+      +'</div>'
+      +(shape==='lin'&&!win&&L>20000&&feats.length>20
+        ? '<div class="ibox" style="margin-top:8px;font-size:10.5px;">At '+bpLabel(L)+' across one figure a gene is only a few pixels wide, so most names are left off. Pick a feature above, or zoom in, to read them — the exported figure follows the view.</div>':'');
     return {html:h,after:function(){ drawFig(model,'sqFig'); }};
   }
   function enzPicker(key){
@@ -11208,22 +11323,36 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   function panelAlign(rec){
     var mode=U('alMode','pair'), bId=U('alB',''), msa=U('alMsa',[]);
     var opts=S.seqs.map(function(r){ return '<option value="'+escapeHtml(r.id)+'"'+(r.id===bId?' selected':'')+'>'+escapeHtml(r.name)+' ('+r.seq.length.toLocaleString('en-US')+' bp)</option>'; }).join('');
+    var MODES=[['pair','One vs one — exact pairwise (Needleman–Wunsch / Smith–Waterman)'],
+               ['many','One vs many — pairwise identity table'],
+               ['msa','Many at once — multiple alignment (genes)'],
+               ['dot','One vs one — dot plot (genome scale)'],
+               ['genome','One vs one — genome alignment, collinear blocks']];
     var h='<div class="sq-row">'
       +'<div class="mbc-f"><label for="sqAlMode">Comparison</label><select id="sqAlMode" onchange="SEQ.set(\'alMode\',this.value)">'
-        +['pair','Pairwise — exact (Needleman–Wunsch / Smith–Waterman)','dot','Dot plot — genome vs genome','genome','Genome alignment — seed &amp; extend blocks','msa','Multiple alignment — genes'].reduce(function(a,v,i,arr){
-            return i%2?a:a+'<option value="'+arr[i]+'"'+(mode===arr[i]?' selected':'')+'>'+arr[i+1]+'</option>'; },'')
+        +MODES.map(function(m){ return '<option value="'+m[0]+'"'+(mode===m[0]?' selected':'')+'>'+escapeHtml(m[1])+'</option>'; }).join('')
         +'</select></div>';
-    if(mode!=='msa') h+='<div class="mbc-f"><label for="sqAlB">Compare against</label><select id="sqAlB" onchange="SEQ.set(\'alB\',this.value)"><option value="">— pick a sequence —</option>'+opts+'</select></div>';
+    if(mode!=='msa'&&mode!=='many') h+='<div class="mbc-f"><label for="sqAlB">Compare against</label><select id="sqAlB" onchange="SEQ.set(\'alB\',this.value)"><option value="">— pick a sequence —</option>'+opts+'</select></div>';
     if(mode==='pair') h+='<div class="mbc-f"><label for="sqAlSub">Alignment</label><select id="sqAlSub" onchange="SEQ.set(\'alSub\',this.value)">'
       +'<option value="global"'+(U('alSub','global')==='global'?' selected':'')+'>Global (end to end)</option>'
       +'<option value="local"'+(U('alSub','global')==='local'?' selected':'')+'>Local (best shared region)</option></select></div>';
     if(mode==='dot'||mode==='genome') h+='<div class="mbc-f"><label for="sqAlK">Word size k</label><input id="sqAlK" type="text" inputmode="decimal" value="'+escapeHtml(String(U('alK',mode==='dot'?12:16)))+'" onchange="SEQ.set(\'alK\',this.value)"></div>';
     h+='</div>';
-    if(mode==='msa'){
-      h+='<div class="mbc-f" style="margin-bottom:10px;"><label>Sequences to align (2 or more, genes not genomes)</label><div class="sq-enz">'
-        +S.seqs.map(function(r){ return '<label><input type="checkbox" '+(msa.indexOf(r.id)>=0?'checked ':'')
-          +'onchange="SEQ.msaPick(\''+jsAttr(r.id)+'\',this.checked)"> '+escapeHtml(r.name)+'</label>'; }).join('')
-        +'</div></div>';
+    if(mode==='msa'||mode==='many'){
+      var cur=R();
+      var pool=(mode==='many')?S.seqs.filter(function(r){return r.id!==cur.id;}):S.seqs;
+      h+='<div class="mbc-f" style="margin-bottom:10px;"><label>'
+        +(mode==='many'
+          ? 'Compare <b>'+escapeHtml(cur.name)+'</b> against (tick any number)'
+          : 'Sequences to align (2 or more, genes not genomes)')
+        +'</label><div class="sq-enz">'
+        +(pool.length?pool.map(function(r){ return '<label><input type="checkbox" '+(msa.indexOf(r.id)>=0?'checked ':'')
+          +'onchange="SEQ.msaPick(\''+jsAttr(r.id)+'\',this.checked)"> '+escapeHtml(r.name)+' <span style="color:var(--text3)">'+r.seq.length.toLocaleString('en-US')+' bp</span></label>'; }).join('')
+          :'<span style="font:11px var(--mono);color:var(--text3)">Add another sequence to compare against.</span>')
+        +'</div></div>'
+        +(mode==='many'?'<div class="mbc-actions" style="margin-top:0;margin-bottom:8px;">'
+          +'<button class="btn" onclick="SEQ.pickAll(true)">Tick all</button>'
+          +'<button class="btn" onclick="SEQ.pickAll(false)">Clear</button></div>':'');
     }
     h+='<div class="mbc-actions" style="margin-top:0;"><button class="btn ac" onclick="SEQ.runAlign()">Run</button>'
       +(_lastAlign?'<button class="btn" onclick="SEQ.alignDl()">⬇ Download result</button>':'')+'</div>';
@@ -11248,6 +11377,28 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
         +res.g.blocks.slice(0,200).map(function(b,i){
           return '<tr><td>'+(i+1)+'</td><td>'+(b.aEnd-b.aStart).toLocaleString('en-US')+'</td><td>'+(b.aStart+1)+'–'+b.aEnd+'</td><td>'+(b.bStart+1)+'–'+b.bEnd+'</td><td>'+(b.strand===1?'+':'−')+'</td><td>'+b.identity.toFixed(1)+' %</td></tr>';
         }).join('')+'</tbody></table></div>';
+    } else if(res.kind==='many'){
+      // Three identity denominators, because they answer different questions
+      // and papers quote all three. Named in the header so nobody guesses.
+      h+='<div class="sq-stat" style="margin-top:14px;"><span><b>'+res.rows.length+'</b> comparisons</span>'
+        +'<span>reference: '+escapeHtml(res.na)+' ('+res.refLen.toLocaleString('en-US')+' bp)</span>'
+        +'<span>match +2 / mismatch −1 / gap −2</span></div>'
+        +'<div class="mbc-actions" style="margin-top:0;"><button class="btn" onclick="SEQ.alignDl()">⬇ Identity table (CSV)</button></div>'
+        +'<div class="mbc-tblwrap"><table class="sq-tbl"><thead><tr><th rowspan="2">Sequence</th><th rowspan="2">Length</th>'
+        +'<th colspan="5" style="text-align:center;border-bottom:0;">Global (end to end)</th>'
+        +'<th colspan="4" style="text-align:center;border-bottom:0;">Best shared region (local)</th></tr>'
+        +'<tr><th title="identical columns ÷ aligned length">Identity %</th><th>Matches</th><th>Mismatches</th><th>Gaps</th><th>Score</th>'
+        +'<th>Length</th><th>Identity %</th><th title="span on the reference ÷ reference length">% of ref</th>'
+        +'<th title="best local identity against a shuffled copy of the same sequence — the identity you would get by chance">vs shuffled</th></tr></thead><tbody>'
+        +res.rows.map(function(r,i){
+          if(r.error) return '<tr><td>'+escapeHtml(r.name)+'</td><td>'+r.len.toLocaleString('en-US')+'</td><td colspan="9" style="color:var(--warn)">'+escapeHtml(r.error)+'</td></tr>';
+          var real=r.chance>0&&(r.locId-r.chance)>=10;
+          return '<tr'+(i===0?' class="hi"':'')+'><td>'+escapeHtml(r.name)+(r.chance>0&&!real?'<span class="sq-chip" title="the local hit is no better than chance for sequences of this length and base composition">no better than chance</span>':'')+'</td><td>'+r.len.toLocaleString('en-US')+'</td>'
+            +'<td><b>'+r.idAln.toFixed(1)+'</b></td><td>'+r.matches+'</td><td>'+r.mismatches+'</td><td>'+r.gaps+'</td><td>'+r.score+'</td>'
+            +'<td title="reference '+(r.locFrom+1)+'–'+r.locTo+'">'+r.locLen.toLocaleString('en-US')+'</td><td>'+r.locId.toFixed(1)+'</td><td>'+r.locCov.toFixed(0)+'</td>'
+            +'<td>'+(r.chance>0?r.chance.toFixed(1):'—')+'</td></tr>';
+        }).join('')+'</tbody></table></div>'
+        +'<div class="ibox" style="margin-top:9px;font-size:10.5px;">Sorted by global identity, most similar first. <b>Global</b> forces an end-to-end alignment, so a very different length pays for it in gaps and a negative score — that is the signal, not a flaw. <b>Best shared region</b> is a Smith–Waterman hit, which always returns <em>something</em>: a truncated clone shows a short region at ~100 %, an unrelated gene a long gappy region at middling identity. <b>vs shuffled</b> is the null model — the same sequence shuffled twice, keeping its length and base composition, aligned the same way. A local identity that does not clear the shuffled value by ~10 points is noise, and is flagged.</div>';
     } else if(res.kind==='msa'){
       h+='<div class="sq-stat" style="margin-top:14px;"><span><b>'+res.m.rows.length+'</b> sequences</span>'
         +'<span>width <b>'+res.m.width+'</b></span>'
@@ -11328,16 +11479,17 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       var feats=parseGff3(t);
       var rec=R();
       if(!rec){ showToast('Load the sequence first, then import its GFF3','warn'); return; }
-      var keep=feats.filter(function(f){return /CDS|gene|tRNA|rRNA|misc_feature|repeat/i.test(f.type);});
-      rec.feats=(keep.length?keep:feats).slice(0,4000).map(function(f){
-        return {type:f.type,name:f.name,start:f.start,end:f.end,strand:f.strand}; });
-      showToast('✓ '+rec.feats.length+' features added to '+rec.name,'green');
+      var keep=feats.filter(function(f){return /CDS|gene|tRNA|rRNA|ncRNA|misc_feature|repeat/i.test(f.type);});
+      rec.feats=mergeFeats(keep.length?keep:feats).slice(0,4000);
+      showToast('✓ '+rec.feats.length+' features added to '+rec.name
+        +(feats.length>rec.feats.length?' (from '+feats.length+' records)':''),'green');
       render(); return;
     }
     if(/^LOCUS\s/m.test(t)){
       var gb=parseGenbank(t);
       // parseGenbank calls them "features"; the record field is "feats".
-      if(gb&&gb.seq&&gb.seq.length){ addRec({name:gb.name,seq:gb.seq,feats:gb.features}); render(); return; }
+      // GenBank pairs gene+CDS the same way GFF3 does — merge them too.
+      if(gb&&gb.seq&&gb.seq.length){ addRec({name:gb.name,seq:gb.seq,feats:mergeFeats(gb.features)}); render(); return; }
       showToast('That GenBank file had no ORIGIN sequence','warn'); return;
     }
     var recs=parseFasta(t);
@@ -11368,10 +11520,48 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       if(on&&i<0)list.push(name); else if(!on&&i>=0)list.splice(i,1);
       setU(key,list); render(); },
     enzAll:function(key,on){ setU(key,on?ENZYMES.map(function(e){return e.n;}):[]); render(); },
+
+    // ── map region window ──
+    // Stored as 0-based half-open {from,to}; the fields are 1-based, which is
+    // what every genome browser and every paper uses.
+    win:function(a,b){
+      var r=R(); if(!r)return;
+      var L=r.seq.length;
+      var from=Math.round(_n(a,1))-1, to=Math.round(_n(b,L));
+      if(!isFinite(from))from=0; if(!isFinite(to))to=L;
+      from=Math.max(0,Math.min(from,L-1));
+      to=Math.max(from+1,Math.min(to,L));
+      if(to-from<20){ to=Math.min(L,from+20); from=Math.max(0,to-20); }   // 20 bp floor
+      setU('win_'+r.id,(from===0&&to===L)?null:{from:from,to:to});
+      setU('mapShape','lin');
+      render(); },
+    _win:function(){ var r=R(); if(!r)return null;
+      var w=U('win_'+r.id,null);
+      return (w&&w.to>w.from)?w:{from:0,to:r.seq.length}; },
+    zoom:function(f){
+      var r=R(); if(!r)return;
+      var w=this._win(), L=r.seq.length, mid=(w.from+w.to)/2, half=(w.to-w.from)*f/2;
+      this.win(Math.round(mid-half)+1,Math.round(mid+half)); },
+    pan:function(dir){
+      var r=R(); if(!r)return;
+      var w=this._win(), span=w.to-w.from, step=Math.max(1,Math.round(span*0.4))*dir;
+      var L=r.seq.length, from=w.from+step, to=w.to+step;
+      if(from<0){ to-=from; from=0; }
+      if(to>L){ from-=(to-L); to=L; from=Math.max(0,from); }
+      this.win(from+1,to); },
+    jump:function(i){
+      var r=R(); if(!r||i==='')return;
+      var f=featsForMap(r)[+i]; if(!f)return;
+      var pad=Math.max(60,Math.round((f.end-f.start)*0.35));
+      this.win(f.start-pad+1,f.end+pad); },
     msaPick:function(id,on){
       var list=U('alMsa',[]).slice(), i=list.indexOf(id);
       if(on&&i<0)list.push(id); else if(!on&&i>=0)list.splice(i,1);
       setU('alMsa',list); save(); },
+    pickAll:function(on){
+      var r=R();
+      setU('alMsa',on?S.seqs.filter(function(x){return x.id!==r.id;}).map(function(x){return x.id;}):[]);
+      render(); },
 
     add:function(){
       document.getElementById('seqPasteName').value='';
@@ -11523,6 +11713,13 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
           ['Identical columns',String(a.m.consensus.split('*').length-1)],['Centre',a.m.centre]]});
         else if(a.kind==='dot') out.push({type:'kv',title:'Dot plot — '+a.na+' vs '+a.nb,pairs:[
           ['Word size k',String(a.dp.k)],['Matching k-mers',a.dp.points.length.toLocaleString('en-US')]]});
+        else if(a.kind==='many') out.push({type:'table',title:'Identity vs '+a.na+' ('+a.refLen+' bp)',
+          cols:['Sequence','Length','Global ID %','Mismatches','Gaps','Local hit','Local ID %','vs shuffled'],
+          rows:a.rows.map(function(x){ return [x.name,String(x.len),
+            x.error?'—':x.idAln.toFixed(1),
+            x.error?'—':String(x.mismatches), x.error?'—':String(x.gaps),
+            x.error?'—':String(x.locLen), x.error?'—':x.locId.toFixed(1),
+            (x.error||!x.chance)?'—':x.chance.toFixed(1)]; })});
       }
       return out; },
 
@@ -11530,6 +11727,42 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       var r=R(); if(!r)return;
       var mode=U('alMode','pair');
       setU('alRun',true);
+      if(mode==='many'){
+        var picks=S.seqs.filter(function(x){return x.id!==r.id&&U('alMsa',[]).indexOf(x.id)>=0;});
+        if(!picks.length){ _lastAlign={error:'Tick at least one sequence to compare against.'}; render(); return; }
+        // Global AND local per pair. Global alone is misleading when lengths
+        // differ: Needleman-Wunsch will insert hundreds of gaps to harvest
+        // chance matches, so an unrelated 942 bp gene can look like a 97 %
+        // match to a 321 bp reference if you divide matches by the reference
+        // length. The local (Smith-Waterman) hit answers the question that
+        // actually matters — "is there a real shared region, and how long?"
+        var rows=picks.map(function(x){
+          var p=alignPair(r.seq,x.seq,{mode:'global'});
+          if(p.error) return {name:x.name,len:x.seq.length,error:p.error};
+          var q=alignPair(r.seq,x.seq,{mode:'local'});
+          // Null model: the same subject, shuffled. Two shuffles, worst case
+          // taken, so the bar is the harder one to clear.
+          var nul=0;
+          if(!q.error&&x.seq.length<=6000){
+            [7919,104729].forEach(function(sd){
+              var z=alignPair(r.seq,shuffleSeq(x.seq,sd),{mode:'local'});
+              if(!z.error&&z.identity>nul) nul=z.identity;
+            });
+          }
+          return {name:x.name,len:x.seq.length,chance:nul,
+                  idAln:p.identity,
+                  matches:p.matches,mismatches:p.mismatches,gaps:p.gaps,
+                  length:p.length,score:p.score,
+                  locLen:q.error?0:q.length, locId:q.error?0:q.identity,
+                  locFrom:q.error?0:q.aStart, locTo:q.error?0:q.aEnd,
+                  // Coverage is the span the hit occupies ON THE REFERENCE, not
+                  // the aligned length — the latter includes gap columns and can
+                  // exceed the reference, which reads as ">100 % covered".
+                  locCov:(q.error||!r.seq.length)?0:(q.aEnd-q.aStart)/r.seq.length*100};
+        }).sort(function(a,b){ return (b.idAln||-1)-(a.idAln||-1); });
+        _lastAlign={kind:'many',rows:rows,na:r.name,refLen:r.seq.length};
+        render(); return;
+      }
       if(mode==='msa'){
         var picks=S.seqs.filter(function(x){return U('alMsa',[]).indexOf(x.id)>=0;});
         if(picks.length<2){ _lastAlign={error:'Tick at least two sequences.'}; render(); return; }
@@ -11553,6 +11786,18 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       if(!_lastAlign)return;
       var a=_lastAlign, base=(R()&&R().name||'alignment').replace(/[^A-Za-z0-9._-]+/g,'_');
       if(a.kind==='pair') _dl(alnText(a.r,a.na,a.nb),base+'_alignment.txt','text/plain');
+      else if(a.kind==='many'){
+        var rowsM=[['reference','reference_length','sequence','length','global_identity_percent','global_matches','global_mismatches','global_gaps','global_aligned_length','global_score','local_hit_length','local_identity_percent','local_ref_start_1based','local_ref_end','local_percent_of_reference','shuffled_control_identity_percent','note']];
+        a.rows.forEach(function(x){ rowsM.push([a.na,a.refLen,x.name,x.len,
+          x.error?'':x.idAln.toFixed(2),
+          x.error?'':x.matches, x.error?'':x.mismatches, x.error?'':x.gaps,
+          x.error?'':x.length, x.error?'':x.score,
+          x.error?'':x.locLen, x.error?'':x.locId.toFixed(2),
+          x.error?'':x.locFrom+1, x.error?'':x.locTo, x.error?'':x.locCov.toFixed(2),
+          x.error?'':(x.chance>0?x.chance.toFixed(2):''),
+          x.error||'']); });
+        _dl(csv(rowsM),base+'_identity_table.csv','text/csv');
+      }
       else if(a.kind==='msa') _dl(msaText(a.m),base+'_msa.txt','text/plain');
       else if(a.kind==='dot'){
         var rows=[['a_pos_1based','b_pos_1based','strand']];
