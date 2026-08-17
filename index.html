@@ -3004,16 +3004,31 @@ function parseGff3(text){
 // thing IS) and the gene-level name (a locus tag like EPNV4_gp01, which is
 // what a bench scientist reads) over the CDS's protein accession (YP_950479.1).
 var _ACCESSION_RE=/^[A-Z]{2}_?\d{5,}(\.\d+)?$|^[A-Z]{1,3}\d{5,}(\.\d+)?$/;
+// What a record IS beats what it is a member of: a tRNA is a tRNA, not a gene.
+// `region`/`source` describe the whole contig and rank below everything.
+function _typeRank(t){
+  t=String(t||'').toLowerCase();
+  if(!t)return 0;
+  if(t==='region'||t==='source')return 1;
+  if(t==='gene'||t==='pseudogene')return 2;
+  if(t==='mrna'||t==='exon')return 3;
+  if(t==='cds')return 5;
+  return 4;                                  // tRNA, rRNA, ncRNA, repeat_region…
+}
 function mergeFeats(feats){
   var order=[], by=Object.create(null);
   (feats||[]).forEach(function(f){
     if(!(f.end>f.start))return;
-    var k=f.start+':'+f.end+':'+f.strand;
+    // Include the contig id: on a multi-contig draft, two different contigs
+    // routinely carry a feature at the same coordinates, and keying on
+    // coordinates alone silently merges — and therefore deletes — one of them.
+    var k=(f.seqid||'')+'|'+f.start+':'+f.end+':'+f.strand;
     if(!by[k]){ by[k]={start:f.start,end:f.end,strand:f.strand,type:'',name:'',product:'',locusTag:''}; order.push(k); }
     var g=by[k];
-    // Type: CDS wins, then a named RNA/repeat, then whatever came first.
-    if(/^CDS$/i.test(f.type)) g.type='CDS';
-    else if(!g.type||/^gene$/i.test(g.type)) g.type=g.type&&!/^gene$/i.test(f.type)?g.type:(f.type||g.type);
+    // Type by explicit rank. The previous nested-ternary version kept whichever
+    // record arrived first whenever `gene` was already set, and NCBI writes the
+    // `gene` line before its `tRNA` line — so every tRNA imported as "gene".
+    if(_typeRank(f.type)>_typeRank(g.type)) g.type=f.type;
     if(!g.locusTag&&f.locusTag) g.locusTag=f.locusTag;
     if(!g.product&&f.product) g.product=f.product;
     // Name: a locus tag beats a plain name, and any plain name beats an accession.
@@ -3333,7 +3348,9 @@ function alignPair(a,b,opts){
   for(var i2=1;i2<=n;i2++){
     cur[0]=local?0:GAP*i2;
     for(var j2=1;j2<=m;j2++){
-      var d=prev[j2-1]+(s[i2-1]===t[j2-1]?MA:MI);
+      // N is an unknown base, not a base that equals itself. Scoring N==N as a
+      // match makes a gap-filled draft assembly look identical to anything.
+      var d=prev[j2-1]+((s[i2-1]===t[j2-1]&&s[i2-1]!=='N')?MA:MI);
       var u=prev[j2]+GAP, l=cur[j2-1]+GAP;
       var best=d, dir=1;
       if(u>best){best=u;dir=2;}
@@ -3359,7 +3376,7 @@ function alignPair(a,b,opts){
   var mm=0,gaps=0,ident=0;
   for(var k=0;k<A.length;k++){
     if(A[k]==='-'||B[k]==='-')gaps++;
-    else if(A[k]===B[k])ident++;
+    else if(A[k]===B[k]&&A[k]!=='N')ident++;
     else mm++;
   }
   return {a:A,b:B,score:bs,identity:A.length?ident/A.length*100:0,
@@ -3379,21 +3396,30 @@ function dotPlot(a,b,opts){
     (idx[key]||(idx[key]=[])).push(i);
   }
   var pts=[], rc=o.bothStrands!==false?seqRevComp(t):null, truncated=false;
-  function scan(seqT,dir){
-    for(var j=0;j+k<=seqT.length&&!truncated;j++){
+  // Split the point budget between the strands. Scanning forward to exhaustion
+  // first meant that on a repetitive genome the cap was reached before the
+  // reverse strand was touched at all — so an inversion, the single thing a
+  // phage dot plot is drawn to find, was invisible under a caption that still
+  // said "both strands".
+  var budget=rc?Math.floor(maxPts/2):maxPts;
+  function scan(seqT,dir,limit){
+    var n=0;
+    for(var j=0;j+k<=seqT.length;j++){
       var key=seqT.substr(j,k);
       var hits=idx[key];
       if(!hits)continue;
       for(var h=0;h<hits.length;h++){
         // Report on the ORIGINAL b coordinate so both strands share an axis.
         pts.push([hits[h], dir===1?j:(seqT.length-j-k), dir]);
-        if(pts.length>=maxPts){ truncated=true; break; }
+        if(++n>=limit){ truncated=true; return; }
       }
     }
   }
-  scan(t,1);
-  if(rc&&!truncated) scan(rc,-1);
-  return {points:pts,k:k,aLen:s.length,bLen:t.length,truncated:truncated};
+  scan(t,1,budget);
+  if(rc) scan(rc,-1,maxPts-pts.length);
+  return {points:pts,k:k,aLen:s.length,bLen:t.length,truncated:truncated,
+          plus:pts.filter(function(p){return p[2]===1;}).length,
+          minus:pts.filter(function(p){return p[2]===-1;}).length};
 }
 // Seed-and-extend genome alignment: k-mer anchors → chain collinear runs →
 // report blocks with identity. This is what makes 70 kb vs 70 kb tractable.
@@ -3414,16 +3440,26 @@ function genomeAlign(a,b,opts){
     var arr=byDiag[key].sort(function(x,y){return x[0]-y[0];});
     var cs=null;
     arr.forEach(function(p){
-      if(cs&&p[0]-cs.aEnd<=k){ cs.aEnd=Math.max(cs.aEnd,p[0]+k); cs.bEnd=Math.max(cs.bEnd,p[1]+k); cs.n++; }
-      else { if(cs&&cs.aEnd-cs.aStart>=minBlock)blocks.push(cs);
-             cs={aStart:p[0],aEnd:p[0]+k,bStart:p[1],bEnd:p[1]+k,strand:p[2],n:1}; }
+      // On a reverse diagonal b DECREASES as a increases, so tracking bEnd with
+      // Math.max leaves every minus-strand block reporting a k-bp subject range
+      // for a multi-kb query range — and then "100 % identity" over that k bp.
+      // Track the b extent as min/max instead of start/end.
+      if(cs&&p[0]-cs.aEnd<=k){
+        cs.aEnd=Math.max(cs.aEnd,p[0]+k);
+        cs.bMin=Math.min(cs.bMin,p[1]); cs.bMax=Math.max(cs.bMax,p[1]+k);
+        cs.n++;
+      } else { if(cs&&cs.aEnd-cs.aStart>=minBlock)blocks.push(cs);
+             cs={aStart:p[0],aEnd:p[0]+k,bMin:p[1],bMax:p[1]+k,strand:p[2],n:1}; }
     });
     if(cs&&cs.aEnd-cs.aStart>=minBlock)blocks.push(cs);
   });
   // Score each block by real identity over its own span (cheap: same length).
   blocks.forEach(function(bl){
+    bl.bStart=bl.bMin; bl.bEnd=bl.bMax; delete bl.bMin; delete bl.bMax;
     var len=Math.min(bl.aEnd-bl.aStart,bl.bEnd-bl.bStart);
     var sa=s.substr(bl.aStart,len);
+    // For a minus block, a[aStart..] is the reverse complement of t[bStart..],
+    // reading t forward from the LOW end of the block's span.
     var sb=bl.strand===1?t.substr(bl.bStart,len):seqRevComp(t.substr(bl.bStart,len));
     var id=0;
     for(var i=0;i<len;i++) if(sa[i]===sb[i])id++;
@@ -6461,6 +6497,43 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       n++; if(shuffleSeq(_sh0,7919)!==_sh1) fails.push('shuffleSeq must be deterministic for a given seed');
       n++; if(shuffleSeq(_sh0,104729)===_sh1) fails.push('shuffleSeq gave the same result for two different seeds');
       n++; if(_sh1===_sh0) fails.push('shuffleSeq returned the input unchanged');
+      // ── defects an adversarial audit confirmed, each with its own guard ──
+      // N is an unknown base, not one that equals itself.
+      n++; if(alignPair('NNNNNNNNNNNNNNNNNNNN','NNNNNNNNNNNNNNNNNNNN',{mode:'global'}).identity>1)
+        fails.push('20 Ns vs 20 Ns must not be 100 % identical');
+      n++; if(alignPair('ACGTACGTAC','ACGTACGTAC',{mode:'global'}).identity!==100)
+        fails.push('real bases must still score 100 % identical');
+      // A dot plot must never spend its whole budget on one strand: an
+      // inversion is the thing the plot exists to show.
+      // The subject must genuinely CONTAIN an inversion, or zero reverse points
+      // is the correct answer and the test proves nothing (my first version of
+      // this assertion compared a non-palindromic sequence to itself and
+      // "failed" working code).
+      n++; var _rU='ACGTTGCAAGGCTTACGATCCGTTAAGCTGACATTGCCAGG';
+      var _dpA=_rU.repeat(120), _dpB=_rU.repeat(60)+seqRevComp(_rU.repeat(60));
+      var _dpc=dotPlot(_dpA,_dpB,{k:12,maxPoints:2000});
+      if(!(dotPlot(_dpA,_dpB,{k:12,maxPoints:400000}).minus>0))
+        fails.push('test setup wrong: the uncapped dot plot found no reverse matches to begin with');
+      n++; if(_dpc.truncated&&!_dpc.minus)
+        fails.push('dot plot spent its entire point budget on the forward strand — an inversion would be invisible');
+      // A minus-strand genome block must span comparable ranges on both
+      // sequences. Tracking b with Math.max reported k bp for a multi-kb query.
+      n++; var _u='ACGTTGCAAGGCTTACGATCCGTTAAGCTGACATTGCCAGGATTACGTGCAATTGCAGGATTCCATTGGCCCG'.repeat(30);
+      var _invSeq=_u.slice(0,900)+seqRevComp(_u.slice(900,2600))+_u.slice(2600);
+      var _gi=genomeAlign(_u,_invSeq,{k:16,minBlock:150});
+      var _lop=_gi.blocks.filter(function(b){return (b.aEnd-b.aStart)>=150&&(b.bEnd-b.bStart)<50;});
+      if(_lop.length) fails.push(_lop.length+' genome blocks span ≥150 bp on one sequence but <50 on the other');
+      // Annotation import: a tRNA is a tRNA even though NCBI writes its `gene`
+      // line first, and two contigs may share coordinates.
+      n++; var _tf=mergeFeats([{type:'gene',name:'trnA',locusTag:'trnA',start:100,end:180,strand:1,seqid:'c1'},
+                               {type:'tRNA',name:'tRNA-Ala',product:'tRNA-Ala',start:100,end:180,strand:1,seqid:'c1'}]);
+      if(_tf.length!==1||_tf[0].type!=='tRNA')
+        fails.push('a gene+tRNA pair must import as ONE tRNA, got '+_tf.length+' × '+(_tf[0]&&_tf[0].type));
+      n++; var _mc=mergeFeats([{type:'CDS',name:'a',start:10,end:99,strand:1,seqid:'contig1'},
+                               {type:'CDS',name:'b',start:10,end:99,strand:1,seqid:'contig2'}]);
+      if(_mc.length!==2) fails.push('features on DIFFERENT contigs share coordinates and must not be merged away');
+      n++; if(_typeRank('CDS')<=_typeRank('gene')||_typeRank('tRNA')<=_typeRank('gene')||_typeRank('region')>=_typeRank('gene'))
+        fails.push('feature type ranking is wrong: CDS and tRNA must outrank gene, region must not');
       // Parsers
       n++; var _fa=parseFasta('>a desc here\nACGT\nACGT\n>b\nTTTT');
       if(_fa.length!==2||_fa[0].seq!=='ACGTACGT'||_fa[0].name!=='a'||_fa[0].desc!=='desc here')
@@ -10933,6 +11006,10 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       d.active=Math.min(Math.max(0,o.active|0),Math.max(0,d.seqs.length-1));
       d.tab=['map','orf','cut','primer','align'].indexOf(o.tab)>=0?o.tab:'map';
       d.ui=(o.ui&&typeof o.ui==='object')?o.ui:{};
+      // The RESULT of an alignment or a primer run is never persisted (it is
+      // derived and can be megabytes), so a stale "we already ran" flag left
+      // the panel showing neither a result nor its explanation after a reload.
+      d.ui.alRun=false; d.ui.pRun=false;
       return d;
     }catch(e){ return def(); }
   }
@@ -10969,8 +11046,14 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     var span=v1-v0, zoomed=(v0>0||v1<L);
     var yAx=132, prims=P();
     tx(prims,padL,26,title||rec.name,{size:14,bold:true});
-    tx(prims,padL,44,L.toLocaleString('en-US')+' bp · '+(rec.circular?'circular':'linear')+' · '+seqGC(rec.seq).toFixed(1)+' % GC'
-      +(zoomed?'   —   showing '+(v0+1).toLocaleString('en-US')+'–'+v1.toLocaleString('en-US')+' ('+bpLabel(span)+')':''),{size:10});
+    // When zoomed, report the WINDOW's GC. Printing the genome-wide value next
+    // to "showing 12,401–18,900" reads as the region's GC and can be 10 points
+    // out — early phage regions are routinely AT-rich against the genome mean.
+    tx(prims,padL,44, zoomed
+      ? L.toLocaleString('en-US')+' bp '+(rec.circular?'circular':'linear')+' · showing '+(v0+1).toLocaleString('en-US')+'–'+v1.toLocaleString('en-US')
+        +' ('+bpLabel(span)+') · '+seqGC(rec.seq.slice(v0,v1)).toFixed(1)+' % GC in this region ('+seqGC(rec.seq).toFixed(1)+' % overall)'
+      : L.toLocaleString('en-US')+' bp · '+(rec.circular?'circular':'linear')+' · '+seqGC(rec.seq).toFixed(1)+' % GC',
+      {size:10});
     var X=function(p){ return padL+(span?(p-v0)/span*w:0); };
     // Clip to the window; features that only partly overlap are still drawn,
     // cut off at the edge, so you can see something continues past the view.
@@ -11093,7 +11176,9 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       if(seen[k])return; seen[k]=1; drawn++;
       prims.push({t:'circle',x:px,y:py,r:0.8});
     });
-    tx(prims,padL,H-26,dp.points.length.toLocaleString('en-US')+' matching '+dp.k+'-mers, both strands  ·  '+drawn.toLocaleString('en-US')+' distinct points drawn',{size:9});
+    tx(prims,padL,H-26,dp.points.length.toLocaleString('en-US')+' matching '+dp.k+'-mers ('
+      +(dp.plus||0).toLocaleString('en-US')+' forward, '+(dp.minus||0).toLocaleString('en-US')+' reverse)  ·  '
+      +drawn.toLocaleString('en-US')+' distinct points drawn',{size:9});
     if(dp.truncated) tx(prims,padL,H-12,'Anchor cap reached — some matches are not shown. Raise the word size k for a cleaner plot.',{size:9});
     return {w:W,h:H,prims:prims,kind:'dotplot'};
   }
@@ -11147,8 +11232,9 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   function featsForMap(rec){
     var out=rec.feats.map(function(f,i){ return {start:f.start,end:f.end,strand:f.strand,name:f.name||f.type,ci:i}; });
     if(!out.length&&U('mapOrfs',true)){
-      findOrfs(rec.seq,{minAa:+U('orfMin',100),code:rec.code,circular:rec.circular})
-        .slice(0,300).forEach(function(o,i){ out.push({start:o.start,end:o.end,strand:o.strand,name:o.aaLen+' aa',ci:i}); });
+      var all=findOrfs(rec.seq,{minAa:_n(U('orfMin',100),100),code:rec.code,circular:rec.circular});
+      all.slice(0,300).forEach(function(o,i){ out.push({start:o.start,end:o.end,strand:o.strand,name:o.aaLen+' aa',ci:i}); });
+      out.total=all.length; out.predicted=true;     // so the caption can be honest about the 300 cap
     }
     return out;
   }
@@ -11196,7 +11282,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     h+='<div class="mbc-f" style="margin-bottom:10px;"><label>Show cut sites for</label>'+enzPicker('mapEnz')+'</div>'
       +'<div class="sq-fig" id="sqFig"></div>'+figBar()
       +'<div class="sq-stat" style="margin-top:10px;">'
-        +'<span><b>'+feats.length+'</b> features on this sequence</span>'
+        +'<span><b>'+(feats.predicted&&feats.total>feats.length?feats.length+'</b> of '+feats.total+' predicted ORFs drawn':feats.length+'</b> features on this sequence')+'</span>'
         +'<span><b>'+cuts.length+'</b> cut sites</span>'
         +(shape==='lin'&&win?'<span>viewing <b>'+bpLabel(shown)+'</b> of '+bpLabel(L)+'</span>':'<span>whole sequence</span>')
         +(rec.feats.length?'<span>from the imported annotation</span>':'<span>predicted ORFs, not annotated</span>')
@@ -11205,6 +11291,11 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
         ? '<div class="ibox" style="margin-top:8px;font-size:10.5px;">At '+bpLabel(L)+' across one figure a gene is only a few pixels wide, so most names are left off. Pick a feature above, or zoom in, to read them — the exported figure follows the view.</div>':'');
     return {html:h,after:function(){ drawFig(model,'sqFig'); }};
   }
+  // ONE definition of "which enzymes". The default used to be written in five
+  // places: the on-screen table defaulted to EcoRI+HindIII+BamHI while the CSV,
+  // the gel lane and the notebook block all defaulted to none, so on a first
+  // visit the screen showed a digest and every export of it was empty.
+  function cutEnzymes(){ return U('cutEnz',['EcoRI','HindIII','BamHI']); }
   function enzPicker(key){
     var on=U(key,[]);
     return '<div class="sq-enz">'+ENZYMES.map(function(e){
@@ -11241,7 +11332,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   function fasta60(s){ var o=[]; for(var i=0;i<s.length;i+=60) o.push(s.substr(i,60)); return o.join('\n'); }
 
   function panelCut(rec){
-    var enz=U('cutEnz',['EcoRI','HindIII','BamHI']);
+    var enz=cutEnzymes();
     var d=enz.length?digest(rec.seq,enz,rec.circular):{cuts:[],sites:[],fragments:[]};
     var frags=d.fragments;
     var h='<div class="mbc-f" style="margin-bottom:10px;"><label>Enzymes</label>'+enzPicker('cutEnz')+'</div>'
@@ -11265,7 +11356,8 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       +'<div class="sl" style="margin-top:16px;">Fragments (largest first)</div><div class="mbc-tblwrap"><table class="sq-tbl"><thead><tr><th>#</th><th>Size (bp)</th><th>From</th><th>To</th><th>% of total</th></tr></thead><tbody>'
       +frags.slice(0,200).map(function(f,i){
         return '<tr><td>'+(i+1)+'</td><td>'+f.len.toLocaleString('en-US')+'</td><td>'+(f.start+1)+'</td><td>'+f.end+'</td><td>'+(f.len/rec.seq.length*100).toFixed(1)+'</td></tr>';
-      }).join('')+'</tbody></table></div>';
+      }).join('')+'</tbody></table></div>'
+      +(frags.length>200?'<div class="tit-mini" style="margin-top:6px;">Showing the 200 largest of '+frags.length+' fragments — the CSV has all of them.</div>':'');
     return {html:h};
   }
 
@@ -11393,7 +11485,11 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
         +res.rows.map(function(r,i){
           if(r.error) return '<tr><td>'+escapeHtml(r.name)+'</td><td>'+r.len.toLocaleString('en-US')+'</td><td colspan="9" style="color:var(--warn)">'+escapeHtml(r.error)+'</td></tr>';
           var real=r.chance>0&&(r.locId-r.chance)>=10;
-          return '<tr'+(i===0?' class="hi"':'')+'><td>'+escapeHtml(r.name)+(r.chance>0&&!real?'<span class="sq-chip" title="the local hit is no better than chance for sequences of this length and base composition">no better than chance</span>':'')+'</td><td>'+r.len.toLocaleString('en-US')+'</td>'
+          return '<tr'+(i===0?' class="hi"':'')+'><td>'+escapeHtml(r.name)
+            +((r.strand===-1&&real)?'<span class="sq-chip" title="the better alignment was to the reverse complement of this sequence">reverse complement</span>':'')
+            +(r.chance>0&&!real?'<span class="sq-chip" title="the local hit is no better than chance for sequences of this length and base composition">no better than chance</span>':'')
+            +(r.nulSkipped?'<span class="sq-chip" title="the shuffled null model is skipped above 6 kb because it costs two more full alignments">null not run</span>':'')
+            +'</td><td>'+r.len.toLocaleString('en-US')+'</td>'
             +'<td><b>'+r.idAln.toFixed(1)+'</b></td><td>'+r.matches+'</td><td>'+r.mismatches+'</td><td>'+r.gaps+'</td><td>'+r.score+'</td>'
             +'<td title="reference '+(r.locFrom+1)+'–'+r.locTo+'">'+r.locLen.toLocaleString('en-US')+'</td><td>'+r.locId.toFixed(1)+'</td><td>'+r.locCov.toFixed(0)+'</td>'
             +'<td>'+(r.chance>0?r.chance.toFixed(1):'—')+'</td></tr>';
@@ -11472,6 +11568,13 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     if(!quiet) showToast('✓ '+c.name+' ('+c.seq.length.toLocaleString('en-US')+' bp)','green');
     return c;
   }
+  // Keep annotation rows worth drawing. `region`/`source` span the whole
+  // molecule and are not features of anything. Falls back to everything only
+  // when the filter would leave nothing at all to draw.
+  function featFilter(feats){
+    var keep=(feats||[]).filter(function(f){ return _typeRank(f.type)>=2; });
+    return keep.length?keep:(feats||[]);
+  }
   function importText(text,fname){
     var t=String(text||'');
     // GFF3 annotates whatever is already loaded rather than making a record.
@@ -11479,8 +11582,9 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       var feats=parseGff3(t);
       var rec=R();
       if(!rec){ showToast('Load the sequence first, then import its GFF3','warn'); return; }
-      var keep=feats.filter(function(f){return /CDS|gene|tRNA|rRNA|ncRNA|misc_feature|repeat/i.test(f.type);});
-      rec.feats=mergeFeats(keep.length?keep:feats).slice(0,4000);
+      rec.feats=mergeFeats(featFilter(feats)).filter(function(f){
+        return f.start<rec.seq.length;                 // an annotation for a different record
+      }).slice(0,4000);
       showToast('✓ '+rec.feats.length+' features added to '+rec.name
         +(feats.length>rec.feats.length?' (from '+feats.length+' records)':''),'green');
       render(); return;
@@ -11488,8 +11592,12 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     if(/^LOCUS\s/m.test(t)){
       var gb=parseGenbank(t);
       // parseGenbank calls them "features"; the record field is "feats".
-      // GenBank pairs gene+CDS the same way GFF3 does — merge them too.
-      if(gb&&gb.seq&&gb.seq.length){ addRec({name:gb.name,seq:gb.seq,feats:mergeFeats(gb.features)}); render(); return; }
+      // GenBank pairs gene+CDS the same way GFF3 does — merge them too, and
+      // drop the `source` record, which spans the whole molecule and would
+      // otherwise draw one box across the entire map.
+      if(gb&&gb.seq&&gb.seq.length){
+        addRec({name:gb.name,seq:gb.seq,feats:mergeFeats(featFilter(gb.features))});
+        render(); return; }
       showToast('That GenBank file had no ORIGIN sequence','warn'); return;
     }
     var recs=parseFasta(t);
@@ -11589,6 +11697,9 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     del:function(){
       var r=R(); if(!r)return;
       if(!confirm('Delete "'+r.name+'"?'))return;
+      delete S.ui['win_'+r.id];                 // otherwise the window outlives the sequence
+      var mp=U('alMsa',[]).indexOf(r.id); if(mp>=0){ var l2=U('alMsa',[]).slice(); l2.splice(mp,1); setU('alMsa',l2); }
+      if(U('alB','')===r.id) setU('alB','');
       S.seqs.splice(S.active,1); S.active=Math.max(0,S.active-1); _lastAlign=null; render(); },
     rc:function(){ var r=R(); if(!r)return;
       addRec({name:r.name+' (revcomp)',seq:seqRevComp(r.seq),circular:r.circular}); render(); },
@@ -11618,13 +11729,13 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       _dl(out+'\n',r.name.replace(/[^A-Za-z0-9._-]+/g,'_')+'_orfs_'+what+'.fasta','text/plain'); },
 
     cutCsv:function(){ var r=R(); if(!r)return;
-      var d=digest(r.seq,U('cutEnz',[]),r.circular);
+      var d=digest(r.seq,cutEnzymes(),r.circular);
       var rows=[['fragment','size_bp','start_1based','end','percent_of_total']];
       d.fragments.forEach(function(f,i){ rows.push([i+1,f.len,f.start+1,f.end,(f.len/r.seq.length*100).toFixed(2)]); });
       _dl(csv(rows),r.name.replace(/[^A-Za-z0-9._-]+/g,'_')+'_digest.csv','text/csv'); },
     toGel:function(){
       var r=R(); if(!r)return;
-      var enz=U('cutEnz',[]);
+      var enz=cutEnzymes();
       if(!enz.length){ showToast('Pick at least one enzyme first','warn'); return; }
       var d=digest(r.seq,enz,r.circular);
       if(!d.sites.length){ showToast('These enzymes do not cut — nothing to run','warn'); return; }
@@ -11680,7 +11791,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
             return [String(i+1),String(o.start+1),String(o.end),o.strand===1?'+':'−',String(o.aaLen),(proteinMW(aa)/1000).toFixed(1)]; })});
       }
       if(sel.digest){
-        var enz=U('cutEnz',[]);
+        var enz=cutEnzymes();
         var d=enz.length?digest(r.seq,enz,r.circular):{sites:[],fragments:[]};
         out.push({type:'table',title:'Digest — '+(enz.join(' + ')||'no enzymes')+' ('+d.fragments.length+' fragments)',
           cols:['#','Size (bp)','From','To'],
@@ -11737,19 +11848,26 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
         // length. The local (Smith-Waterman) hit answers the question that
         // actually matters — "is there a real shared region, and how long?"
         var rows=picks.map(function(x){
-          var p=alignPair(r.seq,x.seq,{mode:'global'});
-          if(p.error) return {name:x.name,len:x.seq.length,error:p.error};
-          var q=alignPair(r.seq,x.seq,{mode:'local'});
+          // BOTH orientations. Genes are stored in whichever direction they sit
+          // on the genome, so a perfect homolog cloned the other way round
+          // scores 56 % — noise — if you only align the plus strand.
+          var fwd=alignPair(r.seq,x.seq,{mode:'global'});
+          if(fwd.error) return {name:x.name,len:x.seq.length,error:fwd.error};
+          var rcSeq=seqRevComp(x.seq);
+          var rev=alignPair(r.seq,rcSeq,{mode:'global'});
+          var flip=(!rev.error&&rev.identity>fwd.identity);
+          var p=flip?rev:fwd, subj=flip?rcSeq:x.seq;
+          var q=alignPair(r.seq,subj,{mode:'local'});
           // Null model: the same subject, shuffled. Two shuffles, worst case
           // taken, so the bar is the harder one to clear.
-          var nul=0;
-          if(!q.error&&x.seq.length<=6000){
+          var nul=0, nulSkipped=false;
+          if(!q.error&&subj.length<=6000){
             [7919,104729].forEach(function(sd){
-              var z=alignPair(r.seq,shuffleSeq(x.seq,sd),{mode:'local'});
+              var z=alignPair(r.seq,shuffleSeq(subj,sd),{mode:'local'});
               if(!z.error&&z.identity>nul) nul=z.identity;
             });
-          }
-          return {name:x.name,len:x.seq.length,chance:nul,
+          } else if(!q.error) nulSkipped=true;
+          return {name:x.name,len:x.seq.length,chance:nul,nulSkipped:nulSkipped,strand:flip?-1:1,
                   idAln:p.identity,
                   matches:p.matches,mismatches:p.mismatches,gaps:p.gaps,
                   length:p.length,score:p.score,
@@ -11787,14 +11905,16 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       var a=_lastAlign, base=(R()&&R().name||'alignment').replace(/[^A-Za-z0-9._-]+/g,'_');
       if(a.kind==='pair') _dl(alnText(a.r,a.na,a.nb),base+'_alignment.txt','text/plain');
       else if(a.kind==='many'){
-        var rowsM=[['reference','reference_length','sequence','length','global_identity_percent','global_matches','global_mismatches','global_gaps','global_aligned_length','global_score','local_hit_length','local_identity_percent','local_ref_start_1based','local_ref_end','local_percent_of_reference','shuffled_control_identity_percent','note']];
+        var rowsM=[['reference','reference_length','sequence','length','global_identity_percent','global_matches','global_mismatches','global_gaps','global_aligned_length','global_score','local_hit_length','local_identity_percent','local_ref_start_1based','local_ref_end','local_percent_of_reference','shuffled_control_identity_percent','orientation','match_mismatch_gap','note']];
         a.rows.forEach(function(x){ rowsM.push([a.na,a.refLen,x.name,x.len,
           x.error?'':x.idAln.toFixed(2),
           x.error?'':x.matches, x.error?'':x.mismatches, x.error?'':x.gaps,
           x.error?'':x.length, x.error?'':x.score,
           x.error?'':x.locLen, x.error?'':x.locId.toFixed(2),
           x.error?'':x.locFrom+1, x.error?'':x.locTo, x.error?'':x.locCov.toFixed(2),
-          x.error?'':(x.chance>0?x.chance.toFixed(2):''),
+          x.error?'':(x.chance>0?x.chance.toFixed(2):(x.nulSkipped?'not run >6kb':'')),
+          x.error?'':(x.strand===-1?'reverse complement':'forward'),
+          '+2/-1/-2',
           x.error||'']); });
         _dl(csv(rowsM),base+'_identity_table.csv','text/csv');
       }
