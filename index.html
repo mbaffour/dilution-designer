@@ -2961,6 +2961,24 @@ function seqRevComp(s){
 function seqGC(s){ var t=seqClean(s); if(!t.length)return NaN;
   return (t.replace(/[^GC]/g,'').length)/t.length*100; }
 
+// GenBank-style listing: every line carries the 1-based position of its first
+// base, right-aligned to a common width. A flat block of 70,000 letters is not
+// a sequence anyone can use — you cannot check "does the ORF at 12,401 really
+// start with ATG" without counting. `maxNt` caps what is BUILT (0/undefined =
+// no cap); the caller shows .shown/.total so the cap is never silent, and the
+// FASTA export still writes the whole record.
+function seqNumberedLines(seq,width,maxNt){
+  var s=String(seq||''), W=Math.max(1,Math.round(width)||60), total=s.length;
+  var cap=(maxNt>0)?Math.min(Math.round(maxNt),total):total;
+  // Widest number any line will start with = the position of the LAST line.
+  var lastStart=cap>0?(cap-((cap-1)%W)):1, pad=String(lastStart).length, out=[];
+  for(var i=0;i<cap;i+=W){
+    var num=String(i+1);
+    out.push(new Array(pad-num.length+1).join(' ')+num+' '+s.substr(i,Math.min(W,cap-i)));
+  }
+  return {lines:out,text:out.join('\n'),shown:cap,total:total,truncated:cap<total};
+}
+
 // Multi-record FASTA. Returns [{name,desc,seq}] — one entry per '>' record.
 function parseFasta(text){
   var out=[],cur=null;
@@ -2997,6 +3015,15 @@ function parseGff3(text){
       product:attr.product||'', locusTag:attr.locus_tag||'', seqid:f[0]||''});
   });
   return feats;
+}
+// Prokka and Bakta write the assembly into the SAME file as the annotation,
+// after a bare `##FASTA` line — so the one GFF3 that carries its own genome was
+// also the one the importer refused with "load the sequence first". Split it:
+// everything above the marker is GFF3, everything below is multi-FASTA.
+function splitGffFasta(text){
+  var t=String(text||''), m=/^##FASTA\s*$/m.exec(t);
+  if(!m)return {gff:t,fasta:''};
+  return {gff:t.slice(0,m.index),fasta:t.slice(m.index+m[0].length)};
 }
 // NCBI GFF3 writes a `gene` record AND a `CDS` record for the same gene, at
 // identical coordinates. Drawn as-is that is every gene twice, stacked. Merge
@@ -3043,6 +3070,31 @@ function mergeFeats(feats){
             start:g.start, end:g.end, strand:g.strand};
   }).sort(function(a,b){return a.start-b.start||a.end-b.end;});
 }
+// GenBank locations. `join(100..200,300..400)` and `order(...)` list SEVERAL
+// segments of one feature, and a long list wraps onto continuation lines. The
+// old parser took the first `a..b` it could see, so a spliced CDS imported as
+// its first exon and a phage terminase written `join(69000..70153,1..500)` lost
+// the half that crosses the origin — silently, with the map still looking fine.
+// Every `a..b` here is a segment; `complement()` is tracked per group, because
+// `join(complement(1..10),20..30)` really is one segment per strand.
+function _gbLocSegments(loc){
+  var s=String(loc||''), out=[], stack=[], i=0, w, r;
+  while(i<s.length){
+    w=s.slice(i).match(/^([A-Za-z_]+)\(/);
+    if(w){ stack.push(w[1].toLowerCase()==='complement'); i+=w[0].length; continue; }
+    if(s.charAt(i)===')'){ stack.pop(); i++; continue; }
+    r=s.slice(i).match(/^<?(\d+)\.\.>?(\d+)/);        // 1-based inclusive in the file
+    if(r){
+      if(+r[2]>+r[1]-1) out.push({start:+r[1]-1,end:+r[2],strand:stack.indexOf(true)>=0?-1:1});
+      i+=r[0].length; continue;
+    }
+    i++;
+  }
+  return out;
+}
+// Segment k of n carries the feature's name plus " (k/n)", so a two-part CDS
+// reads as one gene in two pieces instead of two genes with the same name.
+function _gbSegName(v,f){ v=String(v||'').trim(); if(!v)return ''; return f._n>1?(v+' ('+(f._i+1)+'/'+f._n+')'):v; }
 // GenBank: ORIGIN block + the common FEATURES lines. Enough to open an NCBI
 // download without a converter, not a full parser.
 function parseGenbank(text){
@@ -3054,22 +3106,45 @@ function parseGenbank(text){
   var feats=[];
   var fm=t.match(/^FEATURES[\s\S]*?(?=^ORIGIN|^\/\/)/m);
   if(fm){
-    var lines=fm[0].split(/\r?\n/), cur=null;
+    // `cur` is the LIST of segments the current feature was split into, so a
+    // /gene= or /product= names every piece of it. The location is accumulated
+    // until the first qualifier because GenBank wraps a long join() onto
+    // continuation lines, and reading only the first line drops the rest.
+    var lines=fm[0].split(/\r?\n/), cur=null, pType='', pLoc='', inLoc=false;
+    var flushLoc=function(){
+      if(!inLoc)return;
+      inLoc=false;
+      var segs=_gbLocSegments(pLoc);
+      cur=segs.length?segs.map(function(g,k){
+        var f={type:pType,start:g.start,end:g.end,strand:g.strand,
+               name:'',product:'',locusTag:'',_i:k,_n:segs.length};
+        f.name=_gbSegName(pType,f);
+        return f;
+      }):null;
+      if(cur)cur.forEach(function(f){ feats.push(f); });
+    };
     lines.forEach(function(ln){
       var m=ln.match(/^ {5}(\S+)\s+(\S.*)$/);
-      if(m){
-        var loc=m[2], strand=/complement/.test(loc)?-1:1;
-        var r=loc.match(/(\d+)\.\.>?(\d+)/);
-        cur=r?{type:m[1],start:+r[1]-1,end:+r[2],strand:strand,name:m[1],product:'',locusTag:''}:null;
-        if(cur)feats.push(cur);
-      } else if(cur){
-        var q=ln.match(/^\s+\/(\w+)="?([^"]*)"?/);
-        if(q){ if(q[1]==='gene'||q[1]==='locus_tag'){ cur.name=q[2]; if(q[1]==='locus_tag')cur.locusTag=q[2]; }
-               else if(q[1]==='product'){ cur.product=q[2]; if(cur.name===cur.type)cur.name=q[2]; } }
+      if(m){ flushLoc(); pType=m[1]; pLoc=m[2].trim(); inLoc=true; return; }
+      var q=ln.match(/^\s+\/(\w+)="?([^"]*)"?/);
+      if(q){
+        flushLoc();
+        if(cur)cur.forEach(function(f){
+          // An EMPTY qualifier value (/locus_tag="") must not overwrite the
+          // type-derived name with ' (1/2)' garbage.
+          if(q[1]==='gene'||q[1]==='locus_tag'){ var nv=_gbSegName(q[2],f); if(nv){ f.name=nv; if(q[1]==='locus_tag')f.locusTag=nv; } }
+          else if(q[1]==='product'){ f.product=String(q[2]||'').trim(); if(f.product&&f.name===_gbSegName(f.type,f))f.name=_gbSegName(f.product,f); }
+        });
+        return;
       }
+      if(inLoc&&/^\s+\S/.test(ln)) pLoc+=ln.trim();      // wrapped location line
     });
+    flushLoc();                                          // a feature with no qualifiers, last in the block
   }
-  return {name:name,seq:seq,features:feats};
+  // The LOCUS line says whether the molecule is circular; dropping it made a
+  // circular phage import linear, so no ORF could ever wrap until the user
+  // flipped Topology by hand.
+  return {name:name,seq:seq,features:feats,circular:/^LOCUS.*\bcircular\b/im.test(t)};
 }
 
 // ── translation (NCBI genetic code tables) ─────────────────────────
@@ -3129,11 +3204,25 @@ function findOrfs(seq,opts){
         if(start<0&&isStart){ start=i; }
         else if(start>=0&&isStop){
           var aaLen=(i-start)/3;
-          if(aaLen>=minAa){
+          // An "ORF" longer than the whole molecule (possible only on a small
+          // circular sequence with a stop-free frame: the scan reads into the
+          // second copy and overtakes its own start) is a scanning artifact,
+          // not a gene — and its arc coordinates cannot express its length:
+          // ge-gs = 2L collapses to end === start. The same goes for an ORF of
+          // EXACTLY the molecule's length (start === end, arc = 0). Skip both.
+          if(aaLen>=minAa&&!(circular&&(i+3-start)>=L)){
             var gs=start, ge=i+3;                     // half-open, on THIS strand
-            var a=dir===1?gs:L-Math.min(ge,L), b=dir===1?Math.min(ge,L):L-gs;
+            // On a circular scan `ge` runs past L into the copied head. Clamping
+            // it with Math.min reported the stub before the origin — an ORF whose
+            // start..end spanned 123 nt while aaLen claimed 186, so no consumer
+            // could recover its nucleotides. A wrapped ORF is an arc: start stays
+            // inside [0,L), end is the wrap point, and (end-start) mod L is the
+            // true length. Unwrapped coordinates are untouched.
+            var wrap=ge>L;
+            var a=dir===1?gs:(wrap?(L-ge%L)%L:L-ge);
+            var b=dir===1?(wrap?ge%L:ge):L-gs;
             out.push({start:a,end:b,strand:dir,frame:dir*(f+1),aaLen:aaLen,
-                      wrapped:ge>L,
+                      wrapped:wrap,
                       nt:scan.slice(start,i+3)});
           }
           start=-1;
@@ -3495,25 +3584,143 @@ function shuffleSeq(seq,seed){
   }
   return a.join('');
 }
-// Progressive multiple alignment: align to the longest sequence as a centre,
-// then pad every row to a common length. Honest about what it is — a centre-
-// star alignment, not a full profile MSA.
+// ONE row of the "One vs many" identity table: the reference against a single
+// subject, in both orientations, plus the shuffled null. Pure and top-level —
+// no UI, no state — so the panel can drive it one subject per macrotask and the
+// self-tests can call it directly. It costs up to FIVE exact DPs per call
+// (global forward, global reverse-complement, local on the winning orientation,
+// and two shuffled-null locals), which is exactly why the caller must not loop
+// over it synchronously.
+function seqCompareOne(refSeq,subjSeq,opts){
+  var o=opts||{};
+  var ref=seqClean(refSeq,true), sub=seqClean(subjSeq,true);
+  var n=ref.length, m=sub.length;
+  if(!n||!m) return {len:m,error:'empty sequence'};
+  // Check the cell cap ONCE, up front, before spending a single DP — so the
+  // caller can tell "this one pair is too big" from "the reference is too big
+  // for every pair on the list" and say the latter once instead of per row.
+  if(n*m>ALIGN_MAX_CELLS)
+    return {len:m,cells:n*m,tooLong:true,
+            error:'too long for exact alignment ('+n+' × '+m+' cells)'};
+  // BOTH orientations. Genes are stored in whichever direction they sit on the
+  // genome, so a perfect homolog cloned the other way round scores 56 % —
+  // noise — if you only align the plus strand.
+  var fwd=alignPair(ref,sub,{mode:'global'});
+  if(fwd.error) return {len:m,error:fwd.error};
+  var rcSeq=seqRevComp(sub);
+  var rev=alignPair(ref,rcSeq,{mode:'global'});
+  var flip=(!rev.error&&rev.identity>fwd.identity);
+  var p=flip?rev:fwd, subj=flip?rcSeq:sub;
+  var q=alignPair(ref,subj,{mode:'local'});
+  // Null model: the same subject, shuffled. Two shuffles, worst case taken, so
+  // the bar is the harder one to clear. Skipped past nullMax because it is two
+  // more full alignments and they are the expensive ones.
+  var nul=0, nulSkipped=false, nullMax=o.nullMax>0?o.nullMax:6000;
+  if(!q.error&&subj.length<=nullMax){
+    [7919,104729].forEach(function(sd){
+      var z=alignPair(ref,shuffleSeq(subj,sd),{mode:'local'});
+      if(!z.error&&z.identity>nul) nul=z.identity;
+    });
+  } else if(!q.error) nulSkipped=true;
+  return {len:m,chance:nul,nulSkipped:nulSkipped,strand:flip?-1:1,
+          idAln:p.identity,
+          matches:p.matches,mismatches:p.mismatches,gaps:p.gaps,
+          length:p.length,score:p.score,
+          locLen:q.error?0:q.length, locId:q.error?0:q.identity,
+          locFrom:q.error?0:q.aStart, locTo:q.error?0:q.aEnd,
+          // Coverage is the span the hit occupies ON THE REFERENCE, not the
+          // aligned length — the latter includes gap columns and can exceed the
+          // reference, which reads as ">100 % covered".
+          locCov:q.error?0:(q.aEnd-q.aStart)/n*100};
+}
+// Centre-star multiple alignment: align every sequence to the longest one (the
+// centre), then MERGE those pairwise alignments into one grid. The merge is the
+// whole job. A pairwise alignment pushes gaps INTO the centre wherever its
+// subject carries an insertion, so each pair describes the centre in its own
+// frame; the master frame reserves, at every centre position, the LARGEST
+// insertion any pair asked for, and re-projects every subject into it. Simply
+// right-padding the rows to a common width — which is what this used to do, with
+// the centre stored ungapped — leaves column c of one row and column c of the
+// next describing different centre positions. The printed alignment is then
+// misregistered and the consensus line is arithmetic on a fiction: a pair the DP
+// scored with ZERO mismatches could still come out with a third of its columns
+// marked non-identical. Honest about what it is — a centre-star alignment, not a
+// full profile MSA — but the columns now correspond.
 function alignMultiple(seqs,opts){
   var list=(seqs||[]).filter(function(x){return x&&x.seq&&seqClean(x.seq).length;});
   if(list.length<2)return {error:'need at least two sequences'};
-  var total=list.reduce(function(a,x){return a+seqClean(x.seq).length;},0);
-  if(total>20000)return {error:'multiple alignment is for genes, not genomes ('+total+' nt total)'};
-  var centre=list.reduce(function(a,b){return seqClean(b.seq).length>seqClean(a.seq).length?b:a;});
-  var rows=[],err=null;
+  // Measure lengths the way alignPair does (it keeps degenerate codes), so the
+  // cap arithmetic below is the same arithmetic that would actually be refused.
+  function _len(x){ return seqClean(x.seq,true).length; }
+  var total=list.reduce(function(a,x){return a+_len(x);},0);
+  if(total>200000)return {error:'multiple alignment is for genes, not genomes ('+
+    total.toLocaleString('en-US')+' nt across '+list.length+' sequences; the display cap is 200,000 nt)'};
+  var centre=list.reduce(function(a,b){return _len(b)>_len(a)?b:a;});
+  var cLen=_len(centre), longest=0;
+  list.forEach(function(x){ if(x!==centre&&_len(x)>longest)longest=_len(x); });
+  // The limit that actually bites is the PER-PAIR exact-DP cap, not the total:
+  // every sequence is aligned to the centre, so the worst pair is centre ×
+  // longest-other. Refuse here with the real numbers rather than passing a total
+  // gate and then letting alignPair refuse one pair with advice about the dot
+  // plot and genome modes — which take exactly two sequences and cannot do this.
+  if(cLen*longest>ALIGN_MAX_CELLS)
+    return {error:'Too large for multiple alignment: every sequence is aligned to the longest one ('+
+      cLen.toLocaleString('en-US')+' nt), so the biggest pair is '+cLen.toLocaleString('en-US')+' × '+
+      longest.toLocaleString('en-US')+' = '+(cLen*longest/1e6).toFixed(1)+'M cells against a cap of '+
+      (ALIGN_MAX_CELLS/1e6)+'M. If some of your sequences are smaller, "One vs many" takes the pairs one at a time — pairs still over the cap are flagged individually instead of blocking the whole run. Two genome-sized sequences need the dot plot or the genome alignment.'};
+  // Bound the TOTAL work too: every pair passing the per-pair cap individually
+  // can still add up to a minute of frozen tab (59 pairs × 6M cells). ~283 ms
+  // per 6M cells on a mid laptop, so 60M cells ≈ 3 s worst — acceptable for a
+  // synchronous call; beyond that, refuse honestly.
+  var work=list.reduce(function(a,x){return x===centre?a:a+cLen*_len(x);},0);
+  if(work>60e6)
+    return {error:'This set needs '+(work/1e6).toFixed(0)+'M DP cells in one go (cap 60M) — the tab would freeze for a minute. Align fewer sequences at once, or use "One vs many", which runs the pairs one at a time with progress.'};
+  var pairs=[],err=null;
   list.forEach(function(x){
-    if(x===centre){ rows.push({name:x.name,aln:seqClean(centre.seq)}); return; }
+    if(x===centre)return;
     var r=alignPair(centre.seq,x.seq,{mode:'global'});
     if(r.error){ err=r.error; return; }
-    rows.push({name:x.name,aln:r.b,ref:r.a});
+    pairs.push({x:x,a:r.a,b:r.b});
   });
   if(err)return {error:err};
-  var width=Math.max.apply(null,rows.map(function(r){return r.aln.length;}));
-  rows.forEach(function(r){ while(r.aln.length<width) r.aln+='-'; });
+  // ins[p] = gap columns the master reserves immediately BEFORE centre base p
+  // (ins[cLen] = after the last one). Maximum over all pairs.
+  var ins=[],i;
+  for(i=0;i<=cLen;i++)ins[i]=0;
+  pairs.forEach(function(p){
+    var pos=0,run=0;
+    for(var k=0;k<p.a.length;k++){
+      if(p.a.charAt(k)==='-'){ run++; continue; }
+      if(run>ins[pos])ins[pos]=run;
+      run=0; pos++;
+    }
+    if(run>ins[pos])ins[pos]=run;
+  });
+  function _dash(n){ var s=''; while(s.length<n)s+='-'; return s; }
+  var cs=seqClean(centre.seq,true), centreRow='';
+  for(i=0;i<cLen;i++) centreRow+=_dash(ins[i])+cs.charAt(i);
+  centreRow+=_dash(ins[cLen]);
+  var width=centreRow.length;
+  // Re-project one subject into the master frame: the bases it inserted at a
+  // centre position go into the block reserved there, left-aligned, and the rest
+  // of the block is gap. Every row therefore ends at the same width by
+  // construction, not by padding.
+  function _project(A,B){
+    var out='',pos=0,buf='';
+    for(var k=0;k<A.length;k++){
+      if(A.charAt(k)==='-'){ buf+=B.charAt(k); continue; }
+      out+=buf+_dash(ins[pos]-buf.length); buf='';
+      out+=B.charAt(k); pos++;
+    }
+    return out+buf+_dash(ins[pos]-buf.length);
+  }
+  var rows=[];
+  list.forEach(function(x){
+    if(x===centre){ rows.push({name:x.name,aln:centreRow}); return; }
+    var p=null;
+    for(var q=0;q<pairs.length;q++) if(pairs[q].x===x){ p=pairs[q]; break; }
+    rows.push({name:x.name,aln:_project(p.a,p.b),ref:centreRow});
+  });
   // Column conservation for the consensus line.
   var cons='';
   for(var c=0;c<width;c++){
@@ -6456,6 +6663,99 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
         fails.push('exact alignment must REFUSE 9M cells, not attempt them');
       n++; if(!alignMultiple([{name:'x',seq:'A'.repeat(15000)},{name:'y',seq:'A'.repeat(15000)}]).error)
         fails.push('alignMultiple must refuse genome-scale input');
+      // ── one row of the One vs many table ──
+      // seqCompareOne is the whole of the per-row science there; the panel just
+      // drives it one subject per macrotask, so this is where it gets checked.
+      // 30 hand-written codons (90 nt) against its own reverse complement. The
+      // reverse-complement orientation reproduces the reference exactly, so the
+      // winning global alignment is 90 columns, 90 matches, 0 mismatches, 0
+      // gaps, 100 % identity, score 90 × (+2) = 180, strand −1. The forward
+      // orientation cannot tie it: the sequence is not its own reverse
+      // complement (it starts with A and ends with A, so the reverse complement
+      // starts with T).
+      n++; var _cc='ATGGCTAAAGGTTCACCGTTACAGGATCTT'
+                  +'AACGTGCATTGGCCATACAGCTTCGAACGG'
+                  +'ATTACCGGATCGCTAAGTCAATGCGGTTAA';
+      var _cr=seqCompareOne(_cc,seqRevComp(_cc));
+      if(_cr.error||_cr.strand!==-1||_cr.idAln!==100||_cr.matches!==90||_cr.mismatches!==0
+         ||_cr.gaps!==0||_cr.length!==90||_cr.score!==180||_cr.len!==90)
+        fails.push('seqCompareOne on a perfect reverse-complement clone: '
+          +(_cr.error||('strand '+_cr.strand+', identity '+_cr.idAln+', '+_cr.matches+' matches / '
+            +_cr.mismatches+' mismatches / '+_cr.gaps+' gaps over '+_cr.length+' columns, score '+_cr.score
+            +', len '+_cr.len))
+          +' — want strand −1, 90 matches / 0 / 0 over 90 columns at 100 %, score 180');
+      // The cap has to be caught BEFORE any DP runs, or "one vs many" cannot
+      // tell "this pair is too big" from "the reference is too big for all of
+      // them". 3000 × 3000 = 9M cells, past the 6M cap.
+      n++; if(!seqCompareOne('A'.repeat(3000),'A'.repeat(3000)).tooLong)
+        fails.push('seqCompareOne must flag 9M cells as too long up front, not attempt them');
+      // ── the centre-star MSA must MERGE its pairwise alignments, not pad them ──
+      // C is the centre (longest, 20 nt). S is C with TT inserted after the 8-nt
+      // AAAAGGGG block and C's trailing AAAA absent, so the optimal global
+      // alignment of C vs S puts TWO gaps INTO the centre at columns 8-9 and
+      // pairs everything else with zero mismatches. The master frame must
+      // reserve that 2-column block. Hand arithmetic: width = 20 centre bases +
+      // 2 reserved columns = 22; the centre's only gaps are columns {8,9}; a
+      // duplicate of the centre aligns gap-for-gap with it; the columns all
+      // three rows agree on are 0-7 (AAAAGGGG) plus 10-17 (CCCCTTTT) = 16.
+      // Right-padding instead — the old behaviour — kept the centre ungapped,
+      // slid it two columns out of register against S, and reported 12.
+      n++; var _msC='AAAAGGGGCCCCTTTTAAAA';
+      var _ms=alignMultiple([{name:'C',seq:_msC},{name:'C2',seq:_msC},{name:'S',seq:'AAAAGGGGTTCCCCTTTT'}]);
+      if(_ms.error) fails.push('MSA registration case errored: '+_ms.error);
+      else {
+        if(!_ms.rows.every(function(r){return r.aln.length===_ms.width;}))
+          fails.push('MSA rows are not all exactly one width');
+        if(_ms.width!==22)
+          fails.push('MSA width '+_ms.width+', want 22 (20 centre bases + a 2-column insertion block)');
+        if(_ms.rows[0].aln.replace(/-/g,'')!==_msC)
+          fails.push('MSA centre row does not degap back to the centre sequence');
+        var _msg=[];
+        for(var _mi=0;_mi<_ms.rows[0].aln.length;_mi++) if(_ms.rows[0].aln.charAt(_mi)==='-')_msg.push(_mi);
+        if(_msg.join(',')!=='8,9')
+          fails.push('MSA centre gaps at columns {'+_msg.join(',')+'}, want {8,9} — the centre never received the subject insertion');
+        if(_ms.rows[1].aln!==_ms.rows[0].aln)
+          fails.push('a duplicate of the centre must align gap-for-gap with the centre row');
+        if(_ms.rows[2].aln.substr(8,2)!=='TT')
+          fails.push('the inserted bases are not in the columns reserved for them');
+        if((_ms.consensus.split('*').length-1)!==16)
+          fails.push('MSA consensus marks '+(_ms.consensus.split('*').length-1)+' identical columns, want 16');
+      }
+      // The limit that actually bites is the per-pair DP (centre × longest
+      // other), not the total nt: two 3 kb genes cleared the old 20,000 nt gate
+      // and then hit a per-pair refusal advertising modes that take exactly two
+      // sequences. Refuse up front, by name, and still align real genes.
+      n++; var _msBig=alignMultiple([{name:'a',seq:'A'.repeat(3000)},{name:'b',seq:'A'.repeat(3000)}]);
+      if(!_msBig.error||_msBig.error.indexOf('One vs many')<0)
+        fails.push('3 kb × 3 kb MSA must be refused with the One vs many suggestion, got: '+(_msBig.error||'no error at all'));
+      n++; var _msOk=alignMultiple([{name:'a',seq:'ACGT'.repeat(10)},{name:'b',seq:'ACGT'.repeat(10)},{name:'c',seq:'ACGA'.repeat(10)}]);
+      if(_msOk.error||_msOk.rows.length!==3)
+        fails.push('three 40 nt sequences must still align, got: '+(_msOk.error||_msOk.rows.length+' rows'));
+      // Total-work gate: 30 sequences of 2 kb pass every per-pair check
+      // (2000 × 2000 = 4M < 6M) but sum to 29 × 4M = 116M cells of frozen tab.
+      n++; var _msMany=[]; for(var _mm=0;_mm<30;_mm++)_msMany.push({name:'s'+_mm,seq:'ACGT'.repeat(500)});
+      if(!alignMultiple(_msMany).error)
+        fails.push('30 × 2 kb passes per-pair checks but is 116M total cells — must be refused, not frozen through');
+      // GenBank topology: the LOCUS line is the only place "circular" is
+      // recorded; dropping it made every circular phage import linear.
+      n++; var _gbC=parseGenbank('LOCUS       pTest 40 bp DNA circular PHG\nORIGIN\n 1 acgtacgtac\n//');
+      var _gbL=parseGenbank('LOCUS       pTest 40 bp DNA linear PHG\nORIGIN\n 1 acgtacgtac\n//');
+      if(_gbC.circular!==true||_gbL.circular!==false)
+        fails.push('parseGenbank must read topology from LOCUS: got circular='+_gbC.circular+'/linear='+_gbL.circular);
+      // An empty /locus_tag="" must not become the feature name " (1/2)".
+      n++; if(_gbSegName('',{_i:0,_n:2})!==''||_gbSegName('  ',{_i:0,_n:2})!=='')
+        fails.push('_gbSegName turned an empty qualifier into a visible name');
+      // A circular scan can fabricate an "ORF" longer than the molecule itself
+      // (a stop-free frame read into the second copy). Its arc coordinates
+      // cannot express its length — it must be dropped, and every returned ORF
+      // must fit: nt length (aaLen*3+3) ≤ L, and for wrapped ORFs the arc
+      // (end-start) mod L must equal that nt length exactly.
+      n++; var _cOrfSeq='ATG'+'GCA'.repeat(30)+'TTT';   // 96 nt circular, stop-free frame 1
+      var _cOrfs=findOrfs(_cOrfSeq,{minAa:5,code:11,circular:true});
+      var _cBad=_cOrfs.filter(function(o){ return o.aaLen*3+3>_cOrfSeq.length ||
+        (o.wrapped && ((o.end-o.start)%_cOrfSeq.length+_cOrfSeq.length)%_cOrfSeq.length!==o.aaLen*3+3); });
+      if(_cBad.length)
+        fails.push(_cBad.length+' circular ORFs are longer than the molecule or have arc≠length');
       // Seed-and-extend: a sequence against itself is 100% covered.
       n++; var _self='ACGTTGCAAGGCTTACGATCCGTTAAGCTGACATTGCCAGGATTACGTGCAA'.repeat(12);
       var _gm2=genomeAlign(_self,_self,{k:14,minBlock:60});
@@ -6546,6 +6846,107 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       var _of=findOrfs('CCCC'+_orf+'CCCC',{minAa:50,code:11});
       if(!_of.some(function(o){return o.strand===1&&o.aaLen===61;}))
         fails.push('findOrfs missed a hand-built 61-codon ORF');
+      // ── GenBank join()/order(): every segment, not just the first ──
+      // "join(10..30,50..70)" is 1-based inclusive, so it is 0-based [9,30) and
+      // [49,70): TWO segments of one CDS, 21 nt each. Taking the first match
+      // imported a spliced gene as its first exon, and a phage gene written
+      // join(69000..70153,1..500) lost the half that crosses the origin.
+      n++; var _gbT='LOCUS       TESTJOIN                  80 bp    DNA     circular PHG\n'
+        +'FEATURES             Location/Qualifiers\n'
+        +'     CDS             join(10..30,50..70)\n'
+        +'                     /gene="spliced"\n'
+        +'ORIGIN\n        1 '+'a'.repeat(80)+'\n//\n';
+      var _gbP=parseGenbank(_gbT), _gbC=_gbP.features.filter(function(f){return f.type==='CDS';});
+      if(_gbP.seq.length!==80||_gbC.length!==2
+         ||_gbC[0].start!==9||_gbC[0].end!==30||_gbC[1].start!==49||_gbC[1].end!==70
+         ||_gbC[0].strand!==1||_gbC[1].strand!==1)
+        fails.push('GenBank join(10..30,50..70) must give 2 CDS segments at [9,30) and [49,70) on the + strand, got '
+          +JSON.stringify(_gbC.map(function(f){return [f.start,f.end,f.strand];})));
+      // complement(join(...)) is ONE gene on the minus strand in two pieces.
+      n++; var _gbR=parseGenbank('LOCUS       X                        900 bp\n'
+        +'FEATURES             Location/Qualifiers\n'
+        +'     CDS             complement(join(100..200,300..400))\n'
+        +'                     /gene="rev"\nORIGIN\n        1 acgt\n//\n').features;
+      if(_gbR.length!==2||_gbR[0].strand!==-1||_gbR[1].strand!==-1
+         ||_gbR[0].start!==99||_gbR[0].end!==200||_gbR[1].start!==299||_gbR[1].end!==400)
+        fails.push('complement(join(...)) lost a segment or its strand: '
+          +JSON.stringify(_gbR.map(function(f){return [f.start,f.end,f.strand];})));
+      // ── Prokka/Bakta GFF3 with the genome after ##FASTA ──
+      // The split must leave no FASTA in the GFF half — a '>' line reaching
+      // parseGff3 is a nine-column split away from becoming a feature — and the
+      // other half must parse as the whole 60 nt contig the features refer to.
+      n++; var _pk='##gff-version 3\n'
+        +'contig_1\tProkka\tCDS\t10\t30\t.\t+\t0\tID=P1;locus_tag=P1\n'
+        +'contig_1\tProkka\tCDS\t40\t54\t.\t-\t0\tID=P2;locus_tag=P2\n'
+        +'##FASTA\n>contig_1 assembled\n'+'ACGT'.repeat(15)+'\n';
+      var _pkS=splitGffFasta(_pk), _pkF=parseFasta(_pkS.fasta), _pkG=parseGff3(_pkS.gff);
+      if(_pkS.gff.indexOf('>')>=0||_pkF.length!==1||_pkF[0].seq.length!==60
+         ||_pkF[0].name!=='contig_1'||_pkG.length!==2)
+        fails.push('##FASTA split: gff still holds ">" '+(_pkS.gff.indexOf('>')>=0)+', '+_pkF.length
+          +' record(s) of '+(_pkF[0]&&_pkF[0].seq.length)+' nt, '+_pkG.length
+          +' features — want no ">", one 60 nt contig_1, 2 features');
+      n++; var _pkN=splitGffFasta('##gff-version 3\nc\t.\tCDS\t1\t9\t.\t+\t0\tID=a');
+      if(_pkN.fasta!==''||_pkN.gff.indexOf('##gff-version')!==0)
+        fails.push('a GFF3 with no ##FASTA must pass through untouched');
+      // ── an ORF across the origin of a circular molecule ──
+      // Hand-built: head 'CTT'×20+'TAG' (63 nt), pad 'TTAGTTAGTTAA' (12 nt — a
+      // stop in all six frames, so nothing else qualifies), tail 'ATG'+'CTT'×40
+      // (123 nt). L = 63+12+123 = 198. The only start codon is the ATG at index
+      // 75; from there the ORF runs 123 nt to the end, wraps, and runs the 63 nt
+      // of head to its TAG. 186 nt = 61 codons + a stop, so aaLen is 61 and
+      // end = (75+186) mod 198 = 63 — BEFORE the start, which is what an arc
+      // across the origin looks like.
+      n++; var _cS='CTT'.repeat(20)+'TAG'+'TTAGTTAGTTAA'+'ATG'+'CTT'.repeat(40);
+      var _cL=_cS.length, _cO=findOrfs(_cS,{minAa:50,code:11,circular:true});
+      var _cW=_cO.filter(function(o){return o.wrapped;});
+      if(_cL!==198||_cO.length!==1||_cW.length!==1||_cO[0].aaLen!==61
+         ||_cO[0].start!==75||_cO[0].end!==63
+         ||((_cO[0].end-_cO[0].start)%_cL+_cL)%_cL!==_cO[0].aaLen*3+3)
+        fails.push('origin-spanning ORF: L='+_cL+', '+_cO.length+' ORF(s), '+_cW.length+' wrapped, aaLen '
+          +(_cO[0]&&_cO[0].aaLen)+' at '+(_cO[0]&&_cO[0].start)+'..'+(_cO[0]&&_cO[0].end)+' spanning '
+          +(_cO[0]?((_cO[0].end-_cO[0].start)%_cL+_cL)%_cL:'-')
+          +' nt — want L=198, one wrapped 61 aa ORF at 75..63 spanning 186 nt');
+      // The reported coordinates must cut the nucleotides back out.
+      n++; var _cR=_cO[0]?(_cS.slice(_cO[0].start)+_cS.slice(0,_cO[0].end)):'';
+      if(_cR!==(_cO[0]&&_cO[0].nt)||_cR.slice(0,3)!=='ATG'||_cR.slice(-3)!=='TAG')
+        fails.push('the start/end of a wrapped ORF do not recover its '+(_cO[0]&&_cO[0].nt.length)+' nt');
+      // Reverse-complemented, position p becomes 197-p: the ORF covers 0..122
+      // and 135..197 of the new sequence, i.e. the arc 135..123 on the − strand.
+      n++; var _cM=findOrfs(seqRevComp(_cS),{minAa:50,code:11,circular:true});
+      if(_cM.length!==1||_cM[0].strand!==-1||!_cM[0].wrapped||_cM[0].start!==135||_cM[0].end!==123)
+        fails.push('the same ORF reverse-complemented must read 135..123 on the − strand, got '
+          +JSON.stringify(_cM.map(function(o){return [o.start,o.end,o.strand,o.wrapped];})));
+      // A circular ORF that does NOT cross the origin keeps plain ascending
+      // coordinates — the wrap handling must not rewrite the ordinary case.
+      n++; var _cP=findOrfs('ATG'+'CTT'.repeat(60)+'TAG'+'TTAGTTAGTTAA',{minAa:50,code:11,circular:true});
+      if(_cP.length!==1||_cP[0].wrapped||_cP[0].start!==0||_cP[0].end!==186)
+        fails.push('a circular ORF that does not wrap must still read 0..186, got '
+          +JSON.stringify(_cP.map(function(o){return [o.start,o.end,o.wrapped];})));
+      // ── numbered sequence listing ──
+      // 130 nt at 60 per line is 60 + 60 + 10, so the lines start at bases 1,
+      // 61 and 121 and the last one carries 10 bases. All hand arithmetic; the
+      // point of the numbers is that a coordinate from the ORF table can be
+      // found by eye, so a drifted prefix is a silently wrong coordinate.
+      n++; var _nlS='ACGT'.repeat(32)+'AC';                 // 128 + 2 = 130 nt
+      var _nl=seqNumberedLines(_nlS,60);
+      var _nlPre=_nl.lines.map(function(l){return l.trim().split(' ')[0];}).join('/');
+      var _nlBody=_nl.lines.map(function(l){return l.replace(/^\s*\d+\s/,'');});
+      if(_nl.lines.length!==3||_nlPre!=='1/61/121'
+         ||_nlBody.map(function(b){return b.length;}).join('/')!=='60/60/10'
+         ||_nlBody.join('')!==_nlS||_nl.truncated)
+        fails.push('seqNumberedLines(130 nt, 60): '+_nl.lines.length+' lines, prefixes '+_nlPre
+          +', lengths '+_nlBody.map(function(b){return b.length;}).join('/')
+          +' — want 3 lines at 1/61/121 of 60/60/10');
+      // The cap must be reported, not silent: 30,000 of 70,000 is 500 lines,
+      // the last starting at 30000 - (29999 mod 60) = 30000 - 59 = 29941.
+      n++; var _nlC=seqNumberedLines('A'.repeat(70000),60,30000);
+      if(_nlC.lines.length!==500||!_nlC.truncated||_nlC.shown!==30000||_nlC.total!==70000
+         ||_nlC.lines[499].trim().split(' ')[0]!=='29941')
+        fails.push('seqNumberedLines cap: '+_nlC.lines.length+' lines, shown '+_nlC.shown
+          +' of '+_nlC.total+', last line starts at '+_nlC.lines[499].trim().split(' ')[0]
+          +' — want 500 lines, 30000 of 70000, last at 29941');
+      n++; if(seqNumberedLines('',60,30000).lines.length!==0||seqNumberedLines('A'.repeat(50),60,30000).truncated)
+        fails.push('seqNumberedLines: empty input must give no lines, and a cap above the length is not truncation');
     }
     // ── host/strain registry. Runs against a scratch copy of dd_hosts and
     // restores whatever was there, so ?selftest=1 never eats real data.
@@ -10964,7 +11365,9 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   .sq-tbl th{color:var(--text3);font-weight:600;}
   .sq-tbl tr.hi td{background:var(--accent-bg);}
   .sq-mono{font:11px/1.55 var(--mono);white-space:pre;overflow-x:auto;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 11px;}
-  .sq-seqbox{font:11.5px/1.6 var(--mono);white-space:pre-wrap;word-break:break-all;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 11px;max-height:340px;overflow:auto;}
+  /* pre, not pre-wrap: a wrapped line puts bases under the coordinate column
+     and the numbers stop meaning anything. The box scrolls in both directions. */
+  .sq-seqbox{font:11.5px/1.6 var(--mono);white-space:pre;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 11px;max-height:340px;overflow:auto;}
   .sq-enz{display:flex;flex-wrap:wrap;gap:4px;max-height:150px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:7px;background:var(--surface);}
   .sq-enz label{font:10.5px var(--mono);display:flex;align-items:center;gap:3px;padding:2px 5px;border-radius:5px;cursor:pointer;}
   .sq-enz label:hover{background:var(--surface2);}
@@ -10975,6 +11378,12 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   var KEY='dd_seq', S=null;
   function _id(){ return 'sq'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
   function _n(v,d){ var x=SCI.parse(String(v)); return isFinite(x)?x:d; }
+  // ONE reader for the ORF length threshold. The field holds whatever was
+  // typed, and unary + turns '' into 0 and 'abc' into NaN in silence — either
+  // one makes findOrfs return every stop-to-stop stretch in the genome while
+  // the label above the table still reads "≥ 100 aa". The map, the table, the
+  // CSV and the FASTA all come through here so they cannot disagree.
+  function orfMinAa(){ return Math.max(0,Math.round(_n(U('orfMin',100),100))); }
 
   // ── state ──────────────────────────────────────────────────────────
   // Sequences can be 70 kb, so records stay lean: no derived data is ever
@@ -11190,9 +11599,19 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     var el=document.getElementById(elId);
     if(el) el.innerHTML=(window.FIG?FIG.svg(model):'<div class="mbc-empty" style="padding:12px">Figure engine unavailable.</div>');
   }
+  // Exporting three zoomed regions of one genome used to write three files
+  // called "phage_N4.svg", each silently replacing the last in the downloads
+  // folder and none of them saying which region it is. Only the linear map has
+  // a region, so only it earns the suffix.
   function figName(ext){
     var r=R();
-    return ((r&&r.name)||'sequence').replace(/[^A-Za-z0-9._-]+/g,'_').slice(0,48)+'.'+ext;
+    var base=((r&&r.name)||'sequence').replace(/[^A-Za-z0-9._-]+/g,'_').slice(0,48);
+    if(r&&S&&S.tab==='map'&&U('mapShape',r.circular?'circ':'lin')==='lin'){
+      var w=U('win_'+r.id,null);
+      if(w&&w.to>w.from&&w.from>=0&&w.to<=r.seq.length&&(w.from>0||w.to<r.seq.length))
+        base+='_'+(w.from+1)+'-'+w.to;               // 1-based, same as the fields
+    }
+    return base+'.'+ext;
   }
   function expSvg(){ if(!_fig||!window.FIG)return; _dl(FIG.svg(_fig),figName('svg'),'image/svg+xml'); }
   function expPdf(){ if(!_fig||!window.FIG)return; _dl(FIG.pdf(_fig),figName('pdf'),'application/pdf'); }
@@ -11232,8 +11651,13 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   function featsForMap(rec){
     var out=rec.feats.map(function(f,i){ return {start:f.start,end:f.end,strand:f.strand,name:f.name||f.type,ci:i}; });
     if(!out.length&&U('mapOrfs',true)){
-      var all=findOrfs(rec.seq,{minAa:_n(U('orfMin',100),100),code:rec.code,circular:rec.circular});
-      all.slice(0,300).forEach(function(o,i){ out.push({start:o.start,end:o.end,strand:o.strand,name:o.aaLen+' aa',ci:i}); });
+      var all=findOrfs(rec.seq,{minAa:orfMinAa(),code:rec.code,circular:rec.circular});
+      // A wrapped ORF has end<start; drawn literally that is a negative-width
+      // box. Draw the arc as far as the origin and say in the label that the
+      // gene carries on past it.
+      all.slice(0,300).forEach(function(o,i){
+        out.push({start:o.start,end:o.wrapped?rec.seq.length:o.end,strand:o.strand,
+                  name:o.aaLen+' aa'+(o.wrapped?' (wraps origin)':''),ci:i}); });
       out.total=all.length; out.predicted=true;     // so the caption can be honest about the 300 cap
     }
     return out;
@@ -11254,30 +11678,41 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       +'<div class="mbc-f"><label for="sqShape">Map</label><select id="sqShape" onchange="SEQ.set(\'mapShape\',this.value)">'
         +'<option value="lin"'+(shape==='lin'?' selected':'')+'>Linear</option>'
         +'<option value="circ"'+(shape==='circ'?' selected':'')+'>Circular</option></select></div>'
-      +'<div class="mbc-f"><label for="sqOrfMin">ORFs ≥ (aa)</label><input id="sqOrfMin" type="text" inputmode="decimal" value="'+escapeHtml(String(U('orfMin',100)))+'" onchange="SEQ.set(\'orfMin\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="sqOrfMin">ORFs ≥ (aa)</label><input id="sqOrfMin" type="text" inputmode="decimal" value="'+escapeHtml(String(orfMinAa()))+'" onchange="SEQ.set(\'orfMin\',this.value)"></div>'
       +'<div class="mbc-f"><label for="sqMapOrfs">If no annotations</label><select id="sqMapOrfs" onchange="SEQ.set(\'mapOrfs\',this.value===\'y\')">'
         +'<option value="y"'+(U('mapOrfs',true)?' selected':'')+'>Draw predicted ORFs</option>'
         +'<option value="n"'+(U('mapOrfs',true)?'':' selected')+'>Draw nothing</option></select></div>'
       +'</div>';
-    // ── region controls (linear only — a "region" of a circle is a linear view) ──
+    // ── region controls ──
+    // These used to be drawn only for shape==='lin'. A plasmid or a circular
+    // genome defaults to 'circ', so on exactly the records people zoom into
+    // there was no from/to, no feature list and no way to reach the zoom at
+    // all. Setting a region from the circular map opens it as a linear view —
+    // SEQ.win already does that — which is the honest answer: a region of a
+    // circle IS a linear stretch. The circular map always draws the whole
+    // molecule, so its fields read 1..L rather than a window it is ignoring.
+    var winF=(shape==='lin')?win:null;
+    h+='<div class="sq-row">'
+      +'<div class="mbc-f"><label for="sqWinA">View from (bp)</label><input id="sqWinA" type="text" inputmode="decimal" value="'+(winF?winF.from+1:1)+'" onchange="SEQ.win(this.value,document.getElementById(\'sqWinB\').value)"></div>'
+      +'<div class="mbc-f"><label for="sqWinB">to (bp)</label><input id="sqWinB" type="text" inputmode="decimal" value="'+(winF?winF.to:L)+'" onchange="SEQ.win(document.getElementById(\'sqWinA\').value,this.value)"></div>';
+    if(feats.length){
+      h+='<div class="mbc-f"><label for="sqJump">Jump to feature</label><select id="sqJump" onchange="SEQ.jump(this.value)">'
+        +'<option value="">— '+feats.length+' features —</option>'
+        +feats.slice(0,1500).map(function(f,i){
+            return '<option value="'+i+'">'+escapeHtml(f.name)+'  ('+(f.start+1).toLocaleString('en-US')+'–'+f.end.toLocaleString('en-US')+')</option>'; }).join('')
+        +'</select></div>';
+    }
+    h+='</div>';
     if(shape==='lin'){
-      h+='<div class="sq-row">'
-        +'<div class="mbc-f"><label for="sqWinA">View from (bp)</label><input id="sqWinA" type="text" inputmode="decimal" value="'+(win?win.from+1:1)+'" onchange="SEQ.win(this.value,document.getElementById(\'sqWinB\').value)"></div>'
-        +'<div class="mbc-f"><label for="sqWinB">to (bp)</label><input id="sqWinB" type="text" inputmode="decimal" value="'+(win?win.to:L)+'" onchange="SEQ.win(document.getElementById(\'sqWinA\').value,this.value)"></div>';
-      if(feats.length){
-        h+='<div class="mbc-f"><label for="sqJump">Jump to feature</label><select id="sqJump" onchange="SEQ.jump(this.value)">'
-          +'<option value="">— '+feats.length+' features —</option>'
-          +feats.slice(0,1500).map(function(f,i){
-              return '<option value="'+i+'">'+escapeHtml(f.name)+'  ('+(f.start+1).toLocaleString('en-US')+'–'+f.end.toLocaleString('en-US')+')</option>'; }).join('')
-          +'</select></div>';
-      }
-      h+='</div><div class="mbc-actions" style="margin-top:0;margin-bottom:10px;">'
+      h+='<div class="mbc-actions" style="margin-top:0;margin-bottom:10px;">'
         +'<button class="btn" onclick="SEQ.win(1,'+L+')">⤢ Whole sequence</button>'
         +'<button class="btn" onclick="SEQ.zoom(0.5)">🔍 Zoom in</button>'
         +'<button class="btn" onclick="SEQ.zoom(2)">🔍 Zoom out</button>'
         +'<button class="btn" onclick="SEQ.pan(-1)">◀ Pan</button>'
         +'<button class="btn" onclick="SEQ.pan(1)">Pan ▶</button>'
         +'</div>';
+    } else {
+      h+='<div class="tit-mini" style="margin:-4px 0 10px;">Setting a region, or jumping to a feature, switches to a linear view of that stretch — the circular map always draws the whole molecule. Use “Map → Circular” to come back.</div>';
     }
     h+='<div class="mbc-f" style="margin-bottom:10px;"><label>Show cut sites for</label>'+enzPicker('mapEnz')+'</div>'
       +'<div class="sq-fig" id="sqFig"></div>'+figBar()
@@ -11303,7 +11738,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     }).join('')+'</div>';
   }
   function panelOrf(rec){
-    var minAa=+U('orfMin',100);
+    var minAa=orfMinAa();
     var orfs=findOrfs(rec.seq,{minAa:minAa,code:rec.code,circular:rec.circular});
     var h='<div class="sq-row">'
       +'<div class="mbc-f"><label for="sqOrfMin2">Minimum length (aa)</label><input id="sqOrfMin2" type="text" inputmode="decimal" value="'+escapeHtml(String(minAa))+'" onchange="SEQ.set(\'orfMin\',this.value)"></div>'
@@ -11320,14 +11755,31 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       +'<div class="mbc-tblwrap"><table class="sq-tbl"><thead><tr><th>#</th><th>Start</th><th>End</th><th>Strand</th><th>Frame</th><th>aa</th><th>kDa</th><th>Protein (first 40 aa)</th></tr></thead><tbody>'
       +orfs.slice(0,400).map(function(o,i){
         var aa=translate(o.nt,rec.code).replace(/\*$/,'');
-        return '<tr><td>'+(i+1)+'</td><td>'+(o.start+1)+'</td><td>'+o.end+'</td><td>'+(o.strand===1?'+':'−')+'</td><td>'+o.frame+'</td><td>'+o.aaLen+'</td><td>'+(proteinMW(aa)/1000).toFixed(1)+'</td><td>'+escapeHtml(aa.slice(0,40))+(aa.length>40?'…':'')+'</td></tr>';
+        // A wrapped ORF ends BEFORE it starts. Saying so in the End cell is the
+        // only thing that makes the row's aa count add up.
+        return '<tr><td>'+(i+1)+'</td><td>'+(o.start+1)+'</td><td>'+o.end+(o.wrapped?' (wraps origin)':'')+'</td><td>'+(o.strand===1?'+':'−')+'</td><td>'+o.frame+'</td><td>'+o.aaLen+'</td><td>'+(proteinMW(aa)/1000).toFixed(1)+'</td><td>'+escapeHtml(aa.slice(0,40))+(aa.length>40?'…':'')+'</td></tr>';
       }).join('')+'</tbody></table></div>'
       +(orfs.length>400?'<div class="tit-mini" style="margin-top:6px;">Showing the first 400 of '+orfs.length+' — the CSV has all of them.</div>':'')
       +'<div class="sl" style="margin-top:18px;">Sequence</div>'
       +'<div class="mbc-actions" style="margin-top:0;"><button class="btn" onclick="SEQ.rc()">⇄ Reverse complement (new sequence)</button>'
         +'<button class="btn" onclick="SEQ.translateAll()">Translate frame 1 → protein sequence</button></div>'
-      +'<div class="sq-seqbox" style="margin-top:8px;">'+escapeHtml(fasta60(rec.seq))+'</div>';
+      +seqBoxHtml(rec.seq);
     return {html:h};
+  }
+  // The raw sequence, GenBank style: 60 nt a line with the 1-based position of
+  // the first base of each. It used to be one unbroken 71,000-character block
+  // with no positions at all, which is not something you can check an ORF
+  // coordinate against. Capped at SEQBOX_MAX so a genome does not put 71 kB of
+  // text into innerHTML on every render; the cap is stated on screen and the
+  // FASTA export is untouched and still writes the whole record.
+  var SEQBOX_MAX=30000;
+  function seqBoxHtml(seq){
+    var nl=seqNumberedLines(seq,60,SEQBOX_MAX);
+    return (nl.truncated
+        ? '<div class="tit-mini" style="margin-top:8px;">Showing 1–'+nl.shown.toLocaleString('en-US')
+          +' of '+nl.total.toLocaleString('en-US')+' bp — the FASTA download has everything.</div>'
+        : '')
+      +'<div class="sq-seqbox" style="margin-top:8px;">'+escapeHtml(nl.text)+'</div>';
   }
   function fasta60(s){ var o=[]; for(var i=0;i<s.length;i+=60) o.push(s.substr(i,60)); return o.join('\n'); }
 
@@ -11436,7 +11888,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       h+='<div class="mbc-f" style="margin-bottom:10px;"><label>'
         +(mode==='many'
           ? 'Compare <b>'+escapeHtml(cur.name)+'</b> against (tick any number)'
-          : 'Sequences to align (2 or more, genes not genomes)')
+          : 'Sequences to align (2 or more). Every one is aligned to the longest, and that pair is the exact O(n×m) DP — so the real limit is longest × next-longest ≤ '+(ALIGN_MAX_CELLS/1e6)+' M cells, about '+(Math.sqrt(ALIGN_MAX_CELLS)/1000).toFixed(1)+' kb against '+(Math.sqrt(ALIGN_MAX_CELLS)/1000).toFixed(1)+' kb. Past that, use One vs many.')
         +'</label><div class="sq-enz">'
         +(pool.length?pool.map(function(r){ return '<label><input type="checkbox" '+(msa.indexOf(r.id)>=0?'checked ':'')
           +'onchange="SEQ.msaPick(\''+jsAttr(r.id)+'\',this.checked)"> '+escapeHtml(r.name)+' <span style="color:var(--text3)">'+r.seq.length.toLocaleString('en-US')+' bp</span></label>'; }).join('')
@@ -11447,8 +11899,19 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
           +'<button class="btn" onclick="SEQ.pickAll(false)">Clear</button></div>':'');
     }
     h+='<div class="mbc-actions" style="margin-top:0;"><button class="btn ac" onclick="SEQ.runAlign()">Run</button>'
-      +(_lastAlign?'<button class="btn" onclick="SEQ.alignDl()">⬇ Download result</button>':'')+'</div>';
-    if(!U('alRun')) return {html:h+'<div class="ibox" style="margin-top:10px;">Exact alignment is O(n×m) and is capped at '+(ALIGN_MAX_CELLS/1e6)+' M cells — for anything genome-sized use the dot plot or the genome alignment, which are k-mer based and run in well under a second on 70 kb.</div>'};
+      +((_lastAlign&&_lastAlign.kind&&!_lastAlign.error)?'<button class="btn" onclick="SEQ.alignDl()">⬇ Download result</button>':'')+'</div>';
+    // A one-vs-many run in flight. The panel is alive between subjects, so it
+    // owes the user where the run is and a way out of it.
+    if(_alignProg) return {html:h+'<div class="ibox" style="margin-top:10px;">Aligning '
+      +(_alignProg.done+1)+' of '+_alignProg.total+' — '+escapeHtml(_alignProg.name)+'… '
+      +'<button class="btn" onclick="SEQ.cancelAlign()" style="margin-left:6px;">Cancel</button></div>'};
+    // The pre-run guidance is per mode: telling the MSA panel to "use the dot
+    // plot" (a two-sequence mode) was exactly the misdirection the cap fix
+    // removed from the error path.
+    if(!U('alRun')) return {html:h+'<div class="ibox" style="margin-top:10px;">'+(
+      mode==='msa' ? 'Aligns every sequence to the longest one and merges the result (centre-star). Best for a handful of gene-sized sequences — the pairwise limit is about '+(Math.sqrt(ALIGN_MAX_CELLS)/1000).toFixed(1)+' kb against '+(Math.sqrt(ALIGN_MAX_CELLS)/1000).toFixed(1)+' kb; past that, use One vs many.'
+      : mode==='many' ? 'Runs the reference against each ticked sequence one at a time, both orientations, with a shuffled-sequence control. Gene-scale pairs are exact; pairs past the '+(ALIGN_MAX_CELLS/1e6)+' M cell cap are flagged individually.'
+      : 'Exact alignment is O(n×m) and is capped at '+(ALIGN_MAX_CELLS/1e6)+' M cells — for anything genome-sized use the dot plot or the genome alignment, which are k-mer based and run in well under a second on 70 kb.')+'</div>'};
     var res=_lastAlign;
     if(!res) return {html:h};
     if(res.error) return {html:h+'<div class="ibox w" style="margin-top:10px;">'+escapeHtml(res.error)+'</div>'};
@@ -11473,6 +11936,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       // Three identity denominators, because they answer different questions
       // and papers quote all three. Named in the header so nobody guesses.
       h+='<div class="sq-stat" style="margin-top:14px;"><span><b>'+res.rows.length+'</b> comparisons</span>'
+        +(res.cancelled?'<span style="color:var(--warn)"><b>cancelled</b> — the rest of the list was never run</span>':'')
         +'<span>reference: '+escapeHtml(res.na)+' ('+res.refLen.toLocaleString('en-US')+' bp)</span>'
         +'<span>match +2 / mismatch −1 / gap −2</span></div>'
         +'<div class="mbc-actions" style="margin-top:0;"><button class="btn" onclick="SEQ.alignDl()">⬇ Identity table (CSV)</button></div>'
@@ -11484,9 +11948,14 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
         +'<th title="best local identity against a shuffled copy of the same sequence — the identity you would get by chance">vs shuffled</th></tr></thead><tbody>'
         +res.rows.map(function(r,i){
           if(r.error) return '<tr><td>'+escapeHtml(r.name)+'</td><td>'+r.len.toLocaleString('en-US')+'</td><td colspan="9" style="color:var(--warn)">'+escapeHtml(r.error)+'</td></tr>';
-          var real=r.chance>0&&(r.locId-r.chance)>=10;
+          // `real` needs the null model, and the null model is skipped above
+          // 6 kb — so gating the orientation chip on it hid the flip for every
+          // large subject that genuinely aligns better reverse-complemented.
+          // Orientation is a fact about which alignment won; the null only ever
+          // gets to REFUTE it, never to license it.
+          var nullRan=r.chance>0, real=nullRan&&(r.locId-r.chance)>=10;
           return '<tr'+(i===0?' class="hi"':'')+'><td>'+escapeHtml(r.name)
-            +((r.strand===-1&&real)?'<span class="sq-chip" title="the better alignment was to the reverse complement of this sequence">reverse complement</span>':'')
+            +((r.strand===-1&&!(nullRan&&!real))?'<span class="sq-chip" title="the better alignment was to the reverse complement of this sequence">reverse complement</span>':'')
             +(r.chance>0&&!real?'<span class="sq-chip" title="the local hit is no better than chance for sequences of this length and base composition">no better than chance</span>':'')
             +(r.nulSkipped?'<span class="sq-chip" title="the shuffled null model is skipped above 6 kb because it costs two more full alignments">null not run</span>':'')
             +'</td><td>'+r.len.toLocaleString('en-US')+'</td>'
@@ -11529,6 +11998,45 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     return out.join('\n');
   }
 
+  // ── one vs many: one subject per macrotask ─────────────────────────
+  // Each subject costs up to five exact DPs, so a forty-sequence panel is
+  // several seconds of solid CPU. Run in one loop that is a frozen tab: no
+  // paint, no progress, no way out, and on a slow machine the browser offers to
+  // kill the page. One subject per macrotask instead — the panel repaints
+  // between subjects, says which one is in flight, and can be abandoned with
+  // the rows already computed kept. `_alignToken` is the run token: bumping it
+  // makes any pending step a no-op, which is how a re-run or a switch of
+  // sequence/mode retires an in-flight run.
+  var _alignToken=0, _alignProg=null, _alignCancel=null;
+  function _alignAbort(){ _alignToken++; _alignProg=null; _alignCancel=null; }
+  function runMany(r,jobs,refN){
+    var token=++_alignToken, rows=[], i=0;
+    _lastAlign=null;
+    _alignCancel=function(){ if(token!==_alignToken)return; _alignToken++; finish(true); };
+    function finish(cancelled){
+      _alignProg=null; _alignCancel=null;
+      rows.sort(function(a,b){ return (b.idAln||-1)-(a.idAln||-1); });
+      _lastAlign={kind:'many',rows:rows,na:r.name,refLen:r.seq.length,total:jobs.length};
+      if(cancelled) _lastAlign.cancelled=true;
+      render();
+    }
+    function step(){
+      if(token!==_alignToken) return;          // retired: re-run, cancel, or a mode switch
+      var j=jobs[i], row;
+      row=j.over ? {len:j.m,error:'past the exact-alignment cap ('+refN.toLocaleString('en-US')+' bp × '+j.m.toLocaleString('en-US')+' bp) — use the genome alignment mode against this one'}
+                 : seqCompareOne(r.seq,j.rec.seq);
+      row.name=j.rec.name;
+      rows.push(row); i++;
+      if(i>=jobs.length){ finish(false); return; }
+      _alignProg={done:i,total:jobs.length,name:jobs[i].rec.name};
+      render();
+      setTimeout(step,0);
+    }
+    _alignProg={done:0,total:jobs.length,name:jobs[0].rec.name};
+    render();
+    setTimeout(step,0);
+  }
+
   // ── main render ────────────────────────────────────────────────────
   function render(){
     if(!S)S=load();
@@ -11563,7 +12071,9 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   // ── import ─────────────────────────────────────────────────────────
   function addRec(r,quiet){
     var c=_coerceSeq(r); if(!c)return null;
-    if(S.seqs.length>=60){ showToast('60 sequences is the limit — delete one first','warn'); return null; }
+    // During a multi-record import the caller reports the shortfall once; a
+    // per-record warning here would fire dozens of times and bury it.
+    if(S.seqs.length>=60){ if(!quiet) showToast('60 sequences is the limit — delete one first','warn'); return null; }
     S.seqs.push(c); S.active=S.seqs.length-1;
     if(!quiet) showToast('✓ '+c.name+' ('+c.seq.length.toLocaleString('en-US')+' bp)','green');
     return c;
@@ -11577,16 +12087,57 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   }
   function importText(text,fname){
     var t=String(text||'');
-    // GFF3 annotates whatever is already loaded rather than making a record.
+    // GFF3 annotates whatever is already loaded — unless the file brought its
+    // own genome along after ##FASTA, in which case it makes the records too.
     if(/^##gff-version/m.test(t)||/\.gff3?$/i.test(fname||'')){
-      var feats=parseGff3(t);
-      var rec=R();
-      if(!rec){ showToast('Load the sequence first, then import its GFF3','warn'); return; }
-      rec.feats=mergeFeats(featFilter(feats)).filter(function(f){
-        return f.start<rec.seq.length;                 // an annotation for a different record
-      }).slice(0,4000);
-      showToast('✓ '+rec.feats.length+' features added to '+rec.name
-        +(feats.length>rec.feats.length?' (from '+feats.length+' records)':''),'green');
+      var parts=splitGffFasta(t);
+      var feats=parseGff3(parts.gff);
+      // A Prokka/Bakta file carries its contigs after ##FASTA. Import those
+      // first and annotate them; a plain GFF3 still annotates what is loaded.
+      var made=[], nContig=0;
+      if(/\S/.test(parts.fasta)){
+        var frecs=parseFasta(parts.fasta); nContig=frecs.length;
+        frecs.slice(0,60).forEach(function(x){ var c=addRec(x,true); if(c)made.push(c); });
+        if(!made.length){
+          showToast(S.seqs.length>=60
+            ? 'Sequence library is full (60) — delete one before importing this GFF3'
+            : 'That GFF3 had a ##FASTA section with no sequence in it','warn');
+          return; }
+      }
+      var targets=made.length?made:(R()?[R()]:[]);
+      if(!targets.length){ showToast('Load the sequence first, then import its GFF3','warn'); return; }
+      // A feature belongs to the contig its seqid names. A single-record import
+      // takes everything, which is what a one-contig annotation means even when
+      // the seqid and the FASTA header disagree.
+      var byName=Object.create(null);
+      targets.forEach(function(x){ byName[x.name]=x; });
+      // "One target" only means "everything belongs to it" when the FILE had at
+      // most one contig. If a 3-contig Prokka import fit only 1 record under the
+      // library cap, funnelling all three contigs' genes onto it would draw
+      // contig 2's genes on contig 1.
+      var lone=(targets.length===1&&nContig<=1)?targets[0]:null, bucket=Object.create(null);
+      feats.forEach(function(f){
+        var tg=byName[f.seqid]||lone; if(!tg)return;
+        (bucket[tg.id]||(bucket[tg.id]=[])).push(f);
+      });
+      // 4000 is a hard cap (_coerceSeq re-applies it on every save), so a
+      // densely annotated genome loses the tail. Saying "4000 features added"
+      // and stopping there reads as "that file had 4000 features".
+      var added=0, capped=0;
+      targets.forEach(function(tg){
+        var kept=mergeFeats(featFilter(bucket[tg.id]||[])).filter(function(f){
+          return f.start<tg.seq.length;                 // an annotation for a different record
+        });
+        if(kept.length>4000) capped+=kept.length;
+        tg.feats=kept.slice(0,4000);
+        added+=tg.feats.length;
+      });
+      var msg='✓ '+added+' feature'+(added===1?'':'s')+' added to '
+        +(targets.length===1?targets[0].name:targets.length+' sequences');
+      if(capped) msg+=' — capped at 4000 per sequence of '+capped+' that matched';
+      else if(feats.length>added) msg+=' (from '+feats.length+' records)';
+      if(nContig>made.length) msg+=' — imported '+made.length+' of '+nContig+' contigs, the sequence library is capped at 60';
+      showToast(msg,(capped||nContig>made.length)?'warn':'green');
       render(); return;
     }
     if(/^LOCUS\s/m.test(t)){
@@ -11596,27 +12147,49 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       // drop the `source` record, which spans the whole molecule and would
       // otherwise draw one box across the entire map.
       if(gb&&gb.seq&&gb.seq.length){
-        addRec({name:gb.name,seq:gb.seq,feats:mergeFeats(featFilter(gb.features))});
+        addRec({name:gb.name,seq:gb.seq,circular:gb.circular,feats:mergeFeats(featFilter(gb.features))});
         render(); return; }
       showToast('That GenBank file had no ORIGIN sequence','warn'); return;
     }
     var recs=parseFasta(t);
     if(!recs.length){ showToast('No sequence found in that file','warn'); return; }
-    var n=0;
-    recs.slice(0,60).forEach(function(r){ if(addRec(r,true))n++; });
-    showToast('✓ '+n+' sequence'+(n===1?'':'s')+' imported','green');
+    // addRec returns null for TWO different reasons — the 60-record library
+    // cap, and a record with no usable DNA in it (a peptide, an all-N stub).
+    // Blaming the cap for both asserts something false; count them apart.
+    var n=0, capN=0, badN=0;
+    recs.forEach(function(r){
+      if(S.seqs.length>=60){ capN++; return; }
+      if(addRec(r,true))n++; else badN++;
+    });
+    var bits=[];
+    if(capN) bits.push(capN+' dropped — sequence library is capped at 60');
+    if(badN) bits.push(badN+' had no DNA sequence in them');
+    showToast((n?'✓ imported '+n+' of '+recs.length:'Imported none of '+recs.length)
+      +(bits.length?' ('+bits.join('; ')+')':''),
+      bits.length?'warn':'green');
     render();
   }
 
   // ── exports ────────────────────────────────────────────────────────
   function csv(rows){ return rows.map(function(r){ return r.map(csvCell).join(','); }).join('\r\n'); }
+  // A truncated notebook table that says nothing about it is a table the next
+  // reader takes for the whole result. The marker is a ROW, not a note in the
+  // title, so it survives into the Markdown, HTML, DOCX and CSV exports the
+  // notebook writes — a title-only caveat is the first thing lost on a paste.
+  function capRow(shown,total,ncol,what){
+    var row=['…','('+shown+' of '+total+' shown — the '+what+' CSV has all of them)'];
+    while(row.length<ncol) row.push('');
+    return row.slice(0,Math.max(2,ncol));
+  }
 
   window.SEQ={
     init:function(){ if(!S)S=load(); render(); },
     render:function(){ if(S)render(); },
-    sel:function(i){ S.active=i; _lastAlign=null; setU('alRun',false); setU('pRun',false); render(); },
+    sel:function(i){ _alignAbort(); S.active=i; _lastAlign=null; setU('alRun',false); setU('pRun',false); render(); },
     tab:function(t){ S.tab=t; render(); },
-    set:function(k,v){ setU(k,v); if(k==='alMode'){ _lastAlign=null; setU('alRun',false); } render(); },
+    set:function(k,v){ setU(k,v); if(k==='alMode'){ _alignAbort(); _lastAlign=null; setU('alRun',false); } render(); },
+    // Keeps the rows already computed and marks the run cancelled in the header.
+    cancelAlign:function(){ if(_alignCancel) _alignCancel(); },
     setRec:function(k,v){ var r=R(); if(!r)return;
       if(k==='circular')r.circular=!!v;
       else if(k==='code')r.code=(String(v)==='1')?1:11;
@@ -11663,6 +12236,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       var pad=Math.max(60,Math.round((f.end-f.start)*0.35));
       this.win(f.start-pad+1,f.end+pad); },
     msaPick:function(id,on){
+      _alignToken++;                      // an in-flight run's job list is now stale
       var list=U('alMsa',[]).slice(), i=list.indexOf(id);
       if(on&&i<0)list.push(id); else if(!on&&i>=0)list.splice(i,1);
       setU('alMsa',list); save(); },
@@ -11700,6 +12274,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       delete S.ui['win_'+r.id];                 // otherwise the window outlives the sequence
       var mp=U('alMsa',[]).indexOf(r.id); if(mp>=0){ var l2=U('alMsa',[]).slice(); l2.splice(mp,1); setU('alMsa',l2); }
       if(U('alB','')===r.id) setU('alB','');
+      _alignAbort();
       S.seqs.splice(S.active,1); S.active=Math.max(0,S.active-1); _lastAlign=null; render(); },
     rc:function(){ var r=R(); if(!r)return;
       addRec({name:r.name+' (revcomp)',seq:seqRevComp(r.seq),circular:r.circular}); render(); },
@@ -11715,16 +12290,19 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     exp:function(kind){ if(kind==='svg')expSvg(); else if(kind==='pdf')expPdf(); else expPng(+kind); },
 
     orfCsv:function(){ var r=R(); if(!r)return;
-      var orfs=findOrfs(r.seq,{minAa:+U('orfMin',100),code:r.code,circular:r.circular});
-      var rows=[['orf','start_1based','end','strand','frame','aa_length','kDa','protein']];
+      var orfs=findOrfs(r.seq,{minAa:orfMinAa(),code:r.code,circular:r.circular});
+      // wraps_origin is what tells a reader that end < start is the arc across
+      // the origin and not a corrupt row.
+      var rows=[['orf','start_1based','end','strand','frame','aa_length','kDa','wraps_origin','protein']];
       orfs.forEach(function(o,i){ var aa=translate(o.nt,r.code).replace(/\*$/,'');
-        rows.push([i+1,o.start+1,o.end,o.strand===1?'+':'-',o.frame,o.aaLen,(proteinMW(aa)/1000).toFixed(2),aa]); });
+        rows.push([i+1,o.start+1,o.end,o.strand===1?'+':'-',o.frame,o.aaLen,(proteinMW(aa)/1000).toFixed(2),o.wrapped?'yes':'',aa]); });
       _dl(csv(rows),r.name.replace(/[^A-Za-z0-9._-]+/g,'_')+'_orfs.csv','text/csv'); },
     orfFasta:function(what){ var r=R(); if(!r)return;
-      var orfs=findOrfs(r.seq,{minAa:+U('orfMin',100),code:r.code,circular:r.circular});
+      var orfs=findOrfs(r.seq,{minAa:orfMinAa(),code:r.code,circular:r.circular});
       var out=orfs.map(function(o,i){
         var s=what==='aa'?translate(o.nt,r.code).replace(/\*$/,''):o.nt;
-        return '>'+r.name+'_orf'+(i+1)+' '+(o.start+1)+'..'+o.end+(o.strand===1?'(+)':'(-)')+' '+o.aaLen+'aa\n'+fasta60(s);
+        return '>'+r.name+'_orf'+(i+1)+' '+(o.start+1)+'..'+o.end+(o.strand===1?'(+)':'(-)')
+          +(o.wrapped?' wraps-origin':'')+' '+o.aaLen+'aa\n'+fasta60(s);
       }).join('\n');
       _dl(out+'\n',r.name.replace(/[^A-Za-z0-9._-]+/g,'_')+'_orfs_'+what+'.fasta','text/plain'); },
 
@@ -11784,18 +12362,20 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
         }catch(e){}
       }
       if(sel.orfs){
-        var orfs=findOrfs(r.seq,{minAa:+U('orfMin',100),code:r.code,circular:r.circular});
-        out.push({type:'table',title:'ORFs ≥ '+U('orfMin',100)+' aa ('+orfs.length+')',
-          cols:['#','Start','End','Strand','aa','kDa'],
-          rows:orfs.slice(0,120).map(function(o,i){ var aa=translate(o.nt,r.code).replace(/\*$/,'');
-            return [String(i+1),String(o.start+1),String(o.end),o.strand===1?'+':'−',String(o.aaLen),(proteinMW(aa)/1000).toFixed(1)]; })});
+        var orfs=findOrfs(r.seq,{minAa:orfMinAa(),code:r.code,circular:r.circular});
+        var orfRows=orfs.slice(0,120).map(function(o,i){ var aa=translate(o.nt,r.code).replace(/\*$/,'');
+          return [String(i+1),String(o.start+1),String(o.end)+(o.wrapped?' (wraps origin)':''),o.strand===1?'+':'−',String(o.aaLen),(proteinMW(aa)/1000).toFixed(1)]; });
+        if(orfs.length>orfRows.length) orfRows.push(capRow(orfRows.length,orfs.length,6,'ORF table'));
+        out.push({type:'table',title:'ORFs ≥ '+orfMinAa()+' aa ('+orfs.length+')',
+          cols:['#','Start','End','Strand','aa','kDa'], rows:orfRows});
       }
       if(sel.digest){
         var enz=cutEnzymes();
         var d=enz.length?digest(r.seq,enz,r.circular):{sites:[],fragments:[]};
+        var fragRows=d.fragments.slice(0,80).map(function(f,i){ return [String(i+1),String(f.len),String(f.start+1),String(f.end)]; });
+        if(d.fragments.length>fragRows.length) fragRows.push(capRow(fragRows.length,d.fragments.length,4,'fragment'));
         out.push({type:'table',title:'Digest — '+(enz.join(' + ')||'no enzymes')+' ('+d.fragments.length+' fragments)',
-          cols:['#','Size (bp)','From','To'],
-          rows:d.fragments.slice(0,80).map(function(f,i){ return [String(i+1),String(f.len),String(f.start+1),String(f.end)]; })});
+          cols:['#','Size (bp)','From','To'], rows:fragRows});
       }
       if(sel.primers&&_lastPrimers&&_lastPrimers.pairs){
         out.push({type:'table',title:'Primer pairs — '+r.name,
@@ -11824,7 +12404,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
           ['Identical columns',String(a.m.consensus.split('*').length-1)],['Centre',a.m.centre]]});
         else if(a.kind==='dot') out.push({type:'kv',title:'Dot plot — '+a.na+' vs '+a.nb,pairs:[
           ['Word size k',String(a.dp.k)],['Matching k-mers',a.dp.points.length.toLocaleString('en-US')]]});
-        else if(a.kind==='many') out.push({type:'table',title:'Identity vs '+a.na+' ('+a.refLen+' bp)',
+        else if(a.kind==='many') out.push({type:'table',title:'Identity vs '+a.na+' ('+a.refLen+' bp)'+(a.cancelled?' — CANCELLED at '+a.rows.length+' of '+a.total+', partial':''),
           cols:['Sequence','Length','Global ID %','Mismatches','Gaps','Local hit','Local ID %','vs shuffled'],
           rows:a.rows.map(function(x){ return [x.name,String(x.len),
             x.error?'—':x.idAln.toFixed(1),
@@ -11837,49 +12417,43 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     runAlign:function(){
       var r=R(); if(!r)return;
       var mode=U('alMode','pair');
+      _alignAbort();                       // a re-run retires whatever was in flight
       setU('alRun',true);
       if(mode==='many'){
         var picks=S.seqs.filter(function(x){return x.id!==r.id&&U('alMsa',[]).indexOf(x.id)>=0;});
         if(!picks.length){ _lastAlign={error:'Tick at least one sequence to compare against.'}; render(); return; }
-        // Global AND local per pair. Global alone is misleading when lengths
-        // differ: Needleman-Wunsch will insert hundreds of gaps to harvest
-        // chance matches, so an unrelated 942 bp gene can look like a 97 %
-        // match to a 321 bp reference if you divide matches by the reference
-        // length. The local (Smith-Waterman) hit answers the question that
-        // actually matters — "is there a real shared region, and how long?"
-        var rows=picks.map(function(x){
-          // BOTH orientations. Genes are stored in whichever direction they sit
-          // on the genome, so a perfect homolog cloned the other way round
-          // scores 56 % — noise — if you only align the plus strand.
-          var fwd=alignPair(r.seq,x.seq,{mode:'global'});
-          if(fwd.error) return {name:x.name,len:x.seq.length,error:fwd.error};
-          var rcSeq=seqRevComp(x.seq);
-          var rev=alignPair(r.seq,rcSeq,{mode:'global'});
-          var flip=(!rev.error&&rev.identity>fwd.identity);
-          var p=flip?rev:fwd, subj=flip?rcSeq:x.seq;
-          var q=alignPair(r.seq,subj,{mode:'local'});
-          // Null model: the same subject, shuffled. Two shuffles, worst case
-          // taken, so the bar is the harder one to clear.
-          var nul=0, nulSkipped=false;
-          if(!q.error&&subj.length<=6000){
-            [7919,104729].forEach(function(sd){
-              var z=alignPair(r.seq,shuffleSeq(subj,sd),{mode:'local'});
-              if(!z.error&&z.identity>nul) nul=z.identity;
-            });
-          } else if(!q.error) nulSkipped=true;
-          return {name:x.name,len:x.seq.length,chance:nul,nulSkipped:nulSkipped,strand:flip?-1:1,
-                  idAln:p.identity,
-                  matches:p.matches,mismatches:p.mismatches,gaps:p.gaps,
-                  length:p.length,score:p.score,
-                  locLen:q.error?0:q.length, locId:q.error?0:q.identity,
-                  locFrom:q.error?0:q.aStart, locTo:q.error?0:q.aEnd,
-                  // Coverage is the span the hit occupies ON THE REFERENCE, not
-                  // the aligned length — the latter includes gap columns and can
-                  // exceed the reference, which reads as ">100 % covered".
-                  locCov:(q.error||!r.seq.length)?0:(q.aEnd-q.aStart)/r.seq.length*100};
-        }).sort(function(a,b){ return (b.idAln||-1)-(a.idAln||-1); });
-        _lastAlign={kind:'many',rows:rows,na:r.name,refLen:r.seq.length};
-        render(); return;
+        // Global AND local per pair — see seqCompareOne, which is the whole of
+        // the per-row science. Global alone is misleading when lengths differ:
+        // Needleman-Wunsch will insert hundreds of gaps to harvest chance
+        // matches, so an unrelated 942 bp gene can look like a 97 % match to a
+        // 321 bp reference if you divide matches by the reference length. The
+        // local (Smith-Waterman) hit answers the question that actually
+        // matters — "is there a real shared region, and how long?"
+        //
+        // Size the pairs first. A genome-sized reference blows the exact-DP
+        // cell cap against every gene on the list, and a table of forty
+        // identical "too large" rows explains the same one fact forty times.
+        var refN=seqClean(r.seq,true).length;
+        var jobs=picks.map(function(x){
+          var m=seqClean(x.seq,true).length;
+          return {rec:x,m:m,over:refN*m>ALIGN_MAX_CELLS};
+        });
+        if(jobs.every(function(j){return j.over;})){
+          // Blame the PAIR, not the reference: a 900 bp gene against three
+          // genomes hits this too, and there the gene is exactly what exact
+          // alignment is for — the other side is what is oversized.
+          var smallest=Math.min.apply(null,jobs.map(function(j){return j.m;}));
+          _lastAlign={error:'Every ticked pair is past the '+(ALIGN_MAX_CELLS/1e6)
+            +' M cell cap on exact alignment: the smallest is '+refN.toLocaleString('en-US')+' bp ('
+            +r.name+') × '+smallest.toLocaleString('en-US')+' bp = '
+            +(refN*smallest/1e6).toFixed(0)+' M cells. Whichever side is genome-sized, '
+            +'use the genome alignment mode against each large sequence one at a time — '
+            +'its seed-and-extend finds where the smaller sequence sits without the full DP. '
+            +'The dot plot shows the same thing as a picture.'};
+          render(); return;
+        }
+        runMany(r,jobs,refN);
+        return;
       }
       if(mode==='msa'){
         var picks=S.seqs.filter(function(x){return U('alMsa',[]).indexOf(x.id)>=0;});
@@ -11916,7 +12490,9 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
           x.error?'':(x.strand===-1?'reverse complement':'forward'),
           '+2/-1/-2',
           x.error||'']); });
-        _dl(csv(rowsM),base+'_identity_table.csv','text/csv');
+        // A cancelled run exports the rows it got. Say so in the filename, or a
+        // half-finished panel leaves the folder looking like a whole one.
+        _dl(csv(rowsM),base+(a.cancelled?'_identity_table_partial.csv':'_identity_table.csv'),'text/csv');
       }
       else if(a.kind==='msa') _dl(msaText(a.m),base+'_msa.txt','text/plain');
       else if(a.kind==='dot'){
@@ -11930,7 +12506,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       } },
     // For the notebook provider and the command palette.
     list:function(){ return S?S.seqs:[]; },
-    open:function(id){ if(!S)S=load(); var i=S.seqs.map(function(x){return x.id;}).indexOf(id); if(i>=0)S.active=i; render(); },
+    open:function(id){ if(!S)S=load(); var i=S.seqs.map(function(x){return x.id;}).indexOf(id); if(i>=0){ _alignAbort(); S.active=i; } render(); },
     _primers:function(){ return _lastPrimers; },
     _rec:R
   };
