@@ -629,6 +629,42 @@ body.print-plate-mode .excl-bar{display:none!important;}
   </div>
 </div>
 
+<!-- ══════════ SEQUENCES & CLONING ══════════ -->
+<div id="seqView" style="display:none;padding:16px 20px 60px;max-width:1180px;margin:0 auto;">
+  <div class="mbc-grid">
+    <aside class="mbc-nav">
+      <div class="sl">Sequences</div>
+      <button class="btn ac" onclick="SEQ.add()" style="width:100%;justify-content:center;">＋ Paste / new</button>
+      <button class="btn" onclick="document.getElementById('seqFile').click()" style="width:100%;justify-content:center;margin-top:5px;">⬆ Import FASTA / GenBank</button>
+      <input type="file" id="seqFile" accept=".fa,.fasta,.fna,.ffn,.faa,.seq,.txt,.gb,.gbk,.genbank,.gff,.gff3,text/plain" style="display:none" onchange="SEQ.importFile(event)" aria-label="Import a FASTA, GenBank or GFF3 file">
+      <div id="seqList" class="mbc-list" role="listbox" aria-label="Saved sequences"></div>
+      <div id="seqLibTools"></div>
+    </aside>
+    <section class="mbc-main" id="seqMain"></section>
+  </div>
+</div>
+
+<!-- ══════════ PASTE A SEQUENCE ══════════ -->
+<div class="modal-overlay" id="seqPaste" style="display:none;" onclick="if(event.target===this)SEQ.closePaste()">
+  <div class="modal-box" style="max-width:660px;">
+    <div class="modal-title">Add a sequence</div>
+    <div class="f">
+      <label for="seqPasteName">Name</label>
+      <input id="seqPasteName" placeholder="e.g. gp23 capsid, pUC19, phage N4">
+    </div>
+    <div class="f">
+      <label for="seqPasteText">Sequence, FASTA or GenBank</label>
+      <textarea id="seqPasteText" rows="9" spellcheck="false" style="font:11px var(--mono);resize:vertical;" placeholder="&gt;my_gene&#10;ATGAGCGATAAACTG…&#10;&#10;Anything non-letter is ignored, U becomes T, and a FASTA header sets the name."></textarea>
+    </div>
+    <label class="ck" style="margin-top:4px;"><input type="checkbox" id="seqPasteCirc"> Circular (plasmid / circular genome)</label>
+    <div class="ibox" style="font-size:10.5px;">Sequences are stored in this browser only, like everything else here. A 70 kb genome is about 70 KB of storage — keep a workspace backup.</div>
+    <div class="modal-footer">
+      <button class="modal-btn" onclick="SEQ.closePaste()">Cancel</button>
+      <button class="modal-btn primary" onclick="SEQ.savePaste()">Add</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════ HOST / STRAIN EDITOR ══════════ -->
 <div class="modal-overlay" id="hostEdit" style="display:none;" onclick="if(event.target===this)HOSTUI.close()">
   <div class="modal-box">
@@ -1179,6 +1215,7 @@ const DD_KEYS=[
   {k:'dd_lysates',        label:'Lysate library',             json:true},
   {k:'dd_hosts',          label:'Host / strain registry',     json:true},
   {k:'dd_notebook',       label:'Lab notebook entries',       json:true},
+  {k:'dd_seq',            label:'Sequences',                  json:true},
   {k:'dd_reagent_custom', label:'Custom reagent recipes',     json:true},
   {k:'dd_gel',            label:'Gel simulator setup',        json:true},
   {k:'dd_gel_ladders',    label:'Custom gel ladders',         json:true},
@@ -1203,6 +1240,7 @@ function _ddCount(key,raw){
     if(v&&typeof v==='object'){
       if(Array.isArray(v.experiments))return v.experiments.length;
       if(Array.isArray(v.lysates))return v.lysates.length;
+      if(Array.isArray(v.seqs))return v.seqs.length;
       return Object.keys(v).length;
     }
   }catch(e){}
@@ -1313,6 +1351,7 @@ var SCI=(function(){
       else if(appMode==='phg'&&window.PHG) PHG.render();
       else if(appMode==='mic'&&window.MIC) MIC.recompute();
       else if(appMode==='titer'&&window.TIT) TIT.render();
+      else if(appMode==='seq'&&window.SEQ) SEQ.render();
       else if(typeof update==='function') update();
     }catch(e){}
   }
@@ -1469,10 +1508,11 @@ const MODE_GROUPS=[
   {key:'tools', label:'Tools',  modes:[
     {m:'dilcalc',label:'💧 Dilution Calc'},
     {m:'reagent',label:'⚗️ Reagent Prep'},
-    {m:'calc',   label:'🧬 Calculators'},
+    {m:'calc',   label:'🧮 Calculators'},
     {m:'proto',  label:'📋 Protocols'},
     {m:'mic',    label:'🔬 Microscopy'},
-    {m:'gel',    label:'🧪 Gel Sim'}]}
+    {m:'gel',    label:'🧪 Gel Sim'},
+    {m:'seq',    label:'🧬 Sequences'}]}
 ];
 // 'phage' is the plate planner's other mode, not its own destination.
 function groupOf(m){
@@ -1517,8 +1557,8 @@ function setMode(m) {
       hv=document.getElementById('homeView'), cv=document.getElementById('calcView'), pv=document.getElementById('protoView'),
       gv=document.getElementById('gelView'), nv=document.getElementById('notebookView'),
       lv=document.getElementById('phgView'), mv=document.getElementById('micView'),
-      tv=document.getElementById('titView');
-  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto'||m==='gel'||m==='notebook'||m==='phg'||m==='mic'||m==='titer');
+      tv=document.getElementById('titView'), sq=document.getElementById('seqView');
+  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto'||m==='gel'||m==='notebook'||m==='phg'||m==='mic'||m==='titer'||m==='seq');
   if(rv) rv.style.display = m==='reagent'?'':'none';
   if(dv) dv.style.display = m==='dilcalc'?'':'none';
   if(hv) hv.style.display = m==='home'?'':'none';
@@ -1529,6 +1569,7 @@ function setMode(m) {
   if(lv) lv.style.display = m==='phg'?'':'none';
   if(mv) mv.style.display = m==='mic'?'':'none';
   if(tv) tv.style.display = m==='titer'?'':'none';
+  if(sq) sq.style.display = m==='seq'?'':'none';
   if(appEl) appEl.style.display = special?'none':'';
   if(m==='reagent'){ rpInit(); return; }
   if(m==='dilcalc'){ dcInit(); return; }
@@ -1540,6 +1581,7 @@ function setMode(m) {
   if(m==='phg'){ if(window.PHG) PHG.init(); if(window.HOSTUI) HOSTUI.render(); return; }
   if(m==='mic'){ if(window.MIC) MIC.init(); return; }
   if(m==='titer'){ if(window.TIT) TIT.init(); return; }
+  if(m==='seq'){ if(window.SEQ) SEQ.init(); return; }
   // The plate planner's two experiment types. One tab, switch inside.
   var pm=document.getElementById('plateModeSw');
   if(pm) pm.innerHTML=[['plasmid','Plasmid / Induction'],['phage','Phage Infection']].map(function(x){
@@ -2885,6 +2927,619 @@ function lysImportJson(text){
   if(!n) throw new Error('no readable lysates in that file');
   if(!lysSave(order.map(function(k){return byId[k];}))) throw new Error('browser storage is full');
   return n;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SEQUENCE CORE — parsing, thermodynamics, alignment, ORFs, enzymes.
+
+   All pure, all top level, all self-tested against PUBLISHED values.
+   Deliberately outside every module IIFE: a parse error in a UI module
+   must not take the science with it (the house rule that has already
+   saved this file twice).
+
+   Scale target is a phage genome — N4 is 70,153 bp / 72 CDS — which is
+   what decides the algorithms below. Full O(n·m) dynamic programming is
+   fine for genes (2 kb × 2 kb = 4M cells) and impossible for genomes
+   (70k × 70k = 4.9 BILLION), so genome comparison is seed-and-extend.
+   ══════════════════════════════════════════════════════════════════ */
+
+// ── parsing ────────────────────────────────────────────────────────
+var IUPAC={A:'A',C:'C',G:'G',T:'T',U:'T',R:'AG',Y:'CT',S:'GC',W:'AT',K:'GT',
+           M:'AC',B:'CGT',D:'AGT',H:'ACT',V:'ACG',N:'ACGT'};
+// Keep degenerate codes: primers and enzyme sites legitimately contain them.
+function seqClean(s,keepAmbig){
+  var up=String(s||'').replace(/^\s*[>;].*$/gm,'').toUpperCase().replace(/U/g,'T');
+  return keepAmbig ? up.replace(/[^ACGTRYSWKMBDHVN]/g,'') : up.replace(/[^ACGTN]/g,'');
+}
+function seqRevComp(s){
+  var C={A:'T',C:'G',G:'C',T:'A',U:'A',N:'N',R:'Y',Y:'R',S:'S',W:'W',K:'M',M:'K',
+         B:'V',V:'B',D:'H',H:'D'};
+  var o='',t=String(s||'').toUpperCase();
+  for(var i=t.length-1;i>=0;i--) o+=C[t[i]]||'N';
+  return o;
+}
+function seqGC(s){ var t=seqClean(s); if(!t.length)return NaN;
+  return (t.replace(/[^GC]/g,'').length)/t.length*100; }
+
+// Multi-record FASTA. Returns [{name,desc,seq}] — one entry per '>' record.
+function parseFasta(text){
+  var out=[],cur=null;
+  String(text||'').split(/\r?\n/).forEach(function(ln){
+    if(/^\s*>/.test(ln)){
+      var h=ln.replace(/^\s*>/,'').trim();
+      var sp=h.indexOf(' ');
+      cur={name:(sp<0?h:h.slice(0,sp))||'unnamed',desc:(sp<0?'':h.slice(sp+1)),seq:''};
+      out.push(cur);
+    } else if(cur){ cur.seq+=ln.replace(/[^A-Za-z]/g,''); }
+    else if(ln.trim()){ cur={name:'unnamed',desc:'',seq:ln.replace(/[^A-Za-z]/g,'')}; out.push(cur); }
+  });
+  return out.filter(function(r){return r.seq.length;})
+            .map(function(r){ r.seq=r.seq.toUpperCase().replace(/U/g,'T'); return r; });
+}
+// GFF3 → features. 1-based inclusive in the file; stored 0-based half-open
+// so every downstream slice is plain JS. Name from Name= / gene= / locus_tag=
+// / product=, which is what NCBI actually writes.
+function parseGff3(text){
+  var feats=[];
+  String(text||'').split(/\r?\n/).forEach(function(ln){
+    if(!ln||ln.charAt(0)==='#')return;
+    var f=ln.split('\t'); if(f.length<9)return;
+    var start=parseInt(f[3],10), end=parseInt(f[4],10);
+    if(!(start>0&&end>=start))return;
+    var attr={};
+    f[8].split(';').forEach(function(kv){
+      var i=kv.indexOf('='); if(i<0)return;
+      try{ attr[kv.slice(0,i).trim()]=decodeURIComponent(kv.slice(i+1).trim()); }
+      catch(e){ attr[kv.slice(0,i).trim()]=kv.slice(i+1).trim(); }
+    });
+    feats.push({type:f[2]||'feature', start:start-1, end:end, strand:(f[6]==='-'?-1:1),
+      name:attr.Name||attr.gene||attr.locus_tag||attr.product||attr.ID||f[2]||'feature',
+      product:attr.product||'', locusTag:attr.locus_tag||'', seqid:f[0]||''});
+  });
+  return feats;
+}
+// GenBank: ORIGIN block + the common FEATURES lines. Enough to open an NCBI
+// download without a converter, not a full parser.
+function parseGenbank(text){
+  var t=String(text||'');
+  var name=(t.match(/^LOCUS\s+(\S+)/m)||[])[1]||'sequence';
+  var seq='';
+  var org=t.split(/^ORIGIN.*$/m)[1];
+  if(org) seq=org.replace(/\/\/[\s\S]*$/,'').replace(/[^A-Za-z]/g,'').toUpperCase().replace(/U/g,'T');
+  var feats=[];
+  var fm=t.match(/^FEATURES[\s\S]*?(?=^ORIGIN|^\/\/)/m);
+  if(fm){
+    var lines=fm[0].split(/\r?\n/), cur=null;
+    lines.forEach(function(ln){
+      var m=ln.match(/^ {5}(\S+)\s+(\S.*)$/);
+      if(m){
+        var loc=m[2], strand=/complement/.test(loc)?-1:1;
+        var r=loc.match(/(\d+)\.\.>?(\d+)/);
+        cur=r?{type:m[1],start:+r[1]-1,end:+r[2],strand:strand,name:m[1],product:'',locusTag:''}:null;
+        if(cur)feats.push(cur);
+      } else if(cur){
+        var q=ln.match(/^\s+\/(\w+)="?([^"]*)"?/);
+        if(q){ if(q[1]==='gene'||q[1]==='locus_tag'){ cur.name=q[2]; if(q[1]==='locus_tag')cur.locusTag=q[2]; }
+               else if(q[1]==='product'){ cur.product=q[2]; if(cur.name===cur.type)cur.name=q[2]; } }
+      }
+    });
+  }
+  return {name:name,seq:seq,features:feats};
+}
+
+// ── translation (NCBI genetic code tables) ─────────────────────────
+var GENETIC_CODES={
+  1:{name:'Standard',
+     aa:'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+     starts:'---M------**--*----M---------------M----------------------------'},
+  11:{name:'Bacterial / plastid',
+      aa:'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+      starts:'---M------**--*----M------------MMMM---------------M------------'}
+};
+var _B='TCAG';
+function _codonIndex(c){
+  var i=_B.indexOf(c[0]), j=_B.indexOf(c[1]), k=_B.indexOf(c[2]);
+  return (i<0||j<0||k<0)?-1:i*16+j*4+k;
+}
+function translate(seq,codeId,stopAt){
+  var code=GENETIC_CODES[codeId]||GENETIC_CODES[1];
+  var s=seqClean(seq),out='';
+  for(var i=0;i+2<s.length;i+=3){
+    var ix=_codonIndex(s.substr(i,3));
+    var aa=ix<0?'X':code.aa[ix];
+    if(aa==='*'&&stopAt)return out;
+    out+=aa;
+  }
+  return out;
+}
+// Protein MW (average isotopic residue masses + one water).
+var _AAW={A:71.0788,R:156.1875,N:114.1038,D:115.0886,C:103.1388,E:129.1155,Q:128.1307,
+  G:57.0519,H:137.1411,I:113.1594,L:113.1594,K:128.1741,M:131.1926,F:147.1766,P:97.1167,
+  S:87.0782,T:101.1051,W:186.2132,Y:163.1760,V:99.1326};
+function proteinMW(p){
+  var s=String(p||'').toUpperCase().replace(/[^A-Z]/g,'').replace(/\*+$/,'');
+  if(!s.length)return NaN;
+  var m=18.01528;
+  for(var i=0;i<s.length;i++) m+=_AAW[s[i]]||0;
+  return m;
+}
+// Six-frame ORF finder. Frames 1..3 forward, -1..-3 reverse; coordinates are
+// always reported on the FORWARD strand so they can be drawn on one map.
+function findOrfs(seq,opts){
+  var o=opts||{}, minAa=o.minAa>0?o.minAa:50, codeId=o.code||11, circular=!!o.circular;
+  var code=GENETIC_CODES[codeId]||GENETIC_CODES[11];
+  var fwd=seqClean(seq), L=fwd.length;
+  if(L<6)return [];
+  var rev=seqRevComp(fwd), out=[];
+  [[fwd,1],[rev,-1]].forEach(function(pair){
+    var s=pair[0], dir=pair[1];
+    var scan=circular?s+s.slice(0,Math.min(s.length,3000)):s;
+    for(var f=0;f<3;f++){
+      var start=-1;
+      for(var i=f;i+2<scan.length;i+=3){
+        if(i>=L&&start<0)break;                       // wrapped region only continues an ORF
+        var ix=_codonIndex(scan.substr(i,3));
+        if(ix<0){ continue; }
+        var isStart=code.starts[ix]==='M', isStop=code.aa[ix]==='*';
+        if(start<0&&isStart){ start=i; }
+        else if(start>=0&&isStop){
+          var aaLen=(i-start)/3;
+          if(aaLen>=minAa){
+            var gs=start, ge=i+3;                     // half-open, on THIS strand
+            var a=dir===1?gs:L-Math.min(ge,L), b=dir===1?Math.min(ge,L):L-gs;
+            out.push({start:a,end:b,strand:dir,frame:dir*(f+1),aaLen:aaLen,
+                      wrapped:ge>L,
+                      nt:scan.slice(start,i+3)});
+          }
+          start=-1;
+        }
+      }
+    }
+  });
+  return out.sort(function(x,y){ return y.aaLen-x.aaLen; });
+}
+
+// ── restriction enzymes ────────────────────────────────────────────
+// site: IUPAC recognition sequence; cut: offset of the top-strand nick from
+// the start of the site (REBASE convention); a NEGATIVE cut means the enzyme
+// cuts upstream of its site. Facts, not a copied database.
+var ENZYMES=[
+  {n:'EcoRI',s:'GAATTC',c:1},{n:'BamHI',s:'GGATCC',c:1},{n:'HindIII',s:'AAGCTT',c:1},
+  {n:'NotI',s:'GCGGCCGC',c:2},{n:'XhoI',s:'CTCGAG',c:1},{n:'SalI',s:'GTCGAC',c:1},
+  {n:'PstI',s:'CTGCAG',c:5},{n:'SmaI',s:'CCCGGG',c:3},{n:'XbaI',s:'TCTAGA',c:1},
+  {n:'SpeI',s:'ACTAGT',c:1},{n:'KpnI',s:'GGTACC',c:5},{n:'SacI',s:'GAGCTC',c:5},
+  {n:'NcoI',s:'CCATGG',c:1},{n:'NdeI',s:'CATATG',c:2},{n:'EcoRV',s:'GATATC',c:3},
+  {n:'HpaI',s:'GTTAAC',c:3},{n:'ClaI',s:'ATCGAT',c:2},{n:'ApaI',s:'GGGCCC',c:5},
+  {n:'BglII',s:'AGATCT',c:1},{n:'NheI',s:'GCTAGC',c:1},{n:'AscI',s:'GGCGCGCC',c:2},
+  {n:'PacI',s:'TTAATTAA',c:5},{n:'SbfI',s:'CCTGCAGG',c:6},{n:'FseI',s:'GGCCGGCC',c:6},
+  {n:'AvrII',s:'CCTAGG',c:1},{n:'MluI',s:'ACGCGT',c:1},{n:'SphI',s:'GCATGC',c:5},
+  {n:'StuI',s:'AGGCCT',c:3},{n:'ScaI',s:'AGTACT',c:3},{n:'DraI',s:'TTTAAA',c:3},
+  {n:'PvuII',s:'CAGCTG',c:3},{n:'AatII',s:'GACGTC',c:5},{n:'AflII',s:'CTTAAG',c:1},
+  {n:'BsrGI',s:'TGTACA',c:1},{n:'MfeI',s:'CAATTG',c:1},{n:'NsiI',s:'ATGCAT',c:5},
+  {n:'SspI',s:'AATATT',c:3},{n:'AhdI',s:'GACNNNNNGTC',c:6},{n:'DrdI',s:'GACNNNNNNGTC',c:7},
+  {n:'BsaI',s:'GGTCTC',c:7},{n:'BsmBI',s:'CGTCTC',c:7},{n:'BbsI',s:'GAAGAC',c:8},
+  {n:'HaeIII',s:'GGCC',c:2},{n:'AluI',s:'AGCT',c:2},{n:'MspI',s:'CCGG',c:1},
+  {n:'TaqI',s:'TCGA',c:1},{n:'HhaI',s:'GCGC',c:3},{n:'Sau3AI',s:'GATC',c:0},
+  {n:'MboI',s:'GATC',c:0},{n:'HinfI',s:'GANTC',c:1},{n:'RsaI',s:'GTAC',c:2},
+  {n:'NlaIII',s:'CATG',c:4},{n:'BstEII',s:'GGTNACC',c:1},{n:'SfiI',s:'GGCCNNNNNGGCC',c:8}
+];
+function _iupacRe(site){
+  return new RegExp(site.split('').map(function(ch){
+    var set=IUPAC[ch]||ch;
+    return set.length>1?('['+set+']'):set;
+  }).join(''),'g');
+}
+// All cut positions for one enzyme. Palindromic sites are found once; a
+// non-palindromic site is searched on both strands.
+function enzymeSites(seq,enz,circular){
+  var s=seqClean(seq), L=s.length;
+  var scan=circular?s+s.slice(0,Math.min(enz.s.length-1,L)):s;
+  var hits=[], re=_iupacRe(enz.s), m;
+  while((m=re.exec(scan))!==null){
+    if(m.index<L) hits.push({pos:m.index,strand:1});
+    re.lastIndex=m.index+1;                       // overlapping sites are real
+  }
+  var rc=seqRevComp(enz.s);
+  if(rc!==enz.s){
+    var re2=_iupacRe(rc), m2;
+    while((m2=re2.exec(scan))!==null){
+      if(m2.index<L) hits.push({pos:m2.index,strand:-1});
+      re2.lastIndex=m2.index+1;
+    }
+  }
+  return hits.map(function(h){
+    var cut=h.strand===1 ? h.pos+enz.c : h.pos+enz.s.length-enz.c;
+    return {enzyme:enz.n,site:h.pos,strand:h.strand,cut:((cut%L)+L)%L};
+  }).sort(function(a,b){return a.cut-b.cut;});
+}
+// Digest with a set of enzymes → sorted fragment lengths, ready for the gel.
+function digest(seq,names,circular){
+  var s=seqClean(seq), L=s.length;
+  var byName={}; ENZYMES.forEach(function(e){byName[e.n]=e;});
+  var cuts=[];
+  (names||[]).forEach(function(n){ var e=byName[n]; if(e) enzymeSites(s,e,circular).forEach(function(h){ cuts.push(h); }); });
+  var pos=cuts.map(function(c){return c.cut;}).filter(function(v,i,a){return a.indexOf(v)===i;})
+              .sort(function(a,b){return a-b;});
+  var frags=[];
+  if(!pos.length) frags=[{start:0,end:L,len:L}];
+  else if(circular){
+    for(var i=0;i<pos.length;i++){
+      var a=pos[i], b=pos[(i+1)%pos.length];
+      frags.push({start:a,end:b,len:((b-a)%L+L)%L||L});
+    }
+  } else {
+    var edges=[0].concat(pos,[L]);
+    for(var j=0;j<edges.length-1;j++){
+      var len=edges[j+1]-edges[j];
+      if(len>0) frags.push({start:edges[j],end:edges[j+1],len:len});
+    }
+  }
+  return {cuts:cuts,sites:pos,fragments:frags.sort(function(a,b){return b.len-a.len;})};
+}
+
+// ── thermodynamics: SantaLucia (1998) unified nearest-neighbour ────
+// ΔH kcal/mol, ΔS cal/(mol·K) for the ten NN pairs, plus initiation terms.
+var _NN={
+  AA:[-7.9,-22.2], AT:[-7.2,-20.4], TA:[-7.2,-21.3], CA:[-8.5,-22.7],
+  GT:[-8.4,-22.4], CT:[-7.8,-21.0], GA:[-8.2,-22.2], CG:[-10.6,-27.2],
+  GC:[-9.8,-24.4], GG:[-8.0,-19.9]
+};
+function _nnPair(p){
+  if(_NN[p])return _NN[p];
+  var rc=seqRevComp(p);                       // the table is symmetric
+  return _NN[rc]||null;
+}
+// Tm in °C. na/k/tris/mg/dntp in mM, primer in nM. Salt correction is
+// Owczarzy (2004/2008): monovalent via the log term, divalent folded in as
+// an equivalent when Mg exceeds free dNTP.
+// ΔH (kcal/mol) and ΔS (cal/mol·K) for a duplex: NN sum + both initiations.
+// Split out so the self-test can assert the thermodynamics directly against
+// the published table, instead of against a Tm someone quoted on a website.
+function nnEnthalpyEntropy(seq){
+  var s=seqClean(seq);
+  if(s.length<2||/N/.test(s))return null;
+  var dH=0,dS=0;
+  for(var i=0;i+1<s.length;i++){
+    var nn=_nnPair(s.substr(i,2));
+    if(!nn)return null;
+    dH+=nn[0]; dS+=nn[1];
+  }
+  // Initiation: 0.2/−5.7 for a terminal G·C, 2.2/+6.9 for a terminal A·T.
+  [s[0],s[s.length-1]].forEach(function(e){
+    if(e==='G'||e==='C'){ dH+=0.2; dS+=-5.7; } else { dH+=2.2; dS+=6.9; }
+  });
+  return {dH:dH,dS:dS};
+}
+function nnTm(seq,opts){
+  var o=opts||{};
+  var s=seqClean(seq);
+  var th=nnEnthalpyEntropy(s);
+  if(!th)return NaN;
+  var dH=th.dH, dS=th.dS;
+  var primer=(o.primer>0?o.primer:250)*1e-9;
+  // Non-self-complementary duplex uses CT/4.
+  var selfComp=(s===seqRevComp(s));
+  var ct=selfComp?primer:primer/4;
+  var R=1.987;
+  var na=(o.na!=null?o.na:50)/1000, k=(o.k||0)/1000, tris=(o.tris||0)/1000;
+  var mg=(o.mg||0)/1000, dntp=(o.dntp||0)/1000;
+  var mono=na+k+tris/2;
+  if(mg>dntp){                                 // free Mg acts like ~ (Mg-dNTP)
+    var free=Math.sqrt(Math.max(0,mg-dntp));
+    mono+=free*3.795;                          // divalent→monovalent equivalence
+  }
+  if(mono<=0)mono=1e-4;
+  var tm=(dH*1000)/(dS+R*Math.log(ct))-273.15;
+  // Owczarzy monovalent correction on 1/Tm.
+  var fgc=(s.replace(/[^GC]/g,'').length)/s.length;
+  var lnNa=Math.log(mono);
+  var inv=1/(tm+273.15)+((4.29*fgc-3.95)*1e-5*lnNa)+9.40e-6*lnNa*lnNa;
+  return 1/inv-273.15;
+}
+// ΔG37 of a duplex, for hairpin/dimer screening.
+function nnDeltaG(s){
+  var t=seqClean(s); if(t.length<2)return 0;
+  var dH=0,dS=0;
+  for(var i=0;i+1<t.length;i++){ var nn=_nnPair(t.substr(i,2)); if(!nn)return 0; dH+=nn[0]; dS+=nn[1]; }
+  [t[0],t[t.length-1]].forEach(function(e){ if(e==='G'||e==='C'){dH+=0.2;dS+=-5.7;} else {dH+=2.2;dS+=6.9;} });
+  return dH-(310.15*dS/1000);
+}
+// Worst contiguous self-dimer / cross-dimer, scored as ΔG of the matched run.
+function dimerScore(a,b){
+  var x=seqClean(a), y=seqRevComp(seqClean(b));
+  var best={dg:0,len:0,offset:0,seq:''};
+  for(var off=-(y.length-1);off<x.length;off++){
+    var run='',runBest={len:0,seq:''};
+    for(var i=0;i<x.length;i++){
+      var j=i-off;
+      if(j<0||j>=y.length){ run=''; continue; }
+      if(x[i]===y[j]){ run+=x[i]; if(run.length>runBest.len)runBest={len:run.length,seq:run}; }
+      else run='';
+    }
+    if(runBest.len>=3){
+      var dg=nnDeltaG(runBest.seq);
+      if(dg<best.dg) best={dg:dg,len:runBest.len,offset:off,seq:runBest.seq};
+    }
+  }
+  return best;
+}
+// Hairpin: best stem with a loop of >= 3 nt.
+function hairpinScore(s){
+  var t=seqClean(s), n=t.length, best={dg:0,stem:0,loop:0};
+  for(var i=0;i<n;i++){
+    for(var j=i+4;j<n;j++){
+      var stem=0;
+      while(i-stem>=0&&j+stem<n&&t[i-stem]===seqRevComp(t[j+stem])) stem++;
+      var loop=j-i-1;
+      if(stem>=3&&loop>=3){
+        var dg=nnDeltaG(t.slice(i-stem+1,i+1));
+        if(dg<best.dg) best={dg:dg,stem:stem,loop:loop};
+      }
+    }
+  }
+  return best;
+}
+
+// ── alignment ──────────────────────────────────────────────────────
+// Exact DP, affine-free (linear gap) for clarity. GUARDED: n*m cells are
+// allocated, so anything past ~4M cells is refused rather than hanging the
+// tab. Genome-scale comparison goes through dotPlot/genomeAlign instead.
+var ALIGN_MAX_CELLS=6e6;
+function alignPair(a,b,opts){
+  var o=opts||{}, local=o.mode==='local';
+  var s=seqClean(a,true), t=seqClean(b,true);
+  var n=s.length, m=t.length;
+  if(!n||!m) return {error:'empty sequence'};
+  if(n*m>ALIGN_MAX_CELLS)
+    return {error:'Too large for exact alignment ('+n+' × '+m+' = '+(n*m/1e6).toFixed(0)+
+                  'M cells). Use the dot plot or genome alignment for sequences this size.'};
+  var MA=o.match!=null?o.match:2, MI=o.mismatch!=null?o.mismatch:-1, GAP=o.gap!=null?o.gap:-2;
+  // Int32Array rows: 4 MB at the cap instead of an array of arrays.
+  var prev=new Int32Array(m+1), cur=new Int32Array(m+1);
+  var trace=new Uint8Array((n+1)*(m+1));       // 0 stop 1 diag 2 up 3 left
+  for(var j=1;j<=m;j++){ prev[j]=local?0:GAP*j; trace[j]=local?0:3; }
+  for(var i=1;i<=n;i++){ trace[i*(m+1)]=local?0:2; }
+  var bi=0,bj=0,bs=local?0:-Infinity;
+  for(var i2=1;i2<=n;i2++){
+    cur[0]=local?0:GAP*i2;
+    for(var j2=1;j2<=m;j2++){
+      var d=prev[j2-1]+(s[i2-1]===t[j2-1]?MA:MI);
+      var u=prev[j2]+GAP, l=cur[j2-1]+GAP;
+      var best=d, dir=1;
+      if(u>best){best=u;dir=2;}
+      if(l>best){best=l;dir=3;}
+      if(local&&best<0){best=0;dir=0;}
+      cur[j2]=best; trace[i2*(m+1)+j2]=dir;
+      if(local?best>bs:(i2===n&&j2===m)){ if(local){bs=best;bi=i2;bj=j2;} }
+    }
+    var tmp=prev; prev=cur; cur=tmp;
+  }
+  if(!local){ bs=prev[m]; bi=n; bj=m; }
+  // Walk back.
+  var A='',B='',i3=bi,j3=bj;
+  while(i3>0||j3>0){
+    var d2=trace[i3*(m+1)+j3];
+    if(local&&d2===0)break;
+    if(d2===1||(!local&&i3>0&&j3>0&&d2===1)){ A=s[i3-1]+A; B=t[j3-1]+B; i3--; j3--; }
+    else if(d2===2){ A=s[i3-1]+A; B='-'+B; i3--; }
+    else if(d2===3){ A='-'+A; B=t[j3-1]+B; j3--; }
+    else if(i3>0){ A=s[i3-1]+A; B='-'+B; i3--; }
+    else { A='-'+A; B=t[j3-1]+B; j3--; }
+  }
+  var mm=0,gaps=0,ident=0;
+  for(var k=0;k<A.length;k++){
+    if(A[k]==='-'||B[k]==='-')gaps++;
+    else if(A[k]===B[k])ident++;
+    else mm++;
+  }
+  return {a:A,b:B,score:bs,identity:A.length?ident/A.length*100:0,
+          matches:ident,mismatches:mm,gaps:gaps,length:A.length,
+          aStart:i3,bStart:j3,aEnd:bi,bEnd:bj,mode:local?'local':'global'};
+}
+// k-mer dot plot — O(n+m) with a hash, which is how you compare two 70 kb
+// genomes in a browser at all. Returns match points in sequence coordinates.
+function dotPlot(a,b,opts){
+  var o=opts||{}, k=o.k>0?o.k:12, maxPts=o.maxPoints>0?o.maxPoints:60000;
+  var s=seqClean(a), t=seqClean(b);
+  if(s.length<k||t.length<k)return {points:[],k:k,aLen:s.length,bLen:t.length,truncated:false};
+  var idx=Object.create(null);
+  for(var i=0;i+k<=s.length;i++){
+    var key=s.substr(i,k);
+    if(key.indexOf('N')>=0)continue;
+    (idx[key]||(idx[key]=[])).push(i);
+  }
+  var pts=[], rc=o.bothStrands!==false?seqRevComp(t):null, truncated=false;
+  function scan(seqT,dir){
+    for(var j=0;j+k<=seqT.length&&!truncated;j++){
+      var key=seqT.substr(j,k);
+      var hits=idx[key];
+      if(!hits)continue;
+      for(var h=0;h<hits.length;h++){
+        // Report on the ORIGINAL b coordinate so both strands share an axis.
+        pts.push([hits[h], dir===1?j:(seqT.length-j-k), dir]);
+        if(pts.length>=maxPts){ truncated=true; break; }
+      }
+    }
+  }
+  scan(t,1);
+  if(rc&&!truncated) scan(rc,-1);
+  return {points:pts,k:k,aLen:s.length,bLen:t.length,truncated:truncated};
+}
+// Seed-and-extend genome alignment: k-mer anchors → chain collinear runs →
+// report blocks with identity. This is what makes 70 kb vs 70 kb tractable.
+function genomeAlign(a,b,opts){
+  var o=opts||{}, k=o.k>0?o.k:16, minBlock=o.minBlock>0?o.minBlock:100;
+  var dp=dotPlot(a,b,{k:k,maxPoints:o.maxPoints||400000,bothStrands:o.bothStrands!==false});
+  var s=seqClean(a), t=seqClean(b);
+  // Group anchors by diagonal (i-j for forward, i+j for reverse), then merge
+  // anchors that are collinear and close.
+  var byDiag=Object.create(null);
+  dp.points.forEach(function(p){
+    var d=(p[2]===1? p[0]-p[1] : p[0]+p[1]);
+    var key=p[2]+':'+d;
+    (byDiag[key]||(byDiag[key]=[])).push(p);
+  });
+  var blocks=[];
+  Object.keys(byDiag).forEach(function(key){
+    var arr=byDiag[key].sort(function(x,y){return x[0]-y[0];});
+    var cs=null;
+    arr.forEach(function(p){
+      if(cs&&p[0]-cs.aEnd<=k){ cs.aEnd=Math.max(cs.aEnd,p[0]+k); cs.bEnd=Math.max(cs.bEnd,p[1]+k); cs.n++; }
+      else { if(cs&&cs.aEnd-cs.aStart>=minBlock)blocks.push(cs);
+             cs={aStart:p[0],aEnd:p[0]+k,bStart:p[1],bEnd:p[1]+k,strand:p[2],n:1}; }
+    });
+    if(cs&&cs.aEnd-cs.aStart>=minBlock)blocks.push(cs);
+  });
+  // Score each block by real identity over its own span (cheap: same length).
+  blocks.forEach(function(bl){
+    var len=Math.min(bl.aEnd-bl.aStart,bl.bEnd-bl.bStart);
+    var sa=s.substr(bl.aStart,len);
+    var sb=bl.strand===1?t.substr(bl.bStart,len):seqRevComp(t.substr(bl.bStart,len));
+    var id=0;
+    for(var i=0;i<len;i++) if(sa[i]===sb[i])id++;
+    bl.len=len; bl.identity=len?id/len*100:0;
+  });
+  blocks.sort(function(x,y){return y.len-x.len;});
+  // Coverage must MERGE overlapping intervals on a, not sum block lengths.
+  // A repeat makes several blocks cover the same stretch, and summing them
+  // reports 100 % coverage for a genome that is half aligned.
+  var iv=blocks.map(function(bl){return [bl.aStart,bl.aEnd];}).sort(function(x,y){return x[0]-y[0];});
+  var covered=0, cs2=null;
+  iv.forEach(function(r){
+    if(cs2&&r[0]<=cs2[1]){ cs2[1]=Math.max(cs2[1],r[1]); }
+    else { if(cs2)covered+=cs2[1]-cs2[0]; cs2=[r[0],r[1]]; }
+  });
+  if(cs2)covered+=cs2[1]-cs2[0];
+  return {blocks:blocks,k:k,aLen:s.length,bLen:t.length,covered:covered,
+          coverage:s.length?Math.min(100,covered/s.length*100):0,truncated:dp.truncated};
+}
+// Progressive multiple alignment: align to the longest sequence as a centre,
+// then pad every row to a common length. Honest about what it is — a centre-
+// star alignment, not a full profile MSA.
+function alignMultiple(seqs,opts){
+  var list=(seqs||[]).filter(function(x){return x&&x.seq&&seqClean(x.seq).length;});
+  if(list.length<2)return {error:'need at least two sequences'};
+  var total=list.reduce(function(a,x){return a+seqClean(x.seq).length;},0);
+  if(total>20000)return {error:'multiple alignment is for genes, not genomes ('+total+' nt total)'};
+  var centre=list.reduce(function(a,b){return seqClean(b.seq).length>seqClean(a.seq).length?b:a;});
+  var rows=[],err=null;
+  list.forEach(function(x){
+    if(x===centre){ rows.push({name:x.name,aln:seqClean(centre.seq)}); return; }
+    var r=alignPair(centre.seq,x.seq,{mode:'global'});
+    if(r.error){ err=r.error; return; }
+    rows.push({name:x.name,aln:r.b,ref:r.a});
+  });
+  if(err)return {error:err};
+  var width=Math.max.apply(null,rows.map(function(r){return r.aln.length;}));
+  rows.forEach(function(r){ while(r.aln.length<width) r.aln+='-'; });
+  // Column conservation for the consensus line.
+  var cons='';
+  for(var c=0;c<width;c++){
+    var ch=rows[0].aln[c], same=true;
+    for(var r2=1;r2<rows.length;r2++) if(rows[r2].aln[c]!==ch){same=false;break;}
+    cons+=(same&&ch!=='-')?'*':' ';
+  }
+  return {rows:rows,consensus:cons,width:width,centre:centre.name};
+}
+
+// ── primer design (Primer3-style heuristics) ───────────────────────
+// Scans candidates in a window, scores them, and pairs them so the product
+// spans the target. Every threshold is a stated default, not a magic number.
+function designPrimers(seq,opts){
+  var o=opts||{};
+  var s=seqClean(seq), L=s.length;
+  if(L<50)return {error:'sequence too short'};
+  var tStart=Math.max(0,o.targetStart!=null?o.targetStart:Math.floor(L*0.25));
+  var tEnd=Math.min(L,o.targetEnd!=null?o.targetEnd:Math.floor(L*0.75));
+  if(tEnd<=tStart)return {error:'target region is empty'};
+  var minLen=o.minLen||18, maxLen=o.maxLen||26;
+  var tmMin=o.tmMin||57, tmMax=o.tmMax||63, tmOpt=o.tmOpt||60;
+  var gcMin=o.gcMin||40, gcMax=o.gcMax||60;
+  var prodMin=o.prodMin||Math.max(100,(tEnd-tStart)), prodMax=o.prodMax||Math.max(prodMin+200,1000);
+  var salt={na:o.na!=null?o.na:50,mg:o.mg||0,dntp:o.dntp||0,primer:o.primer||250};
+
+  function score(p){
+    var tm=nnTm(p,salt), gc=seqGC(p);
+    if(!isFinite(tm))return null;
+    var run=/(A{5,}|C{5,}|G{5,}|T{5,})/.test(p);
+    var clamp=/[GC]$/.test(p);
+    var last5=p.slice(-5), gcClampCount=last5.replace(/[^GC]/g,'').length;
+    var hp=hairpinScore(p), sd=dimerScore(p,p);
+    var pen=Math.abs(tm-tmOpt)*1.0
+          + (gc<gcMin?(gcMin-gc):gc>gcMax?(gc-gcMax):0)*0.2
+          + (run?5:0) + (clamp?0:1.5) + (gcClampCount>3?2:0)
+          + Math.max(0,-hp.dg-2)*1.5 + Math.max(0,-sd.dg-5)*1.2;
+    return {seq:p,tm:tm,gc:gc,len:p.length,hairpin:hp,selfDimer:sd,
+            gcClamp:clamp,run:run,penalty:pen};
+  }
+  var fwd=[],rev=[];
+  var fwEnd=Math.min(tStart+1,L), rvStart=Math.max(tEnd-1,0);
+  for(var i=Math.max(0,tStart-(prodMax-(tEnd-tStart)));i<fwEnd;i++){
+    for(var len=minLen;len<=maxLen&&i+len<=L;len++){
+      var p=s.substr(i,len);
+      if(p.indexOf('N')>=0)continue;
+      var c=score(p); if(!c)continue;
+      if(c.tm<tmMin-3||c.tm>tmMax+3)continue;
+      c.start=i; c.end=i+len; c.strand=1;
+      fwd.push(c);
+    }
+  }
+  for(var j=rvStart;j<Math.min(L,tEnd+(prodMax-(tEnd-tStart)));j++){
+    for(var len2=minLen;len2<=maxLen&&j+len2<=L;len2++){
+      var region=s.substr(j,len2);
+      if(region.indexOf('N')>=0)continue;
+      var p2=seqRevComp(region);
+      var c2=score(p2); if(!c2)continue;
+      if(c2.tm<tmMin-3||c2.tm>tmMax+3)continue;
+      c2.start=j; c2.end=j+len2; c2.strand=-1;
+      rev.push(c2);
+    }
+  }
+  if(!fwd.length||!rev.length)
+    return {error:'no candidate primers met the Tm window ('+tmMin+'–'+tmMax+' °C). Widen it or change the target.'};
+  fwd.sort(function(a,b){return a.penalty-b.penalty;});
+  rev.sort(function(a,b){return a.penalty-b.penalty;});
+  var pairs=[];
+  fwd.slice(0,60).forEach(function(f){
+    rev.slice(0,60).forEach(function(r){
+      var prod=r.end-f.start;
+      if(prod<prodMin||prod>prodMax)return;
+      if(f.end>tStart+1||r.start<tEnd-1)return;          // must flank the target
+      var dTm=Math.abs(f.tm-r.tm);
+      if(dTm>o.maxPairDTm||dTm>5)return;
+      var cd=dimerScore(f.seq,r.seq);
+      pairs.push({fwd:f,rev:r,product:prod,dTm:dTm,crossDimer:cd,
+        penalty:f.penalty+r.penalty+dTm*2+Math.max(0,-cd.dg-6)*1.5});
+    });
+  });
+  if(!pairs.length)
+    return {error:'candidates existed but no pair produced a '+prodMin+'–'+prodMax+' bp product flanking the target.',
+            fwd:fwd.slice(0,10),rev:rev.slice(0,10)};
+  pairs.sort(function(a,b){return a.penalty-b.penalty;});
+  return {pairs:pairs.slice(0,o.limit||10),fwd:fwd.slice(0,10),rev:rev.slice(0,10),
+          target:{start:tStart,end:tEnd},salt:salt};
+}
+// Where else does this primer bind? At 70 kb an exact-3'-seed scan is cheap
+// and answers the question Benchling charges for.
+function primerSpecificity(primer,templateSeq,opts){
+  var o=opts||{}, seed=o.seed||12;
+  var p=seqClean(primer), s=seqClean(templateSeq);
+  if(p.length<seed||!s.length)return [];
+  var tail=p.slice(-seed);                      // the 3' end is what must match
+  var hits=[];
+  [[s,1],[seqRevComp(s),-1]].forEach(function(pair){
+    var hay=pair[0], dir=pair[1], from=0, at;
+    while((at=hay.indexOf(tail,from))>=0){
+      var full=hay.substr(Math.max(0,at-(p.length-seed)),p.length);
+      var mm=0;
+      for(var i=0;i<Math.min(full.length,p.length);i++) if(full[i]!==p[i])mm++;
+      hits.push({pos:dir===1?at:s.length-at-seed,strand:dir,mismatches:mm,
+                 tm:nnTm(full,{na:o.na!=null?o.na:50})});
+      from=at+1;
+      if(hits.length>200)break;
+    }
+  });
+  return hits.sort(function(a,b){return a.mismatches-b.mismatches;});
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -5677,6 +6332,72 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       n++; if(_wsSnap.app!=='dilution-designer'||_wsSnap.kind!=='workspace'||_wsSnap.v!==1)
         fails.push('workspace snapshot header wrong');
     }
+    // ── sequence core. Thermodynamics is anchored to the PUBLISHED NN table
+    // by hand-summation, never to a Tm quoted somewhere: my first draft of
+    // these tests used invented reference values and "failed" correct code.
+    if(typeof nnEnthalpyEntropy==='function'){
+      // GCGTCATACAGTGC → NN sum -111.3/-296.2, both ends G·C → -110.9/-307.6
+      n++; var _th=nnEnthalpyEntropy('GCGTCATACAGTGC');
+      if(!_th||Math.abs(_th.dH+110.9)>0.05||Math.abs(_th.dS+307.6)>0.15)
+        fails.push('NN thermodynamics drifted from the published table: '+(_th?_th.dH+'/'+_th.dS:'null'));
+      // Closed form at 1 M NaCl, CT/4 at 250 nM → 52.4 °C
+      n++; if(!_near(nnTm('GCGTCATACAGTGC',{na:1000,primer:250}),52.4,1.5))
+        fails.push('nnTm at 1 M NaCl = '+nnTm('GCGTCATACAGTGC',{na:1000,primer:250})+', want 52.4');
+      n++; if(!(nnTm('GCGTCATACAGTGC',{na:1000})>nnTm('GCGTCATACAGTGC',{na:10})))
+        fails.push('raising Na+ must raise Tm');
+      n++; var _p20=nnTm('ACGTGCCTAGCAATGGCTTA',{na:50});
+      if(!(_p20>50&&_p20<65)) fails.push('a normal 20-mer should melt at 50–65 °C, got '+_p20);
+      n++; if(!isNaN(nnTm('ACGTNACGT',{na:50}))) fails.push('nnTm must return NaN for an ambiguous sequence');
+      // Codon tables
+      n++; if(translate('ATGGCTTTTTGA',1)!=='MAF*') fails.push('translation wrong: '+translate('ATGGCTTTTTGA',1));
+      n++; if(GENETIC_CODES[1].aa!==GENETIC_CODES[11].aa) fails.push('table 11 must differ from table 1 only in START codons');
+      n++; if([].filter.call(GENETIC_CODES[1].aa,function(c){return c==='*';}).length!==3)
+        fails.push('the standard code must have exactly 3 stop codons');
+      n++; if(!_near(proteinMW('GG'),132.118,0.02)) fails.push('proteinMW(GG) = '+proteinMW('GG')+', want 132.118');
+      // Restriction: linear n cuts → n+1 fragments, circular → n, and both
+      // must account for every base.
+      n++; var _ln=digest('AAAAGAATTCAAAAGAATTCAAAA',['EcoRI'],false);
+      if(_ln.sites.length!==2||_ln.fragments.length!==3||_ln.fragments.reduce(function(a,f){return a+f.len;},0)!==24)
+        fails.push('linear digest wrong: '+_ln.sites.length+' cuts, '+_ln.fragments.length+' fragments');
+      n++; var _ci=digest('AAAAGAATTCAAAAGAATTCAAAA',['EcoRI'],true);
+      if(_ci.fragments.length!==2||_ci.fragments.reduce(function(a,f){return a+f.len;},0)!==24)
+        fails.push('circular digest wrong: '+_ci.fragments.length+' fragments');
+      n++; if(enzymeSites('GAATCGACTCGAGTCGATTC',{n:'HinfI',s:'GANTC',c:1},false).length!==4)
+        fails.push('IUPAC N in a recognition site did not match all four bases');
+      // Alignment
+      n++; var _ga=alignPair('ACGTACGT','ACGTTCGT',{mode:'global'});
+      if(_ga.mismatches!==1||_ga.gaps!==0) fails.push('global alignment: one substitution should give 1 mismatch, 0 gaps');
+      n++; var _la=alignPair('TTTTACGTACGTTTTT','GGGGACGTACGTGGGG',{mode:'local'});
+      if(_la.length!==8||_la.identity!==100) fails.push('local alignment did not isolate the shared 8-mer core');
+      // The guard that keeps a genome from hanging the tab.
+      n++; if(!alignPair('A'.repeat(3000),'A'.repeat(3000),{mode:'global'}).error)
+        fails.push('exact alignment must REFUSE 9M cells, not attempt them');
+      n++; if(!alignMultiple([{name:'x',seq:'A'.repeat(15000)},{name:'y',seq:'A'.repeat(15000)}]).error)
+        fails.push('alignMultiple must refuse genome-scale input');
+      // Seed-and-extend: a sequence against itself is 100% covered.
+      n++; var _self='ACGTTGCAAGGCTTACGATCCGTTAAGCTGACATTGCCAGGATTACGTGCAA'.repeat(12);
+      var _gm2=genomeAlign(_self,_self,{k:14,minBlock:60});
+      if(!(_gm2.coverage>=90)) fails.push('self genome-align coverage = '+_gm2.coverage.toFixed(1)+'%, want ≥90');
+      // Coverage merges overlapping blocks. A tandem repeat produces many
+      // blocks over the same span; summing their lengths would report far
+      // more than the sequence is long.
+      n++; if(_gm2.covered>_self.length)
+        fails.push('genome-align covered ('+_gm2.covered+') exceeds the sequence length ('+_self.length+') — overlaps are being double-counted');
+      n++; var _dp=dotPlot(_self,_self,{k:14});
+      if(!_dp.points.some(function(p){return p[0]===p[1]&&p[2]===1;})) fails.push('self dot plot lost the main diagonal');
+      // Parsers
+      n++; var _fa=parseFasta('>a desc here\nACGT\nACGT\n>b\nTTTT');
+      if(_fa.length!==2||_fa[0].seq!=='ACGTACGT'||_fa[0].name!=='a'||_fa[0].desc!=='desc here')
+        fails.push('FASTA parser wrong: '+JSON.stringify(_fa));
+      n++; var _gf=parseGff3('##gff-version 3\nchr\t.\tCDS\t10\t21\t.\t-\t0\tName=gp1;locus_tag=X_01');
+      if(_gf.length!==1||_gf[0].start!==9||_gf[0].end!==21||_gf[0].strand!==-1||_gf[0].name!=='gp1')
+        fails.push('GFF3 parser wrong (must be 0-based half-open): '+JSON.stringify(_gf));
+      // ORFs: a hand-built 60-codon ORF must be found on the forward strand.
+      n++; var _orf='ATG'+'GCT'.repeat(60)+'TAA';
+      var _of=findOrfs('CCCC'+_orf+'CCCC',{minAa:50,code:11});
+      if(!_of.some(function(o){return o.strand===1&&o.aaLen===61;}))
+        fails.push('findOrfs missed a hand-built 61-codon ORF');
+    }
     // ── host/strain registry. Runs against a scratch copy of dd_hosts and
     // restores whatever was there, so ?selftest=1 never eats real data.
     if(typeof hostUpsert==='function'){
@@ -5820,12 +6541,13 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       {m:'plasmid',icon:'🧫',title:'Plate Planner',desc:'Design 96 / 384 & multi-plate layouts — plasmid/induction & phage/MOI, master mix, randomization, bench checks.'},
       {m:'dilcalc',icon:'💧',title:'Dilution & Molarity',desc:'C1V1 across every unit, serial dilutions, molarity↔mass, and weigh-outs.'},
       {m:'reagent',icon:'⚗️',title:'Reagent Prep',desc:nRec+' verified buffer / media / stock recipes — including miniprep P1/P2/P3, Buffer PE, CTAB — scaled to any volume.'},
-      {m:'calc',icon:'🧬',title:'Molbio Calculators',desc:CALCS.length+' bench calculators: ng↔pmol, A260, ligation, primer Tm, OD→cells, phage titer/MOI, %↔molarity & more.'},
+      {m:'calc',icon:'🧮',title:'Molbio Calculators',desc:CALCS.length+' bench calculators: ng↔pmol, A260, ligation, primer Tm, OD→cells, phage titer/MOI, %↔molarity & more.'},
       {m:'proto',icon:'📋',title:'Protocols',desc:(window.PROTO?PROTO.list.length:21)+' step-by-step protocols — miniprep, CTAB gDNA, gels, transformation, plaque assay — that rescale as you change the numbers.'},
       {m:'phg',icon:'🦠',title:'Phage Planner',desc:'Keep your lysates and their titers, then work out the volume for an infection — by MOI, total PFU or final PFU/mL — and the dilution to make when that volume is too small to pipette.'},
       {m:'titer',icon:'⭕',title:'Titering & EOP',desc:'Log plaque counts with replicates, get PFU/mL with SD and CV, group lysates under host conditions, EOP against a switchable reference with Welch-t significance — then export tidy CSVs and publication-ready SVG/PNG bar charts.'},
       {m:'mic',icon:'🔬',title:'Microscopy & Dyes',desc:nDye+' dyes and stains — what to use for what, at what concentration, in which channel. Spectra, filter/laser matching, panel bleed-through checks, and the working dilution worked out for your sample count.'},
       {m:'gel',icon:'🧪',title:'Gel Simulator',desc:'Predict an agarose or SDS-PAGE run before you pour it — '+nLad+' vendor ladders, band-resolution warnings and a best-% suggestion.'},
+      {m:'seq',icon:'🧬',title:'Sequences & Cloning',desc:'Open a FASTA, GenBank or GFF3 and get a linear or circular map, six-frame ORFs and translation, a restriction digest that runs straight onto a simulated gel, nearest-neighbour primer design with off-target checking, and alignments from two genes to two whole genomes.'},
       {m:'notebook',icon:'📓',title:'Lab Notebook',desc:'Pull results from any module into a dated entry, add your own notes, and export to Markdown, HTML, PDF, Word, CSV or JSON.'}
     ];
     var featured=['namass','a260','pctmolar','tm','od600','titer','moivol','lysate','ligation','doubling','rcf'];
@@ -8044,6 +8766,16 @@ function dyeWorking(o){
       renderControls(); render(); },
     lane:function(i,k,v){ if(S.lanes[i]){ S.lanes[i][k]=v; render(); } },
     addLane:function(){ S.lanes.push({name:'Lane '+(S.lanes.length+1), sizes:''}); renderControls(); render(); },
+    // Cross-module entry point: a digest becomes a lane without the user
+    // retyping twenty fragment sizes. Switches to DNA if we are on a protein gel.
+    pushLane:function(name,sizes){
+      if(!S) S=load();
+      if(S.type!=='dna'){                        // switch the gel WITHOUT wiping existing lanes
+        S.type='dna'; S.pct='1';
+        var l=allLadders().filter(function(x){return x.t==='dna';})[0]; if(l) S.ladder=l.id;
+      }
+      S.lanes.push({name:String(name||'Digest').slice(0,40), sizes:String(sizes||'')});
+      renderControls(); render(); },
     delLane:function(i){ S.lanes.splice(i,1); renderControls(); render(); },
     addLadder:function(){
       var n=(document.getElementById('gelCustName').value||'').trim();
@@ -9217,6 +9949,14 @@ function dyeWorking(o){
   }
 
   // ── public surface ────────────────────────────────────────────────
+  // The three figure backends and the xlsx writer are generic — they consume a
+  // primitive list, not anything about titers. Publishing them lets the
+  // sequence maps export at the same quality with no second export pipeline.
+  // (They stay declared in here rather than being hoisted so this stays one
+  // edit; SEQ guards on window.FIG, so a parse error here degrades SEQ's
+  // exports instead of breaking it.)
+  window.FIG={svg:svgFromModel,paint:paintModel,pdf:pdfFromModel,xlsx:buildXlsx,col:colFor};
+
   window.TIT={
     init:function(){ if(!S)S=load(); render(); },
     render:function(){ if(S)render(); },
@@ -9455,12 +10195,14 @@ function dyeWorking(o){
     gel:     {label:'Gel Sim',       mod:'GELBLK',   items:[['image','Gel image'],['table','Band table'],['warn','Gel check notes']]},
     phg:     {label:'Phage Planner', mod:'PHGBLK',   items:[['plan','Infection plan'],['ladder','Dilution ladder'],['recipe','Dilution recipe']]},
     mic:     {label:'Microscopy',    mod:'MICBLK',   items:[['dye','Dye sheet + directions'],['dilution','Working dilution recipe'],['panel','Panel & channel check']]},
-    tit:     {label:'Titering & EOP',mod:'TITBLK',   items:[['header','Experiment info'],['counts','Raw plaque counts'],['summary','Titer & EOP summary + methods note'],['chart','Chart (image)']]}
+    tit:     {label:'Titering & EOP',mod:'TITBLK',   items:[['header','Experiment info'],['counts','Raw plaque counts'],['summary','Titer & EOP summary + methods note'],['chart','Chart (image)']]},
+    seq:     {label:'Sequences',    mod:'SEQBLK',   items:[['info','Sequence info'],['map','Map (image)'],['orfs','ORF table'],['digest','Digest fragments'],['primers','Primer pairs + conditions'],['align','Alignment summary']]}
   };
   function providerFn(src){
     if(src==='gel'&&window.GEL&&GEL.blocks) return GEL.blocks;
     if(src==='mic'&&window.MIC&&MIC.blocks) return MIC.blocks;
     if(src==='tit'&&window.TIT&&TIT.blocks) return TIT.blocks;
+    if(src==='seq'&&window.SEQ&&SEQ.blocks) return SEQ.blocks;
     var m=window[PROVIDERS[src]&&PROVIDERS[src].mod];
     return (typeof m==='function')?m:null;
   }
@@ -9490,6 +10232,8 @@ function dyeWorking(o){
     mic:    function(){ var id=lsGet('mic_last')||'';
                         var d=(window.MIC&&MIC.list||[]).filter(function(x){return x.id===id;})[0];
                         return {id:id,label:d?d.name:'Microscopy'}; },
+    seq:    function(){ var r=null; try{ r=window.SEQ&&SEQ._rec&&SEQ._rec(); }catch(e){}
+                        return {id:(r&&r.id)||'',label:(r&&r.name)||'Sequences'}; },
     plate:  function(){ var nm=''; try{ nm=P().expName||(plates[activePlate]&&plates[activePlate].name)||''; }catch(e){}
                         return {id:'',label:nm||'Plate'}; },
     gel:    function(){ var s=null; try{ s=GEL._model.state(); }catch(e){}
@@ -10048,6 +10792,785 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   else document.addEventListener('DOMContentLoaded',syncDatalist);
 })();
 
+/* ════════════ SEQUENCES & CLONING ════════════════════════════════════
+   Maps, ORFs, digests, primers and alignments. All of the science lives at
+   top level (seqClean … alignMultiple) so a parse error in here cannot take
+   it down; this IIFE is only the UI on top of it. ════════════════════════ */
+(function(){
+  var css=`
+  .sq-head{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px;}
+  .sq-head .mbc-f{flex:1;min-width:170px;}
+  .sq-stat{display:flex;gap:14px;flex-wrap:wrap;font:11px var(--mono);color:var(--text3);margin:2px 0 12px;}
+  .sq-stat b{color:var(--text);font-weight:600;}
+  .sq-tabs{display:flex;gap:5px;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-bottom:12px;}
+  .sq-tab{border:0;background:none;color:var(--text3);font:12px var(--sans);padding:7px 11px;border-radius:8px 8px 0 0;cursor:pointer;border-bottom:2px solid transparent;}
+  .sq-tab:hover{color:var(--text);}
+  .sq-tab.on{color:var(--text);border-bottom-color:var(--accent2);font-weight:600;}
+  .sq-tab:focus-visible{outline:2px solid var(--accent2);outline-offset:1px;}
+  .sq-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:9px;margin-bottom:10px;}
+  .sq-fig{border:1px solid var(--border);border-radius:10px;background:#fff;padding:6px;overflow-x:auto;}
+  .sq-fig svg{display:block;max-width:100%;height:auto;}
+  .sq-tbl{width:100%;border-collapse:collapse;font:11px var(--mono);}
+  .sq-tbl th,.sq-tbl td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);white-space:nowrap;}
+  .sq-tbl th{color:var(--text3);font-weight:600;}
+  .sq-tbl tr.hi td{background:var(--accent-bg);}
+  .sq-mono{font:11px/1.55 var(--mono);white-space:pre;overflow-x:auto;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 11px;}
+  .sq-seqbox{font:11.5px/1.6 var(--mono);white-space:pre-wrap;word-break:break-all;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 11px;max-height:340px;overflow:auto;}
+  .sq-enz{display:flex;flex-wrap:wrap;gap:4px;max-height:150px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:7px;background:var(--surface);}
+  .sq-enz label{font:10.5px var(--mono);display:flex;align-items:center;gap:3px;padding:2px 5px;border-radius:5px;cursor:pointer;}
+  .sq-enz label:hover{background:var(--surface2);}
+  .sq-chip{display:inline-block;font:10px var(--mono);padding:1px 6px;border-radius:5px;background:var(--surface2);color:var(--text3);margin-left:5px;}
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  var KEY='dd_seq', S=null;
+  function _id(){ return 'sq'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+  function _n(v,d){ var x=SCI.parse(String(v)); return isFinite(x)?x:d; }
+
+  // ── state ──────────────────────────────────────────────────────────
+  // Sequences can be 70 kb, so records stay lean: no derived data is ever
+  // stored, everything on screen is recomputed from .seq.
+  function _coerceSeq(r){
+    if(!r||typeof r!=='object')return null;
+    var s=seqClean(r.seq||'');
+    if(!s.length)return null;
+    return {id:String(r.id||_id()).slice(0,40),
+            name:String(r.name||'Untitled').slice(0,120),
+            desc:String(r.desc||'').slice(0,300),
+            circular:!!r.circular,
+            code:(r.code===1?1:11),
+            seq:s,
+            feats:(Array.isArray(r.feats)?r.feats:[]).slice(0,4000).map(function(f){
+              return {type:String(f.type||'feature').slice(0,30),
+                      name:String(f.name||'').slice(0,80),
+                      start:Math.max(0,f.start|0), end:Math.max(0,f.end|0),
+                      strand:f.strand===-1?-1:1};
+            }).filter(function(f){return f.end>f.start;})};
+  }
+  function def(){ return {v:1,seqs:[],active:0,tab:'map',ui:{}}; }
+  function load(){
+    var raw=lsGet(KEY); if(!raw)return def();
+    try{
+      var o=JSON.parse(raw); if(!o||typeof o!=='object')return def();
+      var d=def();
+      d.seqs=(Array.isArray(o.seqs)?o.seqs:[]).map(_coerceSeq).filter(Boolean).slice(0,60);
+      d.active=Math.min(Math.max(0,o.active|0),Math.max(0,d.seqs.length-1));
+      d.tab=['map','orf','cut','primer','align'].indexOf(o.tab)>=0?o.tab:'map';
+      d.ui=(o.ui&&typeof o.ui==='object')?o.ui:{};
+      return d;
+    }catch(e){ return def(); }
+  }
+  function save(){ if(S) lsSetWarn(KEY,JSON.stringify(S)); }
+  function R(){ return S&&S.seqs[S.active]||null; }
+  function U(k,d){ return S.ui[k]!==undefined?S.ui[k]:d; }
+  function setU(k,v){ S.ui[k]=v; }
+
+  // ── figure model helpers ───────────────────────────────────────────
+  // Same primitive vocabulary the titer charts use (rect/line/circle/text),
+  // so SVG, PNG-at-dpi and vector PDF all come free via window.FIG.
+  function P(){ return []; }
+  function tx(pr,x,y,t,o){ o=o||{}; pr.push({t:'text',x:x,y:y,txt:String(t),size:o.size||10,anchor:o.anchor||'start',bold:!!o.bold,rot:o.rot||0}); }
+  function ln(pr,x,y,x2,y2,cls,dash){ pr.push({t:'line',x:x,y:y,x2:x2,y2:y2,cls:cls||'',dash:!!dash}); }
+  function bx(pr,x,y,w,h,ci){ pr.push({t:'rect',x:x,y:y,w:Math.max(0.6,w),h:h,cls:'bar',ci:ci||0}); }
+  function niceTicks(len,want){
+    var raw=len/(want||8), mag=Math.pow(10,Math.floor(Math.log10(raw)));
+    var step=[1,2,2.5,5,10].map(function(m){return m*mag;}).filter(function(v){return v>=raw;})[0]||10*mag;
+    var out=[]; for(var v=0;v<=len;v+=step) out.push(Math.round(v));
+    return out;
+  }
+  function bpLabel(v){
+    if(v>=1e6)return (v/1e6).toFixed(v%1e6?1:0)+' Mb';
+    if(v>=1000)return (v/1000).toFixed(v%1000?1:0)+' kb';
+    return v+' bp';
+  }
+  // Linear map: one lane per strand, features as boxes, cut sites as ticks.
+  function linearModel(rec,feats,cuts,title){
+    var W=920, padL=52, padR=22, w=W-padL-padR, L=rec.seq.length;
+    var yAx=132, prims=P();
+    tx(prims,padL,26,title||rec.name,{size:14,bold:true});
+    tx(prims,padL,44,L.toLocaleString('en-US')+' bp · '+(rec.circular?'circular':'linear')+' · '+seqGC(rec.seq).toFixed(1)+' % GC',{size:10});
+    var X=function(p){ return padL+(L?p/L*w:0); };
+    // axis + ticks
+    ln(prims,padL,yAx,padL+w,yAx,'axis');
+    niceTicks(L,8).forEach(function(v){
+      if(v>L)return;
+      ln(prims,X(v),yAx,X(v),yAx+5,'axis');
+      tx(prims,X(v),yAx+17,bpLabel(v),{size:9,anchor:'middle'});
+    });
+    // features, packed into rows so overlapping ones stay readable
+    var rows=[[],[]];                                   // 0 = forward, 1 = reverse
+    function place(list,dir){
+      var lanes=[];
+      list.filter(function(f){return f.strand===dir;}).forEach(function(f){
+        var i=0; while(lanes[i]&&lanes[i]>f.start) i++;
+        lanes[i]=f.end; rows[dir===1?0:1].push({f:f,lane:i});
+      });
+    }
+    var sorted=feats.slice().sort(function(a,b){return a.start-b.start;});
+    place(sorted,1); place(sorted,-1);
+    var LH=15;
+    rows[0].forEach(function(r){
+      var y=yAx-24-r.lane*LH;
+      bx(prims,X(r.f.start),y,X(r.f.end)-X(r.f.start),11,r.f.ci||0);
+      if(X(r.f.end)-X(r.f.start)>26) tx(prims,(X(r.f.start)+X(r.f.end))/2,y+8.5,r.f.name,{size:8,anchor:'middle'});
+    });
+    rows[1].forEach(function(r){
+      var y=yAx+26+r.lane*LH;
+      bx(prims,X(r.f.start),y,X(r.f.end)-X(r.f.start),11,r.f.ci||0);
+      if(X(r.f.end)-X(r.f.start)>26) tx(prims,(X(r.f.start)+X(r.f.end))/2,y+8.5,r.f.name,{size:8,anchor:'middle'});
+    });
+    var topLanes=rows[0].reduce(function(a,r){return Math.max(a,r.lane+1);},0);
+    var botLanes=rows[1].reduce(function(a,r){return Math.max(a,r.lane+1);},0);
+    if(feats.length){
+      // Plain ASCII: the PDF writer's WinAnsi map turns fullwidth glyphs into '?'.
+      tx(prims,padL-6,yAx-18,'+ strand',{size:8,anchor:'end'});
+      tx(prims,padL-6,yAx+34,'- strand',{size:8,anchor:'end'});
+    }
+    // cut sites below everything
+    var yCut=yAx+40+botLanes*LH;
+    var seen={};
+    cuts.forEach(function(c){
+      ln(prims,X(c.cut),yCut,X(c.cut),yCut+9,'');
+      var k=Math.round(X(c.cut)/34);                     // thin the labels, not the ticks
+      if(!seen[k]){ seen[k]=1; tx(prims,X(c.cut),yCut+20,c.enzyme,{size:8,anchor:'middle',rot:0}); }
+    });
+    var H=Math.max(210,yCut+(cuts.length?32:0)+18);
+    // Shift everything down if the forward lanes would run off the top.
+    var need=topLanes*LH+24;
+    if(need>yAx-58){
+      var dy=need-(yAx-58);
+      prims.forEach(function(p){ if(p.y!=null&&p.y>50){p.y+=dy; if(p.y2!=null)p.y2+=dy;} });
+      H+=dy;
+    }
+    return {w:W,h:H,prims:prims,kind:'seqmap'};
+  }
+  // Circular map: the primitive list has no arc, so arcs are polylines. That
+  // is exactly what a PDF viewer draws anyway.
+  function circularModel(rec,feats,cuts,title){
+    var W=640,H=640,cx=W/2,cy=H/2+8,Rr=210,L=rec.seq.length,prims=P();
+    function pt(p,r){ var a=(p/L)*Math.PI*2-Math.PI/2; return [cx+Math.cos(a)*r,cy+Math.sin(a)*r]; }
+    function arc(from,to,r,cls,ci,thick){
+      var steps=Math.max(2,Math.ceil((to-from)/L*180));
+      var prev=pt(from,r);
+      for(var i=1;i<=steps;i++){
+        var q=pt(from+(to-from)*i/steps,r);
+        if(thick){ // a band: draw it as a short thick chord using two rails
+          var q2=pt(from+(to-from)*i/steps,r+thick), p2=pt(from+(to-from)*(i-1)/steps,r+thick);
+          prims.push({t:'line',x:prev[0],y:prev[1],x2:q[0],y2:q[1],cls:cls||''});
+          prims.push({t:'line',x:p2[0],y:p2[1],x2:q2[0],y2:q2[1],cls:cls||''});
+          if(i===1) prims.push({t:'line',x:prev[0],y:prev[1],x2:p2[0],y2:p2[1],cls:cls||''});
+          if(i===steps) prims.push({t:'line',x:q[0],y:q[1],x2:q2[0],y2:q2[1],cls:cls||''});
+        } else prims.push({t:'line',x:prev[0],y:prev[1],x2:q[0],y2:q[1],cls:cls||''});
+        prev=q;
+      }
+    }
+    tx(prims,cx,26,title||rec.name,{size:14,bold:true,anchor:'middle'});
+    tx(prims,cx,cy-4,L.toLocaleString('en-US')+' bp',{size:12,anchor:'middle',bold:true});
+    tx(prims,cx,cy+13,seqGC(rec.seq).toFixed(1)+' % GC',{size:10,anchor:'middle'});
+    arc(0,L,Rr,'axis');
+    niceTicks(L,12).forEach(function(v){
+      if(v>=L)return;
+      var a=pt(v,Rr), b=pt(v,Rr+7), c=pt(v,Rr+20);
+      ln(prims,a[0],a[1],b[0],b[1],'axis');
+      tx(prims,c[0],c[1],bpLabel(v),{size:8,anchor:'middle'});
+    });
+    feats.forEach(function(f,i){
+      var r=f.strand===1?Rr-14-(i%3)*12:Rr-52-(i%3)*12;
+      arc(f.start,f.end,r,'',0,9);
+      var mid=pt((f.start+f.end)/2,r-6);
+      if((f.end-f.start)/L>0.02) tx(prims,mid[0],mid[1],f.name,{size:8,anchor:'middle'});
+    });
+    cuts.forEach(function(c){
+      var a=pt(c.cut,Rr),b=pt(c.cut,Rr-9);
+      ln(prims,a[0],a[1],b[0],b[1],'');
+    });
+    return {w:W,h:H,prims:prims,kind:'seqcirc'};
+  }
+  function dotModel(a,b,dp,nameA,nameB){
+    var W=620,H=620,padL=62,padB=54,prims=P();
+    var w=W-padL-24, h=H-padB-52;
+    tx(prims,padL,24,'Dot plot · k = '+dp.k,{size:13,bold:true});
+    tx(prims,padL,40,nameA+' (x)  vs  '+nameB+' (y)',{size:9});
+    var X=function(p){ return padL+p/Math.max(1,dp.aLen)*w; };
+    var Y=function(p){ return 52+h-p/Math.max(1,dp.bLen)*h; };
+    ln(prims,padL,52,padL,52+h,'axis'); ln(prims,padL,52+h,padL+w,52+h,'axis');
+    niceTicks(dp.aLen,6).forEach(function(v){ if(v>dp.aLen)return;
+      ln(prims,X(v),52+h,X(v),52+h+5,'axis'); tx(prims,X(v),52+h+17,bpLabel(v),{size:8,anchor:'middle'}); });
+    niceTicks(dp.bLen,6).forEach(function(v){ if(v>dp.bLen)return;
+      ln(prims,padL-5,Y(v),padL,Y(v),'axis'); tx(prims,padL-8,Y(v)+3,bpLabel(v),{size:8,anchor:'end'}); });
+    // Bin to the pixel grid before emitting primitives. 60 000 overlapping
+    // circles look identical to 9 000 distinct ones but make the SVG ~7× the
+    // size and the PDF unopenable, and the drawn image is the same either way.
+    var seen=Object.create(null), drawn=0;
+    dp.points.forEach(function(p){
+      var px=Math.round(X(p[0])*2)/2, py=Math.round(Y(p[1])*2)/2, k=px+'|'+py;
+      if(seen[k])return; seen[k]=1; drawn++;
+      prims.push({t:'circle',x:px,y:py,r:0.8});
+    });
+    tx(prims,padL,H-26,dp.points.length.toLocaleString('en-US')+' matching '+dp.k+'-mers, both strands  ·  '+drawn.toLocaleString('en-US')+' distinct points drawn',{size:9});
+    if(dp.truncated) tx(prims,padL,H-12,'Anchor cap reached — some matches are not shown. Raise the word size k for a cleaner plot.',{size:9});
+    return {w:W,h:H,prims:prims,kind:'dotplot'};
+  }
+
+  // ── figure export (shared pipeline) ────────────────────────────────
+  var _fig=null;                                    // last model rendered, for export
+  function drawFig(model,elId){
+    _fig=model;
+    var el=document.getElementById(elId);
+    if(el) el.innerHTML=(window.FIG?FIG.svg(model):'<div class="mbc-empty" style="padding:12px">Figure engine unavailable.</div>');
+  }
+  function figName(ext){
+    var r=R();
+    return ((r&&r.name)||'sequence').replace(/[^A-Za-z0-9._-]+/g,'_').slice(0,48)+'.'+ext;
+  }
+  function expSvg(){ if(!_fig||!window.FIG)return; _dl(FIG.svg(_fig),figName('svg'),'image/svg+xml'); }
+  function expPdf(){ if(!_fig||!window.FIG)return; _dl(FIG.pdf(_fig),figName('pdf'),'application/pdf'); }
+  function expPng(dpi){
+    if(!_fig||!window.FIG)return;
+    var sc=dpi/96, cv=document.createElement('canvas');
+    cv.width=Math.round(_fig.w*sc); cv.height=Math.round(_fig.h*sc);
+    var ctx=cv.getContext('2d'); ctx.scale(sc,sc);
+    FIG.paint(ctx,_fig);
+    dlCanvasPngDpi(cv,dpi,figName(dpi+'dpi.png'));
+  }
+  function figBar(){
+    return '<div class="mbc-actions">'
+      +'<button class="btn" onclick="SEQ.exp(\'svg\')">⬇ SVG (vector)</button>'
+      +'<button class="btn" onclick="SEQ.exp(\'pdf\')">⬇ PDF (vector)</button>'
+      +'<button class="btn" onclick="SEQ.exp(300)">⬇ PNG 300 dpi</button>'
+      +'<button class="btn" onclick="SEQ.exp(600)">⬇ PNG 600 dpi</button>'
+      +'</div>';
+  }
+
+  // ── sidebar ────────────────────────────────────────────────────────
+  function renderList(){
+    var el=document.getElementById('seqList'); if(!el)return;
+    el.innerHTML=S.seqs.length?S.seqs.map(function(r,i){
+      return '<button class="mbc-item'+(i===S.active?' active':'')+'" role="option" aria-selected="'+(i===S.active)+'" onclick="SEQ.sel('+i+')">'
+        +escapeHtml(r.name)
+        +'<span class="tit-mini" style="display:block;">'+r.seq.length.toLocaleString('en-US')+' bp'
+        +(r.circular?' · circular':'')+(r.feats.length?' · '+r.feats.length+' features':'')+'</span></button>';
+    }).join(''):'<div class="mbc-empty" style="padding:12px">No sequences yet.</div>';
+    var t=document.getElementById('seqLibTools');
+    if(t) t.innerHTML=S.seqs.length?'<div class="mbc-actions" style="margin-top:8px;">'
+      +'<button class="btn" onclick="SEQ.expFasta()">⬇ FASTA</button>'
+      +'<button class="btn" onclick="SEQ.del()">🗑 Delete</button></div>':'';
+  }
+
+  // ── panels ─────────────────────────────────────────────────────────
+  function featsForMap(rec){
+    var out=rec.feats.map(function(f,i){ return {start:f.start,end:f.end,strand:f.strand,name:f.name||f.type,ci:i}; });
+    if(!out.length&&U('mapOrfs',true)){
+      findOrfs(rec.seq,{minAa:+U('orfMin',100),code:rec.code,circular:rec.circular})
+        .slice(0,300).forEach(function(o,i){ out.push({start:o.start,end:o.end,strand:o.strand,name:o.aaLen+' aa',ci:i}); });
+    }
+    return out;
+  }
+  function panelMap(rec){
+    var enz=U('mapEnz',[]);
+    var cuts=enz.length?digest(rec.seq,enz,rec.circular).cuts:[];
+    var feats=featsForMap(rec);
+    var shape=U('mapShape',rec.circular?'circ':'lin');
+    var model=shape==='circ'?circularModel(rec,feats,cuts):linearModel(rec,feats,cuts);
+    var h='<div class="sq-row">'
+      +'<div class="mbc-f"><label for="sqShape">Map</label><select id="sqShape" onchange="SEQ.set(\'mapShape\',this.value)">'
+        +'<option value="lin"'+(shape==='lin'?' selected':'')+'>Linear</option>'
+        +'<option value="circ"'+(shape==='circ'?' selected':'')+'>Circular</option></select></div>'
+      +'<div class="mbc-f"><label for="sqOrfMin">ORFs ≥ (aa)</label><input id="sqOrfMin" type="text" inputmode="decimal" value="'+escapeHtml(String(U('orfMin',100)))+'" onchange="SEQ.set(\'orfMin\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="sqMapOrfs">If no annotations</label><select id="sqMapOrfs" onchange="SEQ.set(\'mapOrfs\',this.value===\'y\')">'
+        +'<option value="y"'+(U('mapOrfs',true)?' selected':'')+'>Draw predicted ORFs</option>'
+        +'<option value="n"'+(U('mapOrfs',true)?'':' selected')+'>Draw nothing</option></select></div>'
+      +'</div>'
+      +'<div class="mbc-f" style="margin-bottom:10px;"><label>Show cut sites for</label>'+enzPicker('mapEnz')+'</div>'
+      +'<div class="sq-fig" id="sqFig"></div>'+figBar()
+      +'<div class="sq-stat" style="margin-top:10px;">'
+        +'<span><b>'+feats.length+'</b> features drawn</span>'
+        +'<span><b>'+cuts.length+'</b> cut sites</span>'
+        +(rec.feats.length?'<span>from the imported annotation</span>':'<span>predicted, not annotated</span>')
+      +'</div>';
+    return {html:h,after:function(){ drawFig(model,'sqFig'); }};
+  }
+  function enzPicker(key){
+    var on=U(key,[]);
+    return '<div class="sq-enz">'+ENZYMES.map(function(e){
+      return '<label><input type="checkbox" '+(on.indexOf(e.n)>=0?'checked ':'')+'onchange="SEQ.enz(\''+key+'\',\''+jsAttr(e.n)+'\',this.checked)"> '+escapeHtml(e.n)+'</label>';
+    }).join('')+'</div>';
+  }
+  function panelOrf(rec){
+    var minAa=+U('orfMin',100);
+    var orfs=findOrfs(rec.seq,{minAa:minAa,code:rec.code,circular:rec.circular});
+    var h='<div class="sq-row">'
+      +'<div class="mbc-f"><label for="sqOrfMin2">Minimum length (aa)</label><input id="sqOrfMin2" type="text" inputmode="decimal" value="'+escapeHtml(String(minAa))+'" onchange="SEQ.set(\'orfMin\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="sqCode">Genetic code</label><select id="sqCode" onchange="SEQ.setRec(\'code\',this.value)">'
+        +'<option value="11"'+(rec.code===11?' selected':'')+'>11 — bacterial / archaeal / plastid</option>'
+        +'<option value="1"'+(rec.code===1?' selected':'')+'>1 — standard</option></select></div>'
+      +'</div>'
+      +'<div class="sq-stat"><span><b>'+orfs.length+'</b> ORFs ≥ '+minAa+' aa</span>'
+        +'<span>longest <b>'+(orfs.length?Math.max.apply(null,orfs.map(function(o){return o.aaLen;})):0)+'</b> aa</span>'
+        +'<span>six frames, stop-to-stop with a start codon</span></div>'
+      +'<div class="mbc-actions"><button class="btn" onclick="SEQ.orfCsv()">⬇ ORF table (CSV)</button>'
+        +'<button class="btn" onclick="SEQ.orfFasta(\'nt\')">⬇ ORFs (FASTA, nt)</button>'
+        +'<button class="btn" onclick="SEQ.orfFasta(\'aa\')">⬇ Proteins (FASTA)</button></div>'
+      +'<div class="mbc-tblwrap"><table class="sq-tbl"><thead><tr><th>#</th><th>Start</th><th>End</th><th>Strand</th><th>Frame</th><th>aa</th><th>kDa</th><th>Protein (first 40 aa)</th></tr></thead><tbody>'
+      +orfs.slice(0,400).map(function(o,i){
+        var aa=translate(o.nt,rec.code).replace(/\*$/,'');
+        return '<tr><td>'+(i+1)+'</td><td>'+(o.start+1)+'</td><td>'+o.end+'</td><td>'+(o.strand===1?'+':'−')+'</td><td>'+o.frame+'</td><td>'+o.aaLen+'</td><td>'+(proteinMW(aa)/1000).toFixed(1)+'</td><td>'+escapeHtml(aa.slice(0,40))+(aa.length>40?'…':'')+'</td></tr>';
+      }).join('')+'</tbody></table></div>'
+      +(orfs.length>400?'<div class="tit-mini" style="margin-top:6px;">Showing the first 400 of '+orfs.length+' — the CSV has all of them.</div>':'')
+      +'<div class="sl" style="margin-top:18px;">Sequence</div>'
+      +'<div class="mbc-actions" style="margin-top:0;"><button class="btn" onclick="SEQ.rc()">⇄ Reverse complement (new sequence)</button>'
+        +'<button class="btn" onclick="SEQ.translateAll()">Translate frame 1 → protein sequence</button></div>'
+      +'<div class="sq-seqbox" style="margin-top:8px;">'+escapeHtml(fasta60(rec.seq))+'</div>';
+    return {html:h};
+  }
+  function fasta60(s){ var o=[]; for(var i=0;i<s.length;i+=60) o.push(s.substr(i,60)); return o.join('\n'); }
+
+  function panelCut(rec){
+    var enz=U('cutEnz',['EcoRI','HindIII','BamHI']);
+    var d=enz.length?digest(rec.seq,enz,rec.circular):{cuts:[],sites:[],fragments:[]};
+    var frags=d.fragments;
+    var h='<div class="mbc-f" style="margin-bottom:10px;"><label>Enzymes</label>'+enzPicker('cutEnz')+'</div>'
+      +'<div class="mbc-actions" style="margin-top:0;">'
+        +'<button class="btn" onclick="SEQ.enzAll(\'cutEnz\',false)">Clear all</button>'
+        +'<button class="btn ac" onclick="SEQ.toGel()">🧪 Send fragments to Gel Simulator</button>'
+        +'<button class="btn" onclick="SEQ.cutCsv()">⬇ Fragments (CSV)</button></div>'
+      +'<div class="sq-stat" style="margin-top:12px;">'
+        +'<span><b>'+d.sites.length+'</b> cut positions</span>'
+        +'<span><b>'+frags.length+'</b> fragments</span>'
+        +'<span>'+(rec.circular?'circular':'linear')+' · '+rec.seq.length.toLocaleString('en-US')+' bp</span></div>';
+    if(!enz.length) h+='<div class="ibox">Pick one or more enzymes above.</div>';
+    else if(!d.sites.length) h+='<div class="ibox w">None of the selected enzymes cut this sequence. That is a real result, not an error — check it against a second enzyme before assuming the sequence is wrong.</div>';
+    h+='<div class="sl" style="margin-top:16px;">Per enzyme</div><div class="mbc-tblwrap"><table class="sq-tbl"><thead><tr><th>Enzyme</th><th>Site</th><th>Cuts</th><th>Positions (first 12)</th></tr></thead><tbody>'
+      +enz.map(function(n){
+        var e=ENZYMES.filter(function(x){return x.n===n;})[0]; if(!e)return '';
+        var hits=enzymeSites(rec.seq,e,rec.circular);
+        return '<tr><td>'+escapeHtml(n)+'</td><td>'+escapeHtml(e.s)+'</td><td>'+hits.length+'</td><td>'
+          +hits.slice(0,12).map(function(x){return x.cut+1;}).join(', ')+(hits.length>12?' …':'')+'</td></tr>';
+      }).join('')+'</tbody></table></div>'
+      +'<div class="sl" style="margin-top:16px;">Fragments (largest first)</div><div class="mbc-tblwrap"><table class="sq-tbl"><thead><tr><th>#</th><th>Size (bp)</th><th>From</th><th>To</th><th>% of total</th></tr></thead><tbody>'
+      +frags.slice(0,200).map(function(f,i){
+        return '<tr><td>'+(i+1)+'</td><td>'+f.len.toLocaleString('en-US')+'</td><td>'+(f.start+1)+'</td><td>'+f.end+'</td><td>'+(f.len/rec.seq.length*100).toFixed(1)+'</td></tr>';
+      }).join('')+'</tbody></table></div>';
+    return {html:h};
+  }
+
+  function panelPrimer(rec){
+    var o={targetStart:Math.max(0,Math.round(_n(U('pStart',''),NaN))-1),
+           targetEnd:Math.round(_n(U('pEnd',''),NaN)),
+           tmMin:_n(U('tmMin',57),57), tmMax:_n(U('tmMax',63),63),
+           prodMin:_n(U('prodMin',300),300), prodMax:_n(U('prodMax',1200),1200),
+           na:_n(U('na',50),50), mg:_n(U('mg',0),0), primer:_n(U('pConc',250),250)};
+    if(!isFinite(o.targetStart)||o.targetStart<0) delete o.targetStart;
+    if(!isFinite(o.targetEnd)||o.targetEnd<=0) delete o.targetEnd;
+    o.tmOpt=(o.tmMin+o.tmMax)/2;
+    var res=U('pRun')?designPrimers(rec.seq,o):null;
+    var h='<div class="sq-row">'
+      +f('pStart','Target start (bp, 1-based)',U('pStart',''),'blank = middle half')
+      +f('pEnd','Target end (bp)',U('pEnd',''),'blank = middle half')
+      +f('tmMin','Tm min (°C)',U('tmMin',57))
+      +f('tmMax','Tm max (°C)',U('tmMax',63))
+      +'</div><div class="sq-row">'
+      +f('prodMin','Product min (bp)',U('prodMin',300))
+      +f('prodMax','Product max (bp)',U('prodMax',1200))
+      +f('na','Na⁺ (mM)',U('na',50))
+      +f('mg','Mg²⁺ (mM)',U('mg',0))
+      +f('pConc','Primer (nM)',U('pConc',250))
+      +'</div>'
+      +'<div class="mbc-actions" style="margin-top:0;"><button class="btn ac" onclick="SEQ.runPrimers()">Design primers</button>'
+      +(res&&res.pairs?'<button class="btn" onclick="SEQ.primerCsv()">⬇ Primer table (CSV)</button><button class="btn" onclick="SEQ.primerToNb()">📓 Send to notebook</button>':'')+'</div>'
+      +'<div class="ibox" style="margin-top:10px;font-size:10.5px;">Tm is SantaLucia 1998 unified nearest-neighbour thermodynamics with the Owczarzy monovalent salt correction — the same model Primer3 uses, not the 4×GC+2×AT rule. Hairpin and dimer ΔG are screened, and every pair is re-scanned against this whole sequence for off-target 3′ binding.</div>';
+    if(res&&res.error) h+='<div class="ibox w" style="margin-top:10px;">'+escapeHtml(res.error)+'</div>';
+    if(res&&res.pairs){
+      _lastPrimers=res;
+      h+='<div class="sl" style="margin-top:16px;">Best pairs</div><div class="mbc-tblwrap"><table class="sq-tbl"><thead><tr>'
+        +'<th>#</th><th>Primer</th><th>Sequence (5′→3′)</th><th>Len</th><th>Tm</th><th>GC %</th><th>Position</th><th>Hairpin ΔG</th><th>Self ΔG</th></tr></thead><tbody>'
+        +res.pairs.map(function(p,i){
+          function row(pr,tag,first){
+            var offs=primerSpecificity(pr.seq,rec.seq).filter(function(x){return x.mismatches<=2;}).length;
+            return '<tr'+(i===0?' class="hi"':'')+'><td>'+(first?(i+1):'')+'</td><td>'+tag
+              +(offs>1?'<span class="sq-chip" title="'+offs+' near-exact 3′ matches in this sequence">'+offs+' sites</span>':'')
+              +'</td><td>'+escapeHtml(pr.seq)+'</td><td>'+pr.len+'</td><td>'+pr.tm.toFixed(1)+'</td><td>'+pr.gc.toFixed(0)+'</td><td>'
+              +(pr.start+1)+'–'+pr.end+'</td><td>'+pr.hairpin.dg.toFixed(1)+'</td><td>'+pr.selfDimer.dg.toFixed(1)+'</td></tr>';
+          }
+          return row(p.fwd,'F',true)+row(p.rev,'R',false)
+            +'<tr><td></td><td colspan="8" style="color:var(--text3)">product <b>'+p.product+' bp</b> · ΔTm '+p.dTm.toFixed(2)+' °C · cross-dimer ΔG '+p.crossDimer.dg.toFixed(1)+' kcal/mol</td></tr>';
+        }).join('')+'</tbody></table></div>';
+    }
+    return {html:h};
+    function f(k,lab,v,hint){
+      return '<div class="mbc-f"><label for="sqp_'+k+'">'+escapeHtml(lab)+'</label>'
+        +'<input id="sqp_'+k+'" type="text" inputmode="decimal" value="'+escapeHtml(String(v))+'" onchange="SEQ.set(\''+k+'\',this.value)"'
+        +(hint?' placeholder="'+escapeHtml(hint)+'"':'')+'></div>';
+    }
+  }
+  var _lastPrimers=null, _lastAlign=null;
+
+  function panelAlign(rec){
+    var mode=U('alMode','pair'), bId=U('alB',''), msa=U('alMsa',[]);
+    var opts=S.seqs.map(function(r){ return '<option value="'+escapeHtml(r.id)+'"'+(r.id===bId?' selected':'')+'>'+escapeHtml(r.name)+' ('+r.seq.length.toLocaleString('en-US')+' bp)</option>'; }).join('');
+    var h='<div class="sq-row">'
+      +'<div class="mbc-f"><label for="sqAlMode">Comparison</label><select id="sqAlMode" onchange="SEQ.set(\'alMode\',this.value)">'
+        +['pair','Pairwise — exact (Needleman–Wunsch / Smith–Waterman)','dot','Dot plot — genome vs genome','genome','Genome alignment — seed &amp; extend blocks','msa','Multiple alignment — genes'].reduce(function(a,v,i,arr){
+            return i%2?a:a+'<option value="'+arr[i]+'"'+(mode===arr[i]?' selected':'')+'>'+arr[i+1]+'</option>'; },'')
+        +'</select></div>';
+    if(mode!=='msa') h+='<div class="mbc-f"><label for="sqAlB">Compare against</label><select id="sqAlB" onchange="SEQ.set(\'alB\',this.value)"><option value="">— pick a sequence —</option>'+opts+'</select></div>';
+    if(mode==='pair') h+='<div class="mbc-f"><label for="sqAlSub">Alignment</label><select id="sqAlSub" onchange="SEQ.set(\'alSub\',this.value)">'
+      +'<option value="global"'+(U('alSub','global')==='global'?' selected':'')+'>Global (end to end)</option>'
+      +'<option value="local"'+(U('alSub','global')==='local'?' selected':'')+'>Local (best shared region)</option></select></div>';
+    if(mode==='dot'||mode==='genome') h+='<div class="mbc-f"><label for="sqAlK">Word size k</label><input id="sqAlK" type="text" inputmode="decimal" value="'+escapeHtml(String(U('alK',mode==='dot'?12:16)))+'" onchange="SEQ.set(\'alK\',this.value)"></div>';
+    h+='</div>';
+    if(mode==='msa'){
+      h+='<div class="mbc-f" style="margin-bottom:10px;"><label>Sequences to align (2 or more, genes not genomes)</label><div class="sq-enz">'
+        +S.seqs.map(function(r){ return '<label><input type="checkbox" '+(msa.indexOf(r.id)>=0?'checked ':'')
+          +'onchange="SEQ.msaPick(\''+jsAttr(r.id)+'\',this.checked)"> '+escapeHtml(r.name)+'</label>'; }).join('')
+        +'</div></div>';
+    }
+    h+='<div class="mbc-actions" style="margin-top:0;"><button class="btn ac" onclick="SEQ.runAlign()">Run</button>'
+      +(_lastAlign?'<button class="btn" onclick="SEQ.alignDl()">⬇ Download result</button>':'')+'</div>';
+    if(!U('alRun')) return {html:h+'<div class="ibox" style="margin-top:10px;">Exact alignment is O(n×m) and is capped at '+(ALIGN_MAX_CELLS/1e6)+' M cells — for anything genome-sized use the dot plot or the genome alignment, which are k-mer based and run in well under a second on 70 kb.</div>'};
+    var res=_lastAlign;
+    if(!res) return {html:h};
+    if(res.error) return {html:h+'<div class="ibox w" style="margin-top:10px;">'+escapeHtml(res.error)+'</div>'};
+    var after=null;
+    if(res.kind==='pair'){
+      h+='<div class="sq-stat" style="margin-top:14px;"><span>identity <b>'+res.r.identity.toFixed(1)+' %</b></span>'
+        +'<span><b>'+res.r.matches+'</b> matches</span><span><b>'+res.r.mismatches+'</b> mismatches</span>'
+        +'<span><b>'+res.r.gaps+'</b> gaps</span><span>length <b>'+res.r.length+'</b></span><span>score '+res.r.score+'</span></div>'
+        +'<div class="sq-mono">'+escapeHtml(alnText(res.r,res.na,res.nb))+'</div>';
+    } else if(res.kind==='dot'){
+      h+='<div class="sq-fig" id="sqFig" style="margin-top:12px;"></div>'+figBar();
+      after=function(){ drawFig(dotModel(null,null,res.dp,res.na,res.nb),'sqFig'); };
+    } else if(res.kind==='genome'){
+      h+='<div class="sq-stat" style="margin-top:14px;"><span>coverage of '+escapeHtml(res.na)+' <b>'+res.g.coverage.toFixed(1)+' %</b></span>'
+        +'<span><b>'+res.g.blocks.length+'</b> collinear blocks</span><span>k = '+res.g.k+'</span>'
+        +(res.g.truncated?'<span>anchor cap reached — raise k</span>':'')+'</div>'
+        +'<div class="mbc-tblwrap"><table class="sq-tbl"><thead><tr><th>#</th><th>Length</th><th>'+escapeHtml(res.na)+'</th><th>'+escapeHtml(res.nb)+'</th><th>Strand</th><th>Identity</th></tr></thead><tbody>'
+        +res.g.blocks.slice(0,200).map(function(b,i){
+          return '<tr><td>'+(i+1)+'</td><td>'+(b.aEnd-b.aStart).toLocaleString('en-US')+'</td><td>'+(b.aStart+1)+'–'+b.aEnd+'</td><td>'+(b.bStart+1)+'–'+b.bEnd+'</td><td>'+(b.strand===1?'+':'−')+'</td><td>'+b.identity.toFixed(1)+' %</td></tr>';
+        }).join('')+'</tbody></table></div>';
+    } else if(res.kind==='msa'){
+      h+='<div class="sq-stat" style="margin-top:14px;"><span><b>'+res.m.rows.length+'</b> sequences</span>'
+        +'<span>width <b>'+res.m.width+'</b></span>'
+        +'<span>identical columns <b>'+(res.m.consensus.split('*').length-1)+'</b></span>'
+        +'<span>centre: '+escapeHtml(res.m.centre)+'</span></div>'
+        +'<div class="sq-mono">'+escapeHtml(msaText(res.m))+'</div>';
+    }
+    return {html:h,after:after};
+  }
+  function alnText(r,na,nb){
+    var out=[], W=60, la=Math.max(String(na).length,String(nb).length,6);
+    function pad(s){ s=String(s).slice(0,la); while(s.length<la)s+=' '; return s; }
+    for(var i=0;i<r.a.length;i+=W){
+      var A=r.a.substr(i,W), B=r.b.substr(i,W), mid='';
+      for(var j=0;j<A.length;j++) mid+=(A[j]===B[j]&&A[j]!=='-')?'|':(A[j]==='-'||B[j]==='-')?' ':'.';
+      out.push(pad(na)+' '+A);
+      out.push(pad('')+' '+mid);
+      out.push(pad(nb)+' '+B);
+      out.push('');
+    }
+    return out.join('\n');
+  }
+  function msaText(m){
+    var W=60, la=Math.min(18,Math.max.apply(null,m.rows.map(function(r){return String(r.name).length;}))||8);
+    function pad(s){ s=String(s).slice(0,la); while(s.length<la)s+=' '; return s; }
+    var out=[];
+    for(var i=0;i<m.width;i+=W){
+      m.rows.forEach(function(r){ out.push(pad(r.name)+' '+r.aln.substr(i,W)); });
+      out.push(pad('')+' '+m.consensus.substr(i,W));
+      out.push('');
+    }
+    return out.join('\n');
+  }
+
+  // ── main render ────────────────────────────────────────────────────
+  function render(){
+    if(!S)S=load();
+    renderList();
+    var el=document.getElementById('seqMain'); if(!el)return;
+    var rec=R();
+    if(!rec){
+      el.innerHTML='<div class="mbc-empty" style="padding:26px 14px;">'
+        +'<p style="margin:0 0 10px;">No sequence loaded.</p>'
+        +'<p style="margin:0;font-size:12px;color:var(--text3)">Paste one, or import a FASTA / GenBank / GFF3 file. Everything here — maps, ORFs, digests, primers and alignments — runs in this browser; nothing is uploaded.</p></div>';
+      save(); return;
+    }
+    var TABS=[['map','Map'],['orf','ORFs & translation'],['cut','Restriction digest'],['primer','Primers'],['align','Alignment']];
+    var panel=({map:panelMap,orf:panelOrf,cut:panelCut,primer:panelPrimer,align:panelAlign}[S.tab]||panelMap)(rec);
+    el.innerHTML='<div class="sq-head">'
+        +'<div class="mbc-f"><label for="sqName">Name</label><input id="sqName" value="'+escapeHtml(rec.name)+'" onchange="SEQ.setRec(\'name\',this.value)"></div>'
+        +'<div class="mbc-f"><label for="sqDesc">Description</label><input id="sqDesc" value="'+escapeHtml(rec.desc)+'" onchange="SEQ.setRec(\'desc\',this.value)"></div>'
+        +'<div class="mbc-f" style="flex:0 0 130px;"><label for="sqCirc">Topology</label><select id="sqCirc" onchange="SEQ.setRec(\'circular\',this.value===\'c\')">'
+          +'<option value="l"'+(rec.circular?'':' selected')+'>Linear</option><option value="c"'+(rec.circular?' selected':'')+'>Circular</option></select></div>'
+      +'</div>'
+      +'<div class="sq-stat"><span><b>'+rec.seq.length.toLocaleString('en-US')+'</b> bp</span>'
+        +'<span>GC <b>'+seqGC(rec.seq).toFixed(1)+' %</b></span>'
+        +'<span>Tm (NN) <b>'+(rec.seq.length<=60&&isFinite(nnTm(rec.seq,{na:50}))?nnTm(rec.seq,{na:50}).toFixed(1)+' °C':'—')+'</b></span>'
+        +'<span>'+(rec.feats.length?rec.feats.length+' annotated features':'no annotation')+'</span></div>'
+      +'<div class="sq-tabs" role="group" aria-label="Sequence tools">'
+      +TABS.map(function(t){ return '<button class="sq-tab'+(S.tab===t[0]?' on':'')+'"'+(S.tab===t[0]?' aria-current="true"':'')+' onclick="SEQ.tab(\''+t[0]+'\')">'+escapeHtml(t[1])+'</button>'; }).join('')
+      +'</div>'+panel.html;
+    if(panel.after) panel.after();
+    save();
+  }
+
+  // ── import ─────────────────────────────────────────────────────────
+  function addRec(r,quiet){
+    var c=_coerceSeq(r); if(!c)return null;
+    if(S.seqs.length>=60){ showToast('60 sequences is the limit — delete one first','warn'); return null; }
+    S.seqs.push(c); S.active=S.seqs.length-1;
+    if(!quiet) showToast('✓ '+c.name+' ('+c.seq.length.toLocaleString('en-US')+' bp)','green');
+    return c;
+  }
+  function importText(text,fname){
+    var t=String(text||'');
+    // GFF3 annotates whatever is already loaded rather than making a record.
+    if(/^##gff-version/m.test(t)||/\.gff3?$/i.test(fname||'')){
+      var feats=parseGff3(t);
+      var rec=R();
+      if(!rec){ showToast('Load the sequence first, then import its GFF3','warn'); return; }
+      var keep=feats.filter(function(f){return /CDS|gene|tRNA|rRNA|misc_feature|repeat/i.test(f.type);});
+      rec.feats=(keep.length?keep:feats).slice(0,4000).map(function(f){
+        return {type:f.type,name:f.name,start:f.start,end:f.end,strand:f.strand}; });
+      showToast('✓ '+rec.feats.length+' features added to '+rec.name,'green');
+      render(); return;
+    }
+    if(/^LOCUS\s/m.test(t)){
+      var gb=parseGenbank(t);
+      // parseGenbank calls them "features"; the record field is "feats".
+      if(gb&&gb.seq&&gb.seq.length){ addRec({name:gb.name,seq:gb.seq,feats:gb.features}); render(); return; }
+      showToast('That GenBank file had no ORIGIN sequence','warn'); return;
+    }
+    var recs=parseFasta(t);
+    if(!recs.length){ showToast('No sequence found in that file','warn'); return; }
+    var n=0;
+    recs.slice(0,60).forEach(function(r){ if(addRec(r,true))n++; });
+    showToast('✓ '+n+' sequence'+(n===1?'':'s')+' imported','green');
+    render();
+  }
+
+  // ── exports ────────────────────────────────────────────────────────
+  function csv(rows){ return rows.map(function(r){ return r.map(csvCell).join(','); }).join('\r\n'); }
+
+  window.SEQ={
+    init:function(){ if(!S)S=load(); render(); },
+    render:function(){ if(S)render(); },
+    sel:function(i){ S.active=i; _lastAlign=null; setU('alRun',false); setU('pRun',false); render(); },
+    tab:function(t){ S.tab=t; render(); },
+    set:function(k,v){ setU(k,v); if(k==='alMode'){ _lastAlign=null; setU('alRun',false); } render(); },
+    setRec:function(k,v){ var r=R(); if(!r)return;
+      if(k==='circular')r.circular=!!v;
+      else if(k==='code')r.code=(String(v)==='1')?1:11;
+      else r[k]=String(v).slice(0,300);
+      render(); },
+    enz:function(key,name,on){
+      var list=U(key,[]).slice();
+      var i=list.indexOf(name);
+      if(on&&i<0)list.push(name); else if(!on&&i>=0)list.splice(i,1);
+      setU(key,list); render(); },
+    enzAll:function(key,on){ setU(key,on?ENZYMES.map(function(e){return e.n;}):[]); render(); },
+    msaPick:function(id,on){
+      var list=U('alMsa',[]).slice(), i=list.indexOf(id);
+      if(on&&i<0)list.push(id); else if(!on&&i>=0)list.splice(i,1);
+      setU('alMsa',list); save(); },
+
+    add:function(){
+      document.getElementById('seqPasteName').value='';
+      document.getElementById('seqPasteText').value='';
+      document.getElementById('seqPasteCirc').checked=false;
+      document.getElementById('seqPaste').style.display='flex';
+      setTimeout(function(){ var t=document.getElementById('seqPasteText'); if(t)t.focus(); },30); },
+    closePaste:function(){ document.getElementById('seqPaste').style.display='none'; },
+    savePaste:function(){
+      var name=(document.getElementById('seqPasteName').value||'').trim();
+      var text=document.getElementById('seqPasteText').value||'';
+      var circ=document.getElementById('seqPasteCirc').checked;
+      if(!seqClean(text).length){ showToast('Nothing to add — paste a sequence','warn'); return; }
+      this.closePaste();
+      if(/^LOCUS\s/m.test(text)||/^\s*>/.test(text)){ importText(text,''); if(name){ var r=R(); if(r){r.name=name;} } if(circ){var r2=R(); if(r2)r2.circular=true;} render(); return; }
+      addRec({name:name||'Sequence '+(S.seqs.length+1),seq:text,circular:circ});
+      render(); },
+    importFile:function(ev){
+      var f=ev.target.files&&ev.target.files[0]; ev.target.value='';
+      if(!f)return;
+      if(f.size>8*1024*1024){ showToast('That file is '+(f.size/1048576).toFixed(1)+' MB — too large for browser storage','warn'); return; }
+      var rd=new FileReader();
+      rd.onload=function(){ try{ importText(rd.result,f.name); }catch(e){ showToast('Import failed: '+e.message,'warn'); } };
+      rd.readAsText(f); },
+    del:function(){
+      var r=R(); if(!r)return;
+      if(!confirm('Delete "'+r.name+'"?'))return;
+      S.seqs.splice(S.active,1); S.active=Math.max(0,S.active-1); _lastAlign=null; render(); },
+    rc:function(){ var r=R(); if(!r)return;
+      addRec({name:r.name+' (revcomp)',seq:seqRevComp(r.seq),circular:r.circular}); render(); },
+    translateAll:function(){ var r=R(); if(!r)return;
+      var aa=translate(r.seq,r.code);
+      _dl('>'+r.name+'_frame1_protein\n'+fasta60(aa)+'\n',
+          r.name.replace(/[^A-Za-z0-9._-]+/g,'_')+'_protein.fasta','text/plain');
+      showToast('✓ '+aa.length+' aa ('+(proteinMW(aa.replace(/\*/g,''))/1000).toFixed(1)+' kDa)','green'); },
+    expFasta:function(){ var r=R(); if(!r)return;
+      _dl('>'+r.name+(r.desc?' '+r.desc:'')+'\n'+fasta60(r.seq)+'\n',
+          r.name.replace(/[^A-Za-z0-9._-]+/g,'_')+'.fasta','text/plain'); },
+
+    exp:function(kind){ if(kind==='svg')expSvg(); else if(kind==='pdf')expPdf(); else expPng(+kind); },
+
+    orfCsv:function(){ var r=R(); if(!r)return;
+      var orfs=findOrfs(r.seq,{minAa:+U('orfMin',100),code:r.code,circular:r.circular});
+      var rows=[['orf','start_1based','end','strand','frame','aa_length','kDa','protein']];
+      orfs.forEach(function(o,i){ var aa=translate(o.nt,r.code).replace(/\*$/,'');
+        rows.push([i+1,o.start+1,o.end,o.strand===1?'+':'-',o.frame,o.aaLen,(proteinMW(aa)/1000).toFixed(2),aa]); });
+      _dl(csv(rows),r.name.replace(/[^A-Za-z0-9._-]+/g,'_')+'_orfs.csv','text/csv'); },
+    orfFasta:function(what){ var r=R(); if(!r)return;
+      var orfs=findOrfs(r.seq,{minAa:+U('orfMin',100),code:r.code,circular:r.circular});
+      var out=orfs.map(function(o,i){
+        var s=what==='aa'?translate(o.nt,r.code).replace(/\*$/,''):o.nt;
+        return '>'+r.name+'_orf'+(i+1)+' '+(o.start+1)+'..'+o.end+(o.strand===1?'(+)':'(-)')+' '+o.aaLen+'aa\n'+fasta60(s);
+      }).join('\n');
+      _dl(out+'\n',r.name.replace(/[^A-Za-z0-9._-]+/g,'_')+'_orfs_'+what+'.fasta','text/plain'); },
+
+    cutCsv:function(){ var r=R(); if(!r)return;
+      var d=digest(r.seq,U('cutEnz',[]),r.circular);
+      var rows=[['fragment','size_bp','start_1based','end','percent_of_total']];
+      d.fragments.forEach(function(f,i){ rows.push([i+1,f.len,f.start+1,f.end,(f.len/r.seq.length*100).toFixed(2)]); });
+      _dl(csv(rows),r.name.replace(/[^A-Za-z0-9._-]+/g,'_')+'_digest.csv','text/csv'); },
+    toGel:function(){
+      var r=R(); if(!r)return;
+      var enz=U('cutEnz',[]);
+      if(!enz.length){ showToast('Pick at least one enzyme first','warn'); return; }
+      var d=digest(r.seq,enz,r.circular);
+      if(!d.sites.length){ showToast('These enzymes do not cut — nothing to run','warn'); return; }
+      if(!window.GEL||!GEL.pushLane){ showToast('Gel simulator unavailable','warn'); return; }
+      // A lane cannot show a hundred bands, and anything under ~50 bp runs off
+      // a normal agarose gel anyway. Take the largest 30 and SAY what was left
+      // behind rather than quietly truncating.
+      var all=d.fragments, keep=all.slice(0,30);
+      GEL.pushLane(r.name.slice(0,18)+' / '+enz.join('+'), keep.map(function(f){return f.len;}).join(', '));
+      setMode('gel');
+      showToast(all.length>keep.length
+        ? '✓ 30 largest of '+all.length+' fragments loaded ('+all[30].len+' bp and smaller left out) — the CSV has all of them'
+        : '✓ '+all.length+' fragments loaded as a gel lane','green'); },
+
+    runPrimers:function(){ setU('pRun',true); render(); },
+    primerCsv:function(){
+      var r=R(); if(!r||!_lastPrimers||!_lastPrimers.pairs)return;
+      var rows=[['pair','primer','sequence_5to3','length','tm_C','gc_percent','start_1based','end','hairpin_dG','self_dimer_dG','product_bp','pair_dTm_C','cross_dimer_dG']];
+      _lastPrimers.pairs.forEach(function(p,i){
+        rows.push([i+1,'F',p.fwd.seq,p.fwd.len,p.fwd.tm.toFixed(2),p.fwd.gc.toFixed(1),p.fwd.start+1,p.fwd.end,p.fwd.hairpin.dg.toFixed(2),p.fwd.selfDimer.dg.toFixed(2),p.product,p.dTm.toFixed(2),p.crossDimer.dg.toFixed(2)]);
+        rows.push([i+1,'R',p.rev.seq,p.rev.len,p.rev.tm.toFixed(2),p.rev.gc.toFixed(1),p.rev.start+1,p.rev.end,p.rev.hairpin.dg.toFixed(2),p.rev.selfDimer.dg.toFixed(2),p.product,p.dTm.toFixed(2),p.crossDimer.dg.toFixed(2)]);
+      });
+      _dl(csv(rows),r.name.replace(/[^A-Za-z0-9._-]+/g,'_')+'_primers.csv','text/csv'); },
+    primerToNb:function(){
+      if(!window.NB||!NB.addBlocks){ showToast('Notebook unavailable','warn'); return; }
+      var b=SEQ.blocks({primers:true});
+      if(!b.length){ showToast('Design primers first','warn'); return; }
+      NB.addBlocks(b); showToast('✓ Primer table sent to the notebook','green'); },
+
+    // ── notebook provider ──
+    blocks:function(sel){
+      var out=[], r=R(); if(!r)return out;
+      sel=sel||{};
+      if(sel.info) out.push({type:'kv',title:r.name,pairs:[
+        ['Length',r.seq.length.toLocaleString('en-US')+' bp'],
+        ['Topology',r.circular?'circular':'linear'],
+        ['GC',seqGC(r.seq).toFixed(1)+' %'],
+        ['Genetic code',r.code===1?'1 (standard)':'11 (bacterial)'],
+        ['Annotated features',String(r.feats.length)],
+        ['Description',r.desc||'—']]});
+      if(sel.map&&_fig&&window.FIG){
+        try{
+          var cv=document.createElement('canvas'); cv.width=_fig.w; cv.height=_fig.h;
+          FIG.paint(cv.getContext('2d'),_fig);
+          out.push({type:'image',title:r.name+' — map',dataUrl:cv.toDataURL('image/png')});
+        }catch(e){}
+      }
+      if(sel.orfs){
+        var orfs=findOrfs(r.seq,{minAa:+U('orfMin',100),code:r.code,circular:r.circular});
+        out.push({type:'table',title:'ORFs ≥ '+U('orfMin',100)+' aa ('+orfs.length+')',
+          cols:['#','Start','End','Strand','aa','kDa'],
+          rows:orfs.slice(0,120).map(function(o,i){ var aa=translate(o.nt,r.code).replace(/\*$/,'');
+            return [String(i+1),String(o.start+1),String(o.end),o.strand===1?'+':'−',String(o.aaLen),(proteinMW(aa)/1000).toFixed(1)]; })});
+      }
+      if(sel.digest){
+        var enz=U('cutEnz',[]);
+        var d=enz.length?digest(r.seq,enz,r.circular):{sites:[],fragments:[]};
+        out.push({type:'table',title:'Digest — '+(enz.join(' + ')||'no enzymes')+' ('+d.fragments.length+' fragments)',
+          cols:['#','Size (bp)','From','To'],
+          rows:d.fragments.slice(0,80).map(function(f,i){ return [String(i+1),String(f.len),String(f.start+1),String(f.end)]; })});
+      }
+      if(sel.primers&&_lastPrimers&&_lastPrimers.pairs){
+        out.push({type:'table',title:'Primer pairs — '+r.name,
+          cols:['Pair','Dir','Sequence 5′→3′','Tm °C','GC %','Position','Product bp'],
+          rows:_lastPrimers.pairs.reduce(function(a,p,i){
+            a.push([String(i+1),'F',p.fwd.seq,p.fwd.tm.toFixed(1),p.fwd.gc.toFixed(0),(p.fwd.start+1)+'–'+p.fwd.end,String(p.product)]);
+            a.push([String(i+1),'R',p.rev.seq,p.rev.tm.toFixed(1),p.rev.gc.toFixed(0),(p.rev.start+1)+'–'+p.rev.end,String(p.product)]);
+            return a; },[])});
+        out.push({type:'kv',title:'Primer conditions',pairs:[
+          ['Model','SantaLucia 1998 unified NN + Owczarzy salt correction'],
+          ['Na⁺',_lastPrimers.salt.na+' mM'],['Mg²⁺',_lastPrimers.salt.mg+' mM'],
+          ['Primer',_lastPrimers.salt.primer+' nM'],
+          ['Target',(_lastPrimers.target.start+1)+'–'+_lastPrimers.target.end]]});
+      }
+      if(sel.align&&_lastAlign&&!_lastAlign.error){
+        var a=_lastAlign;
+        if(a.kind==='pair') out.push({type:'kv',title:'Alignment — '+a.na+' vs '+a.nb,pairs:[
+          ['Identity',a.r.identity.toFixed(1)+' %'],['Matches',String(a.r.matches)],
+          ['Mismatches',String(a.r.mismatches)],['Gaps',String(a.r.gaps)],
+          ['Aligned length',String(a.r.length)],['Mode',a.r.mode]]});
+        else if(a.kind==='genome') out.push({type:'kv',title:'Genome alignment — '+a.na+' vs '+a.nb,pairs:[
+          ['Coverage of '+a.na,a.g.coverage.toFixed(1)+' %'],['Collinear blocks',String(a.g.blocks.length)],
+          ['Word size k',String(a.g.k)]]});
+        else if(a.kind==='msa') out.push({type:'kv',title:'Multiple alignment',pairs:[
+          ['Sequences',String(a.m.rows.length)],['Width',String(a.m.width)],
+          ['Identical columns',String(a.m.consensus.split('*').length-1)],['Centre',a.m.centre]]});
+        else if(a.kind==='dot') out.push({type:'kv',title:'Dot plot — '+a.na+' vs '+a.nb,pairs:[
+          ['Word size k',String(a.dp.k)],['Matching k-mers',a.dp.points.length.toLocaleString('en-US')]]});
+      }
+      return out; },
+
+    runAlign:function(){
+      var r=R(); if(!r)return;
+      var mode=U('alMode','pair');
+      setU('alRun',true);
+      if(mode==='msa'){
+        var picks=S.seqs.filter(function(x){return U('alMsa',[]).indexOf(x.id)>=0;});
+        if(picks.length<2){ _lastAlign={error:'Tick at least two sequences.'}; render(); return; }
+        var m=alignMultiple(picks.map(function(x){return {name:x.name,seq:x.seq};}));
+        _lastAlign=m.error?{error:m.error}:{kind:'msa',m:m};
+        render(); return;
+      }
+      var other=S.seqs.filter(function(x){return x.id===U('alB','');})[0];
+      if(!other){ _lastAlign={error:'Pick a sequence to compare against.'}; render(); return; }
+      var k=Math.max(6,Math.min(28,Math.round(_n(U('alK',mode==='dot'?12:16),mode==='dot'?12:16))));
+      if(mode==='pair'){
+        var res=alignPair(r.seq,other.seq,{mode:U('alSub','global')});
+        _lastAlign=res.error?{error:res.error}:{kind:'pair',r:res,na:r.name,nb:other.name};
+      } else if(mode==='dot'){
+        _lastAlign={kind:'dot',dp:dotPlot(r.seq,other.seq,{k:k}),na:r.name,nb:other.name};
+      } else {
+        _lastAlign={kind:'genome',g:genomeAlign(r.seq,other.seq,{k:k}),na:r.name,nb:other.name};
+      }
+      render(); },
+    alignDl:function(){
+      if(!_lastAlign)return;
+      var a=_lastAlign, base=(R()&&R().name||'alignment').replace(/[^A-Za-z0-9._-]+/g,'_');
+      if(a.kind==='pair') _dl(alnText(a.r,a.na,a.nb),base+'_alignment.txt','text/plain');
+      else if(a.kind==='msa') _dl(msaText(a.m),base+'_msa.txt','text/plain');
+      else if(a.kind==='dot'){
+        var rows=[['a_pos_1based','b_pos_1based','strand']];
+        a.dp.points.forEach(function(p){ rows.push([p[0]+1,p[1]+1,p[2]===1?'+':'-']); });
+        _dl(csv(rows),base+'_dotplot.csv','text/csv');
+      } else if(a.kind==='genome'){
+        var rows2=[['block','length','a_start_1based','a_end','b_start_1based','b_end','strand','identity_percent']];
+        a.g.blocks.forEach(function(b,i){ rows2.push([i+1,b.aEnd-b.aStart,b.aStart+1,b.aEnd,b.bStart+1,b.bEnd,b.strand===1?'+':'-',b.identity.toFixed(2)]); });
+        _dl(csv(rows2),base+'_blocks.csv','text/csv');
+      } },
+    // For the notebook provider and the command palette.
+    list:function(){ return S?S.seqs:[]; },
+    open:function(id){ if(!S)S=load(); var i=S.seqs.map(function(x){return x.id;}).indexOf(id); if(i>=0)S.active=i; render(); },
+    _primers:function(){ return _lastPrimers; },
+    _rec:R
+  };
+})();
+
 /* ════════════ WORKSPACE BACKUP + COMMAND PALETTE (Ctrl/⌘+K) ════════════
    Everything you own lives in this browser. These two make it durable and
    findable: one file that carries the whole workspace, and one search box
@@ -10177,10 +11700,14 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   function build(){
     var out=[];
     [['home','🏠','Home'],['plasmid','🧫','Plate Planner'],['phage','🧫','Plate Planner — phage mode'],
-     ['dilcalc','💧','Dilution & Molarity'],['reagent','⚗️','Reagent Prep'],['calc','🧬','Calculators'],
+     ['dilcalc','💧','Dilution & Molarity'],['reagent','⚗️','Reagent Prep'],['calc','🧮','Calculators'],
      ['proto','📋','Protocols'],['phg','🦠','Phage Planner'],['titer','⭕','Titering & EOP'],
-     ['mic','🔬','Microscopy & Dyes'],['gel','🧪','Gel Simulator'],['notebook','📓','Lab Notebook']]
+     ['mic','🔬','Microscopy & Dyes'],['gel','🧪','Gel Simulator'],['seq','🧬','Sequences & Cloning'],
+     ['notebook','📓','Lab Notebook']]
       .forEach(function(m){ out.push({kind:'module',icon:m[1],name:m[2],hay:m[2],go:function(){setMode(m[0]);}}); });
+    try{ (window.SEQ&&SEQ.list&&SEQ.list()||[]).forEach(function(s){
+      out.push({kind:'sequence',icon:'🧬',name:s.name,hay:s.name+' '+(s.desc||''),
+                go:function(){ setMode('seq'); if(SEQ.open)SEQ.open(s.id); }}); }); }catch(e){}
     try{ (window.MBC&&MBC.calcs||[]).forEach(function(c){
       out.push({kind:'calculator',icon:'🧮',name:c.name,hay:c.name+' '+(c.tags||'')+' '+(c.blurb||''),
                 go:function(){ MBC._cur=c.id; setMode('calc'); }}); }); }catch(e){}
