@@ -85,6 +85,17 @@ header{background:var(--head-bg);color:var(--head-fg);padding:10px 22px;display:
 .mode-tab{font-family:var(--mono);font-size:10.5px;padding:5px 12px;border:none;border-radius:4px;background:transparent;color:var(--head-fg-dim);cursor:pointer;white-space:nowrap;letter-spacing:0.04em;transition:all 0.15s;}
 .mode-tab:hover{color:var(--head-fg);background:rgba(255,255,255,0.10);}
 .mode-tab.active{background:var(--btn-primary);color:#fff;}
+/* Second row: the pages inside the selected group. Quieter than the group
+   row so the hierarchy reads at a glance. */
+.mode-sub{background:rgba(255,255,255,0.05);}
+.mode-sub .mode-tab{font-size:10px;padding:4px 10px;}
+.mode-sub .mode-tab.active{background:rgba(255,255,255,0.20);color:#fff;}
+/* In-module switch for the plate planner's two experiment types, which used
+   to be two separate top-level tabs. */
+.pm-sw{display:flex;gap:4px;margin-bottom:4px;}
+.pm-btn{flex:1;font-family:var(--mono);font-size:10.5px;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text2);cursor:pointer;white-space:nowrap;}
+.pm-btn:hover{border-color:var(--border2);color:var(--text);}
+.pm-btn.on{background:var(--accent-fill);color:var(--accent-fill-fg);border-color:var(--accent-fill);font-weight:700;}
 .theme-group{display:flex;gap:3px;background:rgba(255,255,255,0.08);border-radius:6px;padding:3px;}
 .theme-btn{font-family:var(--mono);font-size:10.5px;padding:5px 10px;border:none;border-radius:4px;background:transparent;color:var(--head-fg-dim);cursor:pointer;letter-spacing:0.04em;transition:all 0.15s;}
 .theme-btn:hover{color:var(--head-fg);background:rgba(255,255,255,0.10);}
@@ -268,7 +279,15 @@ tbody tr:hover{background:var(--bg);}
 
 /* ── MODAL ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:500;display:flex;align-items:center;justify-content:center;}
-.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:26px 30px;width:380px;max-width:92vw;box-shadow:0 8px 40px rgba(0,0,0,0.22);}
+/* max-height + overflow are load-bearing: the overlay centres the box, so a
+   tall body (a long titer history) would otherwise push the Save/Cancel
+   footer off BOTH ends of the screen with no scrollbar and no way out. */
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:26px 30px;width:380px;max-width:92vw;max-height:88vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.22);}
+.phg-hrow{display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text2);}
+.phg-hrow:last-child{border-bottom:0;}
+.phg-hv{font-weight:700;color:var(--text);}
+.phg-hm{margin-left:auto;font-size:10px;color:var(--text3);text-align:right;}
+#phgEditHist{max-height:150px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:4px 9px;background:var(--bg);}
 .modal-title{font-size:16px;font-weight:800;margin-bottom:20px;letter-spacing:-0.02em;}
 .modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:22px;}
 .modal-btn{font-family:var(--mono);font-size:11px;padding:7px 16px;border-radius:5px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;}
@@ -347,20 +366,18 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <span class="brand-name">Dilution Designer</span>
     <span class="brand-mantra">Built with passion for science and discovery</span>
   </div>
-  <div class="mode-tabs">
-    <button class="mode-tab" id="modeTabHome" onclick="setMode('home')">🏠 Home</button>
-    <button class="mode-tab active" id="modeTabPlasmid" onclick="setMode('plasmid')">Plasmid / Induction</button>
-    <button class="mode-tab" id="modeTabPhage" onclick="setMode('phage')">Phage Infection</button>
-    <button class="mode-tab" id="modeTabReagent" onclick="setMode('reagent')">Reagent Prep</button>
-    <button class="mode-tab" id="modeTabDilcalc" onclick="setMode('dilcalc')">Dilution Calc</button>
-    <button class="mode-tab" id="modeTabCalc" onclick="setMode('calc')">🧬 Calculators</button>
-    <button class="mode-tab" id="modeTabProto" onclick="setMode('proto')">📋 Protocols</button>
-    <button class="mode-tab" id="modeTabPhg" onclick="setMode('phg')">🦠 Phage Planner</button>
-    <button class="mode-tab" id="modeTabTit" onclick="setMode('titer')">⭕ Titering</button>
-    <button class="mode-tab" id="modeTabMic" onclick="setMode('mic')">🔬 Microscopy</button>
-    <button class="mode-tab" id="modeTabGel" onclick="setMode('gel')">🧪 Gel Sim</button>
-    <button class="mode-tab" id="modeTabNb" onclick="setMode('notebook')">📓 Notebook</button>
-  </div>
+  <!-- Two rows, not twelve peers. The modules divide into three kinds —
+       things you plan with, things that hold your data, and stateless tools
+       you look something up in — and presenting them as one flat list is what
+       made a bench tool start to feel like a suite. Ctrl+K still reaches
+       everything directly; this row is about telling you what KIND of thing
+       you are doing. Rendered by renderNavTabs() from MODE_GROUPS. -->
+  <!-- Deliberately NOT role=tablist: these switch whole views rather than
+       tabpanels, and claiming tab semantics would promise a roving tabindex
+       and arrow-key navigation that do not exist. Plain navigation with
+       aria-current is what this actually is. -->
+  <nav class="mode-tabs" id="modeGroups" aria-label="Sections"></nav>
+  <nav class="mode-tabs mode-sub" id="modeMembers" aria-label="Pages in this section"></nav>
   <div class="theme-group">
     <button class="theme-btn active" data-theme="day" onclick="setTheme('day')">Day</button>
     <button class="theme-btn" data-theme="night" onclick="setTheme('night')">Night</button>
@@ -394,7 +411,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
 </header>
 
 <div id="welcomeBanner" role="alert">
-  <div id="wbContent"><strong>Welcome to Dilution Designer!</strong> &nbsp;Add conditions in the left panel → paint them onto the plate → export your protocol. Switch between <em>Plasmid/Induction</em> and <em>Phage Infection</em> modes using the tabs above.</div>
+  <div id="wbContent"><strong>Welcome to Dilution Designer!</strong> &nbsp;Add conditions in the left panel → paint them onto the plate → export your protocol. Switch between <em>Plasmid/Induction</em> and <em>Phage Infection</em> with the <em>Experiment type</em> buttons at the top of the left panel, and press <kbd>Ctrl</kbd>+<kbd>K</kbd> to search everything.</div>
   <button id="wbDismiss" onclick="dismissWelcome()" aria-label="Dismiss">✕</button>
 </div>
 
@@ -603,8 +620,55 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <button class="btn ac" onclick="PHG.addLysate()" style="width:100%;justify-content:center;">＋ Add lysate</button>
       <div id="phgList" class="mbc-list" role="listbox" aria-label="Saved phage lysates"></div>
       <div id="phgLibTools"></div>
+      <div class="sl" style="margin-top:14px;">Host strains</div>
+      <button class="btn" onclick="HOSTUI.edit(null)" style="width:100%;justify-content:center;">＋ Add strain</button>
+      <div id="hostList" class="mbc-list" role="list" aria-label="Registered host strains"></div>
+      <div id="hostTools"></div>
     </aside>
     <section class="mbc-main" id="phgMain"></section>
+  </div>
+</div>
+
+<!-- ══════════ HOST / STRAIN EDITOR ══════════ -->
+<div class="modal-overlay" id="hostEdit" style="display:none;" onclick="if(event.target===this)HOSTUI.close()">
+  <div class="modal-box">
+    <div class="modal-title" id="hostEditTitle">Add strain</div>
+    <input type="hidden" id="hostEditId">
+    <div class="f">
+      <label for="hostEditName">Name</label>
+      <input id="hostEditName" placeholder="e.g. E. coli MG1655">
+    </div>
+    <div class="r2">
+      <div class="f"><label for="hostEditSpecies">Species</label><input id="hostEditSpecies" placeholder="e.g. Escherichia coli"></div>
+      <div class="f"><label for="hostEditMarkers">Markers / selection</label><input id="hostEditMarkers" placeholder="e.g. Amp&lt;sup&gt;R&lt;/sup&gt;, none"></div>
+    </div>
+    <div class="r2">
+      <div class="f"><label for="hostEditSource">Source / collection no.</label><input id="hostEditSource" placeholder="e.g. CGSC 6300, lab freezer B2"></div>
+      <div class="f"><label for="hostEditDate">Acquired</label><input type="date" id="hostEditDate"></div>
+    </div>
+    <div class="f">
+      <label for="hostEditNote">Note (optional)</label>
+      <input id="hostEditNote" placeholder="e.g. grows at 30 °C, slow on minimal">
+    </div>
+    <div class="ibox" style="font-size:10.5px;">Strains you register here autocomplete in every host field across the app, so the same organism is spelled the same way everywhere.</div>
+    <div class="modal-footer">
+      <button class="modal-btn" id="hostEditDelete" onclick="HOSTUI.del()" style="margin-right:auto;">Delete</button>
+      <button class="modal-btn" onclick="HOSTUI.close()">Cancel</button>
+      <button class="modal-btn primary" onclick="HOSTUI.save()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ WORKSPACE RESTORE PREVIEW ══════════ -->
+<div class="modal-overlay" id="wsPrev" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal-box" style="max-width:620px;">
+    <div class="modal-title">Restore workspace</div>
+    <div class="tit-mini" style="margin-bottom:9px;">Backup taken <span id="wsPrevWhen">—</span></div>
+    <div id="wsPrevBody"></div>
+    <div class="modal-footer">
+      <button class="modal-btn" onclick="document.getElementById('wsPrev').style.display='none'">Cancel</button>
+      <button class="modal-btn primary" onclick="WS.confirmRestore()">Restore &amp; reload</button>
+    </div>
   </div>
 </div>
 
@@ -630,12 +694,16 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div class="f"><label for="phgEditVol">Vol available (µL)</label><input type="number" id="phgEditVol" value="1000" min="0" step="any"></div>
     </div>
     <div class="r2">
-      <div class="f"><label for="phgEditHost">Propagating host</label><input id="phgEditHost" placeholder="e.g. E. coli MG1655"></div>
+      <div class="f"><label for="phgEditHost">Propagating host</label><input id="phgEditHost" list="ddHosts" placeholder="e.g. E. coli MG1655"><input type="hidden" id="phgEditHostId"></div>
       <div class="f"><label for="phgEditDate">Titered on</label><input type="date" id="phgEditDate"></div>
     </div>
     <div class="f">
       <label for="phgEditNote">Note (optional)</label>
       <input id="phgEditNote" placeholder="e.g. CsCl-purified, stored 4 °C">
+    </div>
+    <div class="f" id="phgEditHistWrap" style="display:none;">
+      <label>Titer history</label>
+      <div id="phgEditHist"></div>
     </div>
     <!-- Same math as the Phage titer calculator and the plate's stock editor. -->
     <details id="phgEditAssay" style="margin-bottom:11px;">
@@ -678,7 +746,9 @@ body.print-plate-mode .excl-bar{display:none!important;}
 <aside class="sidebar">
 
   <div>
-    <div class="sl">Experiment</div>
+    <div class="sl">Experiment type</div>
+    <div class="pm-sw" id="plateModeSw" role="group" aria-label="Plate experiment type"></div>
+    <div class="sl" style="margin-top:14px;">Experiment</div>
     <div class="f">
       <label style="font-weight:700;color:var(--text);" id="compLabel">Compound / reagent name</label>
       <input id="inducerName" placeholder="e.g. Crystal violet, IPTG, phage T4…" oninput="update()">
@@ -708,7 +778,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div class="f"><label>Vol per well (µL)</label><input type="number" id="cultureVol" value="200" min="1" step="any" oninput="update()"></div>
       <div class="f"><label>Total available (µL)</label><input type="number" id="cultureTotal" value="25000" min="0" step="any" oninput="update()"></div>
     </div>
-    <div class="f"><label>Sample / culture name</label><input id="cultureName" placeholder="E.g. E. coli, HeLa…" oninput="update()"></div>
+    <div class="f"><label>Sample / culture name</label><input id="cultureName" list="ddHosts" placeholder="E.g. E. coli, HeLa…" oninput="update()"><input type="hidden" id="cultureHostId"></div>
     <div class="sl" style="margin-top:4px;">Intermediate stock</div>
     <div class="tg">
       <button class="tb on" id="tgDir" onclick="setIntm('direct')">Direct from stock</button>
@@ -733,7 +803,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
       <div class="f"><label>Culture vol/well (µL)</label><input type="number" id="infVol" value="200" min="1" step="any" oninput="update()"></div>
       <div class="f"><label>Culture available (µL)</label><input type="number" id="infTotal" value="25000" min="0" step="any" oninput="update()"></div>
     </div>
-    <div class="f"><label>Culture / host name</label><input id="hostName" placeholder="e.g. E. coli BL21" oninput="update()"></div>
+    <div class="f"><label>Culture / host name</label><input id="hostName" list="ddHosts" placeholder="e.g. E. coli BL21" oninput="update()"><input type="hidden" id="hostHostId"></div>
     <div class="sl" style="margin-top:4px;">Phage stocks</div>
     <div id="phageList"></div>
     <button class="addbtn" onclick="openPhageModal(null)" style="width:100%;padding:7px;margin-top:4px;">＋ Add phage stock</button>
@@ -1077,6 +1147,108 @@ function csvCell(c){
 let _lsWarned=false;
 function lsWarnOnce(){ if(_lsWarned) return; _lsWarned=true;
   try{ showToast('Couldn’t save to this browser’s storage (private mode or full). Export your work to keep it.','warn',6000); }catch(e){} }
+/* Save and warn in one call. Several modules used to do a bare lsSet() and
+   throw the false away, so a full or private-mode browser lost their data
+   with no message at all. */
+function lsSetWarn(k,v){ var ok=lsSet(k,v); if(!ok) lsWarnOnce(); return ok; }
+
+/* The reagent and dye libraries are fetched lazily on first visit to their
+   module, so anything that indexes them (the command palette) has to know
+   when they land. One event, no module-specific coupling. */
+function ddLibraryLoaded(which){
+  try{ document.dispatchEvent(new CustomEvent('dd:library',{detail:{which:which}})); }catch(e){}
+}
+/* Kick off those fetches without needing the user to visit the module.
+   Both loaders are idempotent and write into their own (hidden) views. */
+function ddWarmLibraries(){
+  try{ if(typeof rpLoaded!=='undefined'&&!rpLoaded&&typeof rpInit==='function') rpInit(); }catch(e){}
+  try{ if(window.MIC&&MIC.init&&(!MIC.list||!MIC.list.length)) MIC.init(); }catch(e){}
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   WORKSPACE — every localStorage key this app owns, in one place.
+   Everything you have ever entered lives in this browser and nowhere
+   else; clearing site data wipes it with no warning. This table is what
+   makes a single-file backup possible, and it is the ONLY list — a new
+   module adds its key here or it silently misses every backup.
+   ══════════════════════════════════════════════════════════════════ */
+const DD_KEYS=[
+  {k:'dd_state',          label:'Plate layout (current)',     json:true},
+  {k:'dd_layouts',        label:'Saved plate layouts',        json:true},
+  {k:'dd_titer',          label:'Titering experiments',       json:true},
+  {k:'dd_lysates',        label:'Lysate library',             json:true},
+  {k:'dd_hosts',          label:'Host / strain registry',     json:true},
+  {k:'dd_notebook',       label:'Lab notebook entries',       json:true},
+  {k:'dd_reagent_custom', label:'Custom reagent recipes',     json:true},
+  {k:'dd_gel',            label:'Gel simulator setup',        json:true},
+  {k:'dd_gel_ladders',    label:'Custom gel ladders',         json:true},
+  {k:'dd_phg',            label:'Phage planner settings',     json:true},
+  {k:'dd_mic_panel',      label:'Microscopy panel',           json:true},
+  {k:'dd_mic_dyes',       label:'Custom dyes',                json:true},
+  {k:'dd_sci',            label:'Notation preference',        json:false},
+  {k:'dd_welcomed',       label:'Welcome dismissed',          json:false},
+  {k:'mbc_last',          label:'Last calculator',            json:false},
+  {k:'pr_last',           label:'Last protocol',              json:false},
+  {k:'mic_last',          label:'Last dye',                   json:false}
+];
+
+// How many top-level records a key holds, for the backup preview. Objects
+// keyed by name (dd_layouts) count their keys; arrays count length; the
+// versioned wrappers count the collection inside them.
+function _ddCount(key,raw){
+  if(raw==null)return 0;
+  try{
+    var v=JSON.parse(raw);
+    if(Array.isArray(v))return v.length;
+    if(v&&typeof v==='object'){
+      if(Array.isArray(v.experiments))return v.experiments.length;
+      if(Array.isArray(v.lysates))return v.lysates.length;
+      return Object.keys(v).length;
+    }
+  }catch(e){}
+  return 1;
+}
+function workspaceSnapshot(){
+  var data={},present=0,bytes=0;
+  DD_KEYS.forEach(function(d){
+    var raw=lsGet(d.k);
+    if(raw==null)return;
+    data[d.k]=raw;                       // stored verbatim: no reserialisation, no drift
+    present++; bytes+=d.k.length+raw.length;
+  });
+  return {app:'dilution-designer',kind:'workspace',v:1,
+          savedAt:new Date().toISOString(),appVersion:(typeof MB_VERSION!=='undefined'?MB_VERSION:''),
+          keys:present,bytes:bytes,data:data};
+}
+// What a file WOULD change, without changing anything — the import preview.
+function workspacePlan(payload){
+  if(!payload||payload.kind!=='workspace'||!payload.data||typeof payload.data!=='object')
+    throw new Error('not a Dilution Designer workspace file');
+  var rows=[];
+  DD_KEYS.forEach(function(d){
+    var incoming=payload.data[d.k], current=lsGet(d.k);
+    if(incoming==null&&current==null)return;
+    rows.push({key:d.k,label:d.label,
+      action: incoming==null?'kept' : current==null?'added' : (incoming===current?'same':'replaced'),
+      from:_ddCount(d.k,current), to:_ddCount(d.k,incoming==null?current:incoming)});
+  });
+  return rows;
+}
+// Returns {n, failed:[keys]}. A quota-exceeded write returns false rather
+// than throwing, so a restore could previously stop short and still report
+// success — the user would reload into a half-restored workspace believing
+// it worked. Callers must surface `failed`.
+function workspaceRestore(payload){
+  var rows=workspacePlan(payload),n=0,failed=[];
+  rows.forEach(function(r){
+    if(r.action==='kept')return;
+    var v=payload.data[r.key];
+    if(typeof v!=='string'){ failed.push(r.key); return; }
+    if(lsSet(r.key,v)) n++; else failed.push(r.key);
+  });
+  if(failed.length) lsWarnOnce();
+  return {n:n,failed:failed};
+}
 
 /* ══════════════════════════════════════════════════════════════════
    SCIENTIFIC NOTATION — one parser + formatter for the whole app.
@@ -1180,7 +1352,14 @@ let _undoStack = [];
 let _redoStack = [];
 const UNDO_LIMIT = 30;
 let _ready = false;
-let _sharedSession = false; // viewing a shared-link layout — don't autosave over the user's own work
+/* Viewing a shared-link layout — don't autosave over the user's own work.
+   A top-level `let` binds into the global DECLARATIVE record, never onto
+   `window`, so the modules that guarded on `window._sharedSession` (Titering,
+   the notebook) were checking a permanently-undefined value and saving
+   anyway. ddShared() is the accessor everything now uses. */
+let _sharedSession = false;
+function ddShared(){ return _sharedSession; }
+function ddSetShared(v){ _sharedSession=!!v; }
 
 // Unified palette: conditions + controls
 let palette = [
@@ -1271,22 +1450,68 @@ function setTheme(name) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// MODES
+// MODES — grouped navigation
+//
+// The twelve modules are not peers. Three kinds:
+//   plan    you set something up before the bench
+//   record  your data lives here
+//   tools   stateless: ask a question, get an answer, leave
+// The plate planner's plasmid and phage modes were two separate top-level
+// tabs for ONE module; they are one entry now, with the mode switch inside.
 // ══════════════════════════════════════════════════════════════════
+const MODE_GROUPS=[
+  {key:'plan',  label:'Plan',   modes:[
+    {m:'plasmid',label:'🧫 Plate Planner'},
+    {m:'phg',    label:'🦠 Phage Planner'}]},
+  {key:'record',label:'Record', modes:[
+    {m:'titer',  label:'⭕ Titering & EOP'},
+    {m:'notebook',label:'📓 Lab Notebook'}]},
+  {key:'tools', label:'Tools',  modes:[
+    {m:'dilcalc',label:'💧 Dilution Calc'},
+    {m:'reagent',label:'⚗️ Reagent Prep'},
+    {m:'calc',   label:'🧬 Calculators'},
+    {m:'proto',  label:'📋 Protocols'},
+    {m:'mic',    label:'🔬 Microscopy'},
+    {m:'gel',    label:'🧪 Gel Sim'}]}
+];
+// 'phage' is the plate planner's other mode, not its own destination.
+function groupOf(m){
+  if(m==='phage')m='plasmid';
+  for(var i=0;i<MODE_GROUPS.length;i++)
+    for(var j=0;j<MODE_GROUPS[i].modes.length;j++)
+      if(MODE_GROUPS[i].modes[j].m===m) return MODE_GROUPS[i].key;
+  return null;                                   // home belongs to no group
+}
+// Remember where you were in each group, so clicking "Tools" returns you to
+// the tool you last used rather than always the first one.
+var _lastInGroup={};
+function renderNavTabs(){
+  var g=groupOf(appMode);
+  var gr=document.getElementById('modeGroups'), me=document.getElementById('modeMembers');
+  if(!gr||!me)return;
+  gr.innerHTML='<button class="mode-tab'+(appMode==='home'?' active':'')+'"'+(appMode==='home'?' aria-current="page"':'')+' onclick="setMode(\'home\')">🏠 Home</button>'
+    +MODE_GROUPS.map(function(x){
+      return '<button class="mode-tab'+(g===x.key?' active':'')+'"'+(g===x.key?' aria-current="page"':'')
+        +' onclick="setGroup(\''+x.key+'\')">'+escapeHtml(x.label)+'</button>';
+    }).join('');
+  var grp=MODE_GROUPS.filter(function(x){return x.key===g;})[0];
+  if(!grp){ me.innerHTML=''; me.style.display='none'; return; }
+  me.style.display='';
+  me.innerHTML=grp.modes.map(function(x){
+    var on=(x.m===appMode)||(x.m==='plasmid'&&appMode==='phage');
+    return '<button class="mode-tab'+(on?' active':'')+'"'+(on?' aria-current="page"':'')+' onclick="setMode(\''+x.m+'\')">'+escapeHtml(x.label)+'</button>';
+  }).join('');
+}
+function setGroup(key){
+  var grp=MODE_GROUPS.filter(function(x){return x.key===key;})[0];
+  if(!grp)return;
+  setMode(_lastInGroup[key]||grp.modes[0].m);
+}
+
 function setMode(m) {
   appMode = m;
-  document.getElementById('modeTabPlasmid').classList.toggle('active',m==='plasmid');
-  document.getElementById('modeTabPhage').classList.toggle('active',m==='phage');
-  var mtR=document.getElementById('modeTabReagent'); if(mtR) mtR.classList.toggle('active',m==='reagent');
-  var mtD=document.getElementById('modeTabDilcalc'); if(mtD) mtD.classList.toggle('active',m==='dilcalc');
-  var mtH=document.getElementById('modeTabHome'); if(mtH) mtH.classList.toggle('active',m==='home');
-  var mtC=document.getElementById('modeTabCalc'); if(mtC) mtC.classList.toggle('active',m==='calc');
-  var mtP=document.getElementById('modeTabProto'); if(mtP) mtP.classList.toggle('active',m==='proto');
-  var mtG=document.getElementById('modeTabGel'); if(mtG) mtG.classList.toggle('active',m==='gel');
-  var mtN=document.getElementById('modeTabNb'); if(mtN) mtN.classList.toggle('active',m==='notebook');
-  var mtL=document.getElementById('modeTabPhg'); if(mtL) mtL.classList.toggle('active',m==='phg');
-  var mtM=document.getElementById('modeTabMic'); if(mtM) mtM.classList.toggle('active',m==='mic');
-  var mtT=document.getElementById('modeTabTit'); if(mtT) mtT.classList.toggle('active',m==='titer');
+  var _g=groupOf(m); if(_g) _lastInGroup[_g]=m;
+  renderNavTabs();
   // Home, Reagent Prep, Dilution Calc and Calculators are self-contained views — hide the plate workspace when active.
   var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView'), dv=document.getElementById('dilcalcView'),
       hv=document.getElementById('homeView'), cv=document.getElementById('calcView'), pv=document.getElementById('protoView'),
@@ -1312,9 +1537,14 @@ function setMode(m) {
   if(m==='proto'){ if(window.PROTO) PROTO.init(); return; }
   if(m==='gel'){ if(window.GEL) GEL.init(); return; }
   if(m==='notebook'){ if(window.NB) NB.init(); return; }
-  if(m==='phg'){ if(window.PHG) PHG.init(); return; }
+  if(m==='phg'){ if(window.PHG) PHG.init(); if(window.HOSTUI) HOSTUI.render(); return; }
   if(m==='mic'){ if(window.MIC) MIC.init(); return; }
   if(m==='titer'){ if(window.TIT) TIT.init(); return; }
+  // The plate planner's two experiment types. One tab, switch inside.
+  var pm=document.getElementById('plateModeSw');
+  if(pm) pm.innerHTML=[['plasmid','Plasmid / Induction'],['phage','Phage Infection']].map(function(x){
+    return '<button class="pm-btn'+(m===x[0]?' on':'')+'" aria-pressed="'+(m===x[0])+'" onclick="setMode(\''+x[0]+'\')">'+x[1]+'</button>';
+  }).join('');
   document.getElementById('sbPlasmid').style.display = m==='plasmid'?'':'none';
   document.getElementById('sbPhage').style.display   = m==='phage'?'':'none';
   document.getElementById('moiPanel').style.display  = m==='phage'?'':'none';
@@ -1941,6 +2171,7 @@ function _applyCompact(s){
   if(!plates.length) plates=[{fmt:'96',name:'Plate 1',assign:Array.from({length:8},()=>Array(12).fill(null)),excluded:new Set()}];
   activePlate=Math.min(s.ap||0,plates.length-1); loadPlate(activePlate);
   if(s.fl)Object.entries(s.fl).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
+  _applyHostLink(s.fl);
   setMode(appMode);setTheme(appTheme);setTool(activeTool);setIntm(intmMode);
   const rn=document.getElementById('repNDisplay'); if(rn)rn.textContent=repToolN;
   const ar=document.getElementById('autoRepsDisplay'); if(ar)ar.textContent=autoReps;
@@ -2500,16 +2731,65 @@ function dlCanvasPngDpi(canvas,dpi,name){
 
 var LYS_KEY='dd_lysates';
 
-// A lysate is a plate stock plus the two things you want to remember about
-// it a month later: what you propagated it on, and when you titered it.
+// One recorded titer measurement. Short keys because this lives in
+// localStorage, which the app already fights for quota.
+//   v  value (PFU/mL)      d  bench date        at  machine timestamp
+//   src where it came from ref the run identity  host what it was plated on
+//   n/sd replicate count + SD, so a 3-replicate measurement is
+//        distinguishable from a number somebody typed
+var TITER_HIST_MAX=40;
+function _coerceTiterEntry(e){
+  if(!e||typeof e!=='object')return null;
+  var v=Number(e.v); if(!(isFinite(v)&&v>0))return null;   // reject the whole entry, never a {} that renders NaN
+  var n=Number(e.n), sd=Number(e.sd);
+  return { v:v,
+    d:   String(e.d==null?'':e.d).slice(0,10),
+    at:  String(e.at==null?'':e.at).slice(0,24),
+    src: String(e.src==null?'':e.src).slice(0,16),
+    ref: String(e.ref==null?'':e.ref).slice(0,64),
+    host:String(e.host==null?'':e.host).slice(0,80),
+    n:   isFinite(n)&&n>0?Math.min(999,Math.round(n)):0,
+    sd:  isFinite(sd)&&sd>0?sd:0,
+    note:String(e.note==null?'':e.note).slice(0,120) };
+}
+
+// A lysate is a plate stock plus the things you want to remember about it a
+// month later: what you propagated it on, when you titered it, which
+// registered strain that was, and how the titer has moved.
 // Everything here is untrusted (imported files, a hand-edited localStorage).
+//
+// ⚠ This is a TOTAL REBUILD from a fixed field list, not a merge. Every read
+// and every write funnels through it, so a field that is not named here is
+// silently erased on the very next lysAll(). That is why titerHistory has to
+// be coerced HERE and not just written by the callers.
 function _coerceLysate(x,i){
   if(!x||typeof x!=='object')return null;
   var o=_coercePhageFields(x,i);
   o.id  = String(x.id||'').trim();                      // callers mint one when empty
   o.host= String(x.host==null?'':x.host).slice(0,80);
   o.date= String(x.date==null?'':x.date).slice(0,20);
+  o.hostId = String(x.hostId==null?'':x.hostId).slice(0,40);
+  // Cap on READ, not on write: an imported file can carry thousands of
+  // entries and lysAll() re-parses the whole library on every render.
+  o.titerHistory = (Array.isArray(x.titerHistory)?x.titerHistory:[])
+                     .map(_coerceTiterEntry).filter(Boolean).slice(-TITER_HIST_MAX);
   return o;
+}
+
+// Append a measurement, or update the one already recorded for the same run.
+// Re-pushing the same titering experiment after adding a replicate is the
+// commonest repeat action; appending would manufacture a fake time series of
+// re-measurements, which is worse than no provenance because it looks real.
+// Manual edits carry ref:'' and always append — a human typing a number
+// twice is two decisions.
+function _pushTiterEntry(h,e){
+  h=Array.isArray(h)?h.slice():[];
+  var x=_coerceTiterEntry(e); if(!x)return h;
+  if(!x.at) x.at=new Date().toISOString();
+  if(!x.d)  x.d=x.at.slice(0,10);
+  var k=-1; if(x.ref) h.forEach(function(y,j){ if(y.src===x.src&&y.ref===x.ref)k=j; });
+  if(k>=0) h[k]=x; else h.push(x);
+  return h.slice(-TITER_HIST_MAX);
 }
 function _lysId(){ return 'L'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 
@@ -2529,6 +2809,12 @@ function lysGet(id){ var f=lysAll().filter(function(x){return x.id===id;}); retu
 
 // Save or update. Without an id, an existing lysate of the same name is
 // updated rather than duplicated — re-titering a stock is the common case.
+//
+// `o` may carry throwaway hints that never reach storage (_coerceLysate
+// rebuilds from a fixed list, so it drops them for free):
+//   _src  where this titer came from ('titering' | 'plate' | 'edit')
+//   _ref  run identity, for dedupe    _host what it was plated on
+//   _n/_sd replicate count and SD     _log  false to suppress the entry
 function lysUpsert(o){
   var list=lysAll(), rec=_coerceLysate(o,list.length);
   if(!rec)return null;
@@ -2537,6 +2823,34 @@ function lysUpsert(o){
     rec.id = same.length?same[0].id:_lysId();
   }
   var i=-1; list.forEach(function(x,j){ if(x.id===rec.id)i=j; });
+  var prev = i>=0 ? list[i] : null;
+  // `list[i]=rec` is a FULL REPLACE and most callers pass only a subset, so
+  // anything they omit must be carried over or it is silently destroyed.
+  // Before this, pushing a titer erased the lysate's host, volume and note.
+  if(prev){
+    if(!Array.isArray(o.titerHistory)) rec.titerHistory = prev.titerHistory;
+    if(o.hostId===undefined) rec.hostId = prev.hostId;
+    // OMITTED means "carry it over"; PRESENT-BUT-EMPTY means the user cleared
+    // it on purpose. Treating '' as omitted made host/note/date impossible to
+    // blank — the editor sends every field on every save, so a cleared box
+    // silently refilled itself.
+    ['host','vol','note','date'].forEach(function(k){
+      if(o[k]===undefined) rec[k]=prev[k];
+    });
+  }
+  // Log when the titer moved, OR when the same run is re-reported with
+  // different replicate statistics — adding a replicate that leaves the mean
+  // unchanged still has to update n and SD, or the record claims the old n.
+  var _same=prev&&prev.titer===rec.titer;
+  var _statsChanged=false;
+  if(_same&&o._ref){
+    var pe=(prev.titerHistory||[]).filter(function(y){return y.src===String(o._src||'edit')&&y.ref===String(o._ref);})[0];
+    if(pe&&((o._n!=null&&+o._n!==pe.n)||(o._sd!=null&&Math.abs((+o._sd||0)-pe.sd)>1e-9))) _statsChanged=true;
+  }
+  if(o._log!==false && rec.titer>0 && (!prev || !_same || _statsChanged))
+    rec.titerHistory=_pushTiterEntry(rec.titerHistory,{v:rec.titer,d:rec.date||'',
+      src:String(o._src||'edit'), ref:String(o._ref||''),
+      host:String(o._host||rec.host||''), n:o._n, sd:o._sd});
   if(i>=0) list[i]=rec; else list.push(rec);
   return lysSave(list)?rec:null;
 }
@@ -2560,12 +2874,169 @@ function lysImportJson(text){
   arr.forEach(function(x,i){
     var r=_coerceLysate(x,i); if(!r)return;
     if(!r.id)r.id=_lysId();
+    // A file written by an older build has no titerHistory. Without this the
+    // import would wipe the local history of every id it matches and still
+    // report success.
+    if(byId[r.id]&&!Array.isArray(x.titerHistory)) r.titerHistory=byId[r.id].titerHistory;
+    if(byId[r.id]&&!r.hostId) r.hostId=byId[r.id].hostId;
     if(!byId[r.id])order.push(r.id);
     byId[r.id]=r; n++;
   });
   if(!n) throw new Error('no readable lysates in that file');
   if(!lysSave(order.map(function(k){return byId[k];}))) throw new Error('browser storage is full');
   return n;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// HOST / STRAIN REGISTRY — the bacteria, as records instead of typing.
+//
+// A host was free text in four unrelated places: the plate's culture and
+// host name fields, every Titering condition, the `host` string on a
+// lysate, and the lysate editor. Two experiments on the same strain shared
+// nothing, so "every phage I have plated on MG1655" was unanswerable.
+//
+// Same design as the lysate library above and for the same reason: its own
+// key, referenced by id, never embedded in a plate payload. Linking is
+// ALWAYS additive — the free-text name stays authoritative for display, so
+// legacy data and hand-typed one-offs keep working untouched.
+// ══════════════════════════════════════════════════════════════════
+
+var HOST_KEY='dd_hosts';
+
+// Untrusted input (imported files, hand-edited localStorage): coerce, never trust.
+function _coerceHost(x,i){
+  if(!x||typeof x!=='object')return null;
+  var nm=String(x.name==null?'':x.name).trim().slice(0,80);
+  if(!nm) nm='Strain '+((i||0)+1);
+  return {
+    id:      String(x.id||'').trim(),                      // callers mint one when empty
+    name:    nm,
+    species: String(x.species==null?'':x.species).slice(0,80),
+    source:  String(x.source==null?'':x.source).slice(0,80),   // where it came from / collection no.
+    markers: String(x.markers==null?'':x.markers).slice(0,80), // selection markers, e.g. Amp^R
+    note:    String(x.note==null?'':x.note).slice(0,200),
+    date:    String(x.date==null?'':x.date).slice(0,20)
+  };
+}
+function _hostId(){ return 'H'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+
+function hostAll(){
+  var raw; try{ raw=JSON.parse(lsGet(HOST_KEY)||'[]'); }catch(e){ raw=[]; }
+  if(!Array.isArray(raw)) raw=[];
+  return raw.map(_coerceHost).filter(Boolean).map(function(r){ if(!r.id)r.id=_hostId(); return r; });
+}
+function hostSave(list){
+  var clean=(list||[]).map(_coerceHost).filter(Boolean);
+  clean.forEach(function(r){ if(!r.id)r.id=_hostId(); });
+  return lsSetWarn(HOST_KEY,JSON.stringify(clean));
+}
+function hostGet(id){ var f=hostAll().filter(function(x){return x.id===id;}); return f.length?f[0]:null; }
+// Resolve a free-text name to a registered strain, case-insensitively. This
+// is how legacy data (which only ever had a name) finds its record.
+function hostByName(name){
+  var n=String(name==null?'':name).trim().toLowerCase();
+  if(!n)return null;
+  var f=hostAll().filter(function(x){return x.name.toLowerCase()===n;});
+  return f.length?f[0]:null;
+}
+// Save or update; without an id, an existing strain of the same name is
+// updated rather than duplicated — same rule as lysUpsert.
+function hostUpsert(o){
+  var list=hostAll(), rec=_coerceHost(o,list.length);
+  if(!rec)return null;
+  if(!rec.id){
+    var same=list.filter(function(x){return x.name.toLowerCase()===rec.name.toLowerCase();});
+    rec.id = same.length?same[0].id:_hostId();
+  }
+  var i=-1; list.forEach(function(x,j){ if(x.id===rec.id)i=j; });
+  if(i>=0) list[i]=rec; else list.push(rec);
+  return hostSave(list)?rec:null;
+}
+function hostDelete(id){ return hostSave(hostAll().filter(function(x){return x.id!==id;})); }
+
+// Register a name seen in the wild (a typed host, an imported lysate's host
+// string) without disturbing anything if it is already known. Returns the
+// record so callers can store its id.
+function hostEnsure(name,extra){
+  var n=String(name==null?'':name).trim();
+  if(!n)return null;
+  var found=hostByName(n);
+  if(found)return found;
+  var rec=Object.assign({name:n},extra||{});
+  return hostUpsert(rec);
+}
+
+function hostExportJson(){
+  return JSON.stringify({app:'dilution-designer',kind:'host-strains',v:1,hosts:hostAll()},null,2);
+}
+// Accepts a bare array or our own export.
+function hostImportJson(text){
+  var d=JSON.parse(text);
+  var arr = Array.isArray(d) ? d : (d&&Array.isArray(d.hosts)) ? d.hosts : null;
+  if(!arr) throw new Error('no strains found in that file');
+  var list=hostAll(), byId={}, order=[];
+  list.forEach(function(x){ if(!byId[x.id])order.push(x.id); byId[x.id]=x; });
+  var n=0;
+  arr.forEach(function(x,i){
+    var r=_coerceHost(x,i); if(!r)return;
+    if(!r.id)r.id=_hostId();
+    if(!byId[r.id])order.push(r.id);
+    byId[r.id]=r; n++;
+  });
+  if(!n) throw new Error('no readable strains in that file');
+  if(!hostSave(order.map(function(k){return byId[k];}))) throw new Error('browser storage is full');
+  return n;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CURRENT EXPERIMENT — one name and date for the afternoon.
+//
+// The plate had expName/expDate, Titering had its own name/date, and the
+// notebook had entry.title/date: three names for the same piece of work, so
+// nothing could tell you which plate went with which titration. This is the
+// shared default. It is only ever a DEFAULT — each module keeps its own
+// field and you can still diverge; this just stops you retyping.
+// ══════════════════════════════════════════════════════════════════
+function ddToday(){
+  var d=new Date();
+  // Local, not toISOString(): UTC rolls over at a different moment and would
+  // date an evening's work to tomorrow.
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function curExp(){
+  var n='',d='';
+  try{ n=(document.getElementById('expName')||{}).value||''; }catch(e){}
+  try{ d=(document.getElementById('expDate')||{}).value||''; }catch(e){}
+  if(!n){ try{ var t=JSON.parse(lsGet('dd_titer')||'null');
+    if(t&&t.experiments&&t.experiments[t.active||0]){ n=t.experiments[t.active||0].name||''; d=d||t.experiments[t.active||0].date||''; } }catch(e){} }
+  // The NAME is inherited freely, but the DATE is only inherited when it is
+  // actually today's work. #expDate persists in dd_state forever and is only
+  // ever stamped with today on a first-ever visit, so without this a notebook
+  // entry created weeks later would be silently backdated to the old plate —
+  // and that wrong date flows into every export and into titer provenance.
+  var today=ddToday();
+  return {name:n, date:(d===today?d:today), staleDate:(d&&d!==today)?d:''};
+}
+// Adopt a name/date as the shared one. Never overwrites a field the user has
+// already filled in — silently renaming someone's plate would be worse than
+// having two names.
+function setCurExp(name,date){
+  var n=document.getElementById('expName'), d=document.getElementById('expDate'), touched=false;
+  if(n&&name&&!n.value.trim()){ n.value=name; touched=true; }
+  if(d&&date&&!d.value){ d.value=date; touched=true; }
+  // A bare .value= fires no event, so the plate's oninput="update()" never
+  // ran and the adopted name was neither persisted nor shown in the header
+  // badge — it vanished on the next reload.
+  if(touched&&typeof update==='function'&&_ready){ try{ update(); }catch(e){} }
+  return touched;
+}
+
+// One <datalist> the whole app shares, so every host field gets the same
+// autocomplete without each module maintaining its own copy.
+function hostDatalistHtml(id){
+  return '<datalist id="'+(id||'ddHosts')+'">'
+    +hostAll().map(function(h){ return '<option value="'+escapeHtml(h.name)+'">'+escapeHtml(h.species||h.markers||'')+'</option>'; }).join('')
+    +'</datalist>';
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -3332,7 +3803,33 @@ function redo(){if(!_redoStack.length)return;_undoStack.push(_snap());_restoreSn
 const _FIELDS=['stockConc','stockVol','cultureVol','cultureTotal','intmConc','intmPrepVol',
   'expName','researcher','expNotes','expDate','inducerName','cultureName','concUnits',
   'bacterialConc','infVol','infTotal','hostName',
+  // Optional links into the host registry, carried as hidden inputs so they
+  // ride the generic field persistence into dd_state / #s= / JSON with no
+  // further plumbing. The free-text name stays authoritative.
+  'cultureHostId','hostHostId',
   'sdTarget','sdFactor','sdMinPip','sdMaxPip','sdPctCap','sdStepVol','fillSelect'];
+
+// The three restore loops iterate the PAYLOAD's keys, so a key a payload
+// LACKS is never visited and the live element keeps whatever was there. For
+// ordinary fields that is invisible; for a host link it is a silent lie —
+// load a pre-change layout on top of a session with a host selected and the
+// old strain stays attached to the new layout, then gets autosaved onto it.
+// Clear-then-set, always.
+function _applyHostLink(f){
+  ['cultureHostId','hostHostId'].forEach(function(id){
+    var el=document.getElementById(id); if(!el)return;
+    el.value = (f && typeof f[id]==='string') ? f[id].slice(0,40) : '';
+  });
+}
+// The plate's registered strain, if any. Precedence mirrors P().cultureName
+// (culture first, host second) so the id and the name can never disagree.
+// An id that does not resolve is KEPT, not cleared — a colleague's registry
+// may arrive later via a workspace import — so always tolerate null.
+function plateHost(){
+  var idEl=document.getElementById('cultureHostId'), nmEl=document.getElementById('cultureName');
+  if(!idEl||!idEl.value){ idEl=document.getElementById('hostHostId'); nmEl=document.getElementById('hostName'); }
+  return (idEl&&idEl.value&&hostGet(idEl.value)) || hostByName(nmEl?nmEl.value:'') || null;
+}
 
 function saveToStorage(){
   if(!_ready||_sharedSession)return;
@@ -3362,6 +3859,7 @@ function restoreFromStorage(){
     if(s._condIdCounter!=null)_condIdCounter=s._condIdCounter;
     _adoptPhages(s.phages,(s.fields||{}).phageTiter,(s.fields||{}).phageVol);
     if(s.fields)Object.entries(s.fields).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
+    _applyHostLink(s.fields);
     return true;
   }catch(e){return false;}
 }
@@ -3525,6 +4023,7 @@ function _applyState(s){
   _condIdCounter=s._condIdCounter||0;
   _adoptPhages(s.phages,(s.fields||{}).phageTiter,(s.fields||{}).phageVol);
   if(s.fields)Object.entries(s.fields).forEach(([id,val])=>{const el=document.getElementById(id);if(el)el.value=val;});
+  _applyHostLink(s.fields);
   setMode(appMode);setTheme(appTheme);setTool(activeTool);setIntm(intmMode);
   document.getElementById('repNDisplay').textContent=repToolN;
   document.getElementById('autoRepsDisplay').textContent=autoReps;
@@ -3713,6 +4212,11 @@ if(_restored){
 } else {
   document.getElementById('expDate').valueAsDate=new Date();
   setTool('paint');
+  // The navigation is rendered by setMode() now, not static HTML, so this
+  // branch MUST establish a mode or the header ships with no tabs at all.
+  // It is reachable with a malformed #s= hash on a profile with no saved
+  // state — a clipped share link, which the app's own 1.5 kB URLs invite.
+  setMode(appMode||'plasmid');
   renderPalette();
   window._ddFresh=true;   // first-time visitor → land on the Home hub (handled after modules load)
   try{ if(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) setTheme('night'); }catch(e){}
@@ -3798,7 +4302,8 @@ function rpInit(){
 function rpFinishLoad(){ rpLoaded=true; rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes';
   // The library is fetched lazily, so the Home hub's recipe count starts as a literal.
   // Once the real number is known, refresh the hub so the two can never disagree.
-  if(appMode==='home'&&window.renderHome) renderHome(); }
+  if(appMode==='home'&&window.renderHome) renderHome();
+  ddLibraryLoaded('reagent'); }
 function rpFlatten(){ rpAllRecipes=[]; (rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ rpAllRecipes.push(Object.assign({_cat:c.title,_catKey:c.key}, r)); }); }); }
 function rpCustom(){ try{ return JSON.parse(lsGet('dd_reagent_custom')||'[]'); }catch(e){ return []; } }
 function rpMergeCustom(){ var cust=rpCustom(); var cat=(rpLib.categories||[]).find(function(c){return c.key==='custom';}); if(cust.length){ if(!cat){ cat={key:'custom',title:'My recipes',recipes:[]}; rpLib.categories.push(cat);} cat.recipes=cust; } else if(cat){ cat.recipes=[]; } }
@@ -4924,7 +5429,10 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       // riding along inside share links and undo snapshots.
       n++; if(Object.keys(_coercePhageFields({},0)).sort().join(',')!=='id,name,note,titer,vol')
         fails.push('phage record key set drifted: '+Object.keys(_coercePhageFields({},0)).sort().join(','));
-      n++; if(Object.keys(_coerceLysate({},0)).sort().join(',')!=='date,host,id,name,note,titer,vol')
+      // The lysate is the phage 5 + host/date + the Stage-2 additions
+      // (hostId, titerHistory). Keep asserting the exact set: this is the
+      // only thing stopping a future field from riding along unnoticed.
+      n++; if(Object.keys(_coerceLysate({},0)).sort().join(',')!=='date,host,hostId,id,name,note,titer,titerHistory,vol')
         fails.push('lysate record key set drifted: '+Object.keys(_coerceLysate({},0)).sort().join(','));
       n++; var bad=_coerceLysate({name:new Array(300).join('x'),titer:'abc',vol:-3,note:new Array(500).join('z'),host:1},0);
       if(bad.name.length!==80||bad.titer!==0||bad.vol!==0||bad.note.length!==200)
@@ -5132,6 +5640,164 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
           fails.push('xlsx: numeric and string cells not both encoded');
       }catch(e){ n++; fails.push('xlsx build threw — '+e.message); }
     }
+    // ── workspace backup: the table must cover every key the app writes, and
+    // a restore plan must never claim to change something it isn't changing.
+    // NB: guard on the lexical bindings, not on window — a top-level `const`
+    // is script-scoped and never becomes a window property, so `window.DD_KEYS`
+    // is undefined and this whole block would silently never run.
+    if(typeof DD_KEYS!=='undefined'&&typeof workspacePlan==='function'){
+      n++; var _dup={},_dupes=[];
+      DD_KEYS.forEach(function(d){ if(_dup[d.k])_dupes.push(d.k); _dup[d.k]=1; });
+      if(_dupes.length) fails.push('DD_KEYS has duplicate entries: '+_dupes.join(','));
+      // Every key any module persists must be in DD_KEYS or it misses backups.
+      n++; var _known=['dd_state','dd_layouts','dd_titer','dd_lysates','dd_hosts','dd_notebook','dd_reagent_custom',
+        'dd_gel','dd_gel_ladders','dd_phg','dd_mic_panel','dd_mic_dyes','dd_sci','dd_welcomed',
+        'mbc_last','pr_last','mic_last'];
+      var _missing=_known.filter(function(k){ return !DD_KEYS.some(function(d){return d.k===k;}); });
+      if(_missing.length) fails.push('DD_KEYS is missing keys that modules write: '+_missing.join(','));
+      n++; try{ workspacePlan({kind:'nope'}); fails.push('workspacePlan accepted a non-workspace file'); }
+      catch(e){ /* expected */ }
+      n++; try{ workspacePlan({kind:'workspace',data:'notanobject'}); fails.push('workspacePlan accepted a malformed data block'); }
+      catch(e){ /* expected */ }
+      // A plan against the CURRENT storage must mark identical values "same",
+      // never "replaced" — otherwise the preview scares the user for nothing.
+      // NB _wsSnap, not _snap: a local `var _snap` hoists over the GLOBAL
+      // _snap() (the undo snapshotter) for this whole function scope, so any
+      // later test that snapshots undo state would call a plain object.
+      n++; var _wsSnap=workspaceSnapshot();
+      var _selfPlan=workspacePlan(_wsSnap);
+      var _wrong=_selfPlan.filter(function(r){return r.action!=='same';});
+      if(_wrong.length) fails.push('restoring the current state should be a no-op, got: '+
+        _wrong.map(function(r){return r.key+':'+r.action;}).join(','));
+      // Record counting: array, keyed object, and the versioned wrappers.
+      n++; if(_ddCount('x','[1,2,3]')!==3||_ddCount('x','{"a":1,"b":2}')!==2||
+              _ddCount('x','{"v":1,"experiments":[1,2]}')!==2||_ddCount('x',null)!==0)
+        fails.push('_ddCount wrong: '+[_ddCount('x','[1,2,3]'),_ddCount('x','{"a":1,"b":2}'),
+                   _ddCount('x','{"v":1,"experiments":[1,2]}'),_ddCount('x',null)].join('/'));
+      n++; if(_wsSnap.app!=='dilution-designer'||_wsSnap.kind!=='workspace'||_wsSnap.v!==1)
+        fails.push('workspace snapshot header wrong');
+    }
+    // ── host/strain registry. Runs against a scratch copy of dd_hosts and
+    // restores whatever was there, so ?selftest=1 never eats real data.
+    if(typeof hostUpsert==='function'){
+      var _hSaved=lsGet('dd_hosts');
+      try{
+        lsDel('dd_hosts');
+        var _h1=hostUpsert({name:'E. coli MG1655',species:'Escherichia coli'});
+        n++; if(!_h1||!/^H/.test(_h1.id)) fails.push('hostUpsert did not mint an H id');
+        // Same name, different case, no id → must UPDATE, not duplicate.
+        var _h2=hostUpsert({name:'e. coli mg1655',markers:'Amp^R'});
+        n++; if(hostAll().length!==1||_h2.id!==_h1.id)
+          fails.push('hostUpsert duplicated a same-name strain instead of updating it ('+hostAll().length+' records)');
+        n++; if(hostGet(_h1.id).markers!=='Amp^R') fails.push('hostUpsert did not apply the update');
+        n++; if(!hostByName('E. COLI MG1655')||hostByName('E. COLI MG1655').id!==_h1.id)
+          fails.push('hostByName is not case-insensitive');
+        n++; if(hostByName('')!==null||hostByName(null)!==null) fails.push('hostByName should return null for an empty name');
+        // hostEnsure is how legacy free-text names get registered — it must be
+        // idempotent or every render would mint another strain.
+        n++; hostEnsure('E. coli MG1655'); hostEnsure('E. coli MG1655');
+        if(hostAll().length!==1) fails.push('hostEnsure duplicated an existing strain ('+hostAll().length+')');
+        n++; if(hostEnsure('')!==null) fails.push('hostEnsure should ignore a blank name');
+        // Untrusted input: clipped, never thrown.
+        var _hb=_coerceHost({name:'x'.repeat(500),note:'y'.repeat(999)},0);
+        n++; if(_hb.name.length!==80||_hb.note.length!==200) fails.push('_coerceHost did not clip long strings');
+        n++; if(_coerceHost(null,0)!==null||_coerceHost('nope',0)!==null) fails.push('_coerceHost accepted a non-object');
+        // Round trip must preserve ids, or every link into the registry breaks.
+        var _hJson=hostExportJson(); lsDel('dd_hosts');
+        n++; var _hn=hostImportJson(_hJson);
+        if(_hn!==1||!hostGet(_h1.id)||hostGet(_h1.id).markers!=='Amp^R')
+          fails.push('host export→import lost data or ids');
+        n++; try{ hostImportJson('{"kind":"nope"}'); fails.push('hostImportJson accepted a foreign file'); }catch(e){}
+        n++; if(hostDatalistHtml('t').indexOf('&lt;')<0&&hostUpsert({name:'<b>x</b>'})&&hostDatalistHtml('t').indexOf('<b>')>=0)
+          fails.push('hostDatalistHtml did not escape a hostile strain name');
+      }catch(e){ n++; fails.push('host registry threw — '+e.message); }
+      finally{ if(_hSaved==null) lsDel('dd_hosts'); else lsSet('dd_hosts',_hSaved); }
+    }
+    // ── titer provenance. Every failure mode here is SILENT — the app keeps
+    // working and the record is quietly wrong — so each one is pinned.
+    if(typeof _pushTiterEntry==='function'){
+      var _lSaved=lsGet('dd_lysates');
+      try{
+        lsDel('dd_lysates');
+        var _p=lysUpsert({name:'Prov λ',titer:1e9,vol:500,host:'MG1655',note:'CsCl',_src:'edit'});
+        // #1 the chokepoint: _coerceLysate rebuilds from a fixed list, so an
+        // un-named field is erased on the very next read.
+        n++; if(lysGet(_p.id).titerHistory.length!==1||lysGet(_p.id).titerHistory[0].v!==1e9)
+          fails.push('titerHistory did not survive a read — _coerceLysate is dropping it');
+        // #2 lysUpsert is a FULL REPLACE; a partial upsert must not erase.
+        lysUpsert({id:_p.id,name:'Prov λ',titer:2e9,date:'2026-08-16',_src:'titering',_ref:'tx1/tl1/tc1',_n:3,_sd:2e8});
+        var _r=lysGet(_p.id);
+        n++; if(_r.titerHistory.length!==2) fails.push('partial upsert reset titerHistory ('+_r.titerHistory.length+' entries)');
+        n++; if(_r.host!=='MG1655'||_r.vol!==500||_r.note!=='CsCl')
+          fails.push('partial upsert erased host/vol/note: '+_r.host+'/'+_r.vol+'/'+_r.note);
+        n++; if(_r.titerHistory[1].n!==3||_r.titerHistory[1].sd!==2e8)
+          fails.push('replicate count/SD not recorded — a measured titer is indistinguishable from a typed one');
+        // #3 an unchanged titer must not fabricate a measurement.
+        lysUpsert({id:_p.id,name:'Prov λ',titer:2e9,note:'note only',_src:'plate'});
+        n++; if(lysGet(_p.id).titerHistory.length!==2) fails.push('a note-only save fabricated a titer measurement');
+        // Same run re-pushed updates in place; manual edits always append.
+        lysUpsert({id:_p.id,name:'Prov λ',titer:2.5e9,_src:'titering',_ref:'tx1/tl1/tc1'});
+        n++; if(lysGet(_p.id).titerHistory.length!==2||lysGet(_p.id).titerHistory[1].v!==2.5e9)
+          fails.push('re-pushing the same run should update in place, not append');
+        lysUpsert({id:_p.id,name:'Prov λ',titer:3e9,_src:'edit'});
+        lysUpsert({id:_p.id,name:'Prov λ',titer:4e9,_src:'edit'});
+        n++; if(lysGet(_p.id).titerHistory.length!==4) fails.push('manual edits must always append');
+        // #4 an old-build import must not wipe local history.
+        lysImportJson(JSON.stringify({lysates:[{id:_p.id,name:'Prov λ',titer:9e9}]}));
+        n++; if(lysGet(_p.id).titerHistory.length!==4||lysGet(_p.id).titer!==9e9)
+          fails.push('import from an older build wiped titerHistory');
+        // Round trip.
+        var _lj=lysExportJson(); lsDel('dd_lysates'); lysImportJson(_lj);
+        n++; if(lysGet(_p.id).titerHistory.length!==4) fails.push('export→import lost titerHistory');
+        // Junk entries rejected outright, never a {} that renders NaN.
+        var _jk=lysUpsert({name:'Junk',titer:1e8,titerHistory:[{v:'abc'},{},null,{v:5e8}]});
+        n++; if(!lysGet(_jk.id).titerHistory.every(function(e){return isFinite(e.v)&&e.v>0;}))
+          fails.push('a malformed history entry survived and will render as NaN');
+        // Cap applies on READ, so an imported file cannot bloat every render.
+        // _log:false so the assertion is about the CAP, not about the extra
+        // entry a brand-new record's own titer would legitimately add.
+        var _cap=lysUpsert({name:'Cap',titer:1,_log:false,
+          titerHistory:Array.from({length:120},function(_,i){return {v:i+1};})});
+        n++; if(lysGet(_cap.id).titerHistory.length!==TITER_HIST_MAX)
+          fails.push('titerHistory not capped on read: '+lysGet(_cap.id).titerHistory.length);
+        n++; if(lysGet(_cap.id).titerHistory[TITER_HIST_MAX-1].v!==120) fails.push('the cap discarded the newest entries');
+      }catch(e){ n++; fails.push('titer provenance threw — '+e.message); }
+      finally{ if(_lSaved==null) lsDel('dd_lysates'); else lsSet('dd_lysates',_lSaved); }
+    }
+    // ── the plate's 5-key freeze, checked on the LIVE array, not just the
+    // factory: three sites mint phage records as literals and the factory
+    // test cannot see them.
+    if(typeof phages!=='undefined'&&Array.isArray(phages)){
+      n++; var _drift=phages.filter(function(p){return Object.keys(p).sort().join(',')!=='id,name,note,titer,vol';});
+      if(_drift.length) fails.push('a live phages[] record grew extra keys: '+Object.keys(_drift[0]).sort().join(','));
+    }
+    // ── host link must be CLEARED by a payload that lacks it, not inherited.
+    if(typeof _applyHostLink==='function'&&document.getElementById('hostHostId')){
+      var _hh=document.getElementById('hostHostId');
+      var _keep=_hh.value;
+      n++; _hh.value='Hstale'; _applyHostLink({});
+      if(_hh.value!=='') fails.push('a legacy payload left a stale host link attached ("'+_hh.value+'")');
+      n++; _applyHostLink({hostHostId:'Habc'});
+      if(_hh.value!=='Habc') fails.push('_applyHostLink did not set a present link');
+      _hh.value=_keep;
+    }
+    // ── notebook provenance resolvers must all exist and never throw.
+    if(window.NB&&NB._origin){
+      n++; var _missing=Object.keys(NB._providers||{}).filter(function(k){return typeof NB._origin[k]!=='function';});
+      if(_missing.length) fails.push('no provenance resolver for: '+_missing.join(','));
+      n++; var _bad=[];
+      Object.keys(NB._origin).forEach(function(k){
+        try{ var o=NB._origin[k](); if(!o||typeof o.id!=='string'||typeof o.label!=='string') _bad.push(k); }
+        catch(e){ _bad.push(k+'(threw)'); }
+      });
+      if(_bad.length) fails.push('provenance resolver returned badly or threw: '+_bad.join(','));
+      // Stamping is additive and must not overwrite an imported block's origin.
+      n++; var _b1={type:'text',md:'x'}; NB._stamp([_b1],'tit');
+      if(_b1.src!=='tit'||!_b1.capturedAt||typeof _b1.entityId!=='string')
+        fails.push('stamp() did not attach provenance');
+      n++; var _b2={type:'text',md:'x',src:'imported'}; NB._stamp([_b2],'plate');
+      if(_b2.src!=='imported') fails.push('stamp() overwrote an existing src');
+    }
     return {total:n, passed:n-fails.length, failures:fails};
   }
 
@@ -5166,7 +5832,9 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     el.innerHTML='<div class="home-hero"><h1>Molecular Biology Bench Toolkit</h1><p>One place for dilutions, reagents, plate layouts, protocols and the everyday molecular-biology math. Everything is computed on your own machine — visit once and it keeps working with no network, so it is usable in a cold room or a BSL suite.</p></div>'+
       '<div class="home-cards">'+mods.map(function(x){return '<button class="home-card" onclick="setMode(\''+x.m+'\')"><div class="home-ico" aria-hidden="true">'+x.icon+'</div><div class="home-ct"><div class="home-ctitle">'+escapeHtml(x.title)+'</div><div class="home-cdesc">'+escapeHtml(x.desc)+'</div></div></button>';}).join('')+'</div>'+
       '<div class="home-sub">Jump to a calculator</div><div class="home-chips">'+featured.filter(function(id){return byId[id];}).map(function(id){return '<button class="home-chip" onclick="MBC._cur=\''+id+'\';setMode(\'calc\')">'+escapeHtml(byId[id].name)+'</button>';}).join('')+'</div>'+
-      '<div style="text-align:center;margin-top:26px;font:11px var(--mono);color:var(--text3);line-height:1.7;">Dilution Designer · '+MB_VERSION+'<br>Every calculation runs on your machine — nothing is uploaded.<br>Offline: '+escapeHtml(window.ddPwaStatus?ddPwaStatus():'—')+'</div>';
+      '<div class="home-sub">Your data</div><div id="homeWs"></div>'+
+      '<div style="text-align:center;margin-top:26px;font:11px var(--mono);color:var(--text3);line-height:1.7;">Dilution Designer · '+MB_VERSION+'<br>Every calculation runs on your machine — nothing is uploaded.<br>Offline: '+escapeHtml(window.ddPwaStatus?ddPwaStatus():'—')+'<br>Press <kbd>Ctrl</kbd>+<kbd>K</kbd> to search everything.</div>';
+    if(window.WS) WS.renderHome();
   };
 
   // Self-test on ?selftest=1 (numeric assertions on every formula).
@@ -5179,7 +5847,11 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
     }catch(e){ if(window.console)console.error('self-test crashed',e); }
   },0);
   // First-time visitors land on the Home hub (returning users restore their last view).
-  if(window._ddFresh && (location.hash||'').indexOf('#s=')!==0){ try{ setMode('home'); }catch(e){} }
+  // Land a first-time visitor on the hub — unless a share link actually
+  // loaded. Gate on whether the hash PARSED, not on its text: a malformed
+  // '#s=…' used to skip this and, since the tabs stopped being static HTML,
+  // left the app with no navigation at all.
+  if(window._ddFresh && !ddShared()){ try{ setMode('home'); }catch(e){} }
 })();
 
 /* ══════════════════════════ PROTOCOLS MODULE ══════════════════════════ */
@@ -6613,9 +7285,9 @@ function dyeWorking(o){
   var P={n:6, volPer:200, volUnit:'µL', over:10, minPip:2, factor:10, target:null, targetUnit:null, vialMg:1};
 
   function lsPanel(){ try{ return JSON.parse(lsGet('dd_mic_panel')||'[]'); }catch(e){ return []; } }
-  function savePanel(){ try{ lsSet('dd_mic_panel',JSON.stringify(panelIds)); }catch(e){} }
+  function savePanel(){ try{ lsSetWarn('dd_mic_panel',JSON.stringify(panelIds)); }catch(e){} }
   function custom(){ try{ return JSON.parse(lsGet('dd_mic_dyes')||'[]'); }catch(e){ return []; } }
-  function saveCustom(l){ try{ lsSet('dd_mic_dyes',JSON.stringify(l)); }catch(e){} }
+  function saveCustom(l){ try{ lsSetWarn('dd_mic_dyes',JSON.stringify(l)); }catch(e){} }
 
   // ── library load: same shape and the same graceful failure as rpInit() ──
   function init(){
@@ -6644,6 +7316,7 @@ function dyeWorking(o){
     // The hub renders before this fetch resolves, so its dye count starts as a
     // literal. Refresh it now the real number exists, so the two cannot disagree.
     if(typeof appMode!=='undefined'&&appMode==='home'&&window.renderHome) try{ renderHome(); }catch(e){}
+    ddLibraryLoaded('dye');
   }
   function flatten(){
     all=[]; byId={};
@@ -7177,7 +7850,7 @@ function dyeWorking(o){
   function defState(){ return { type:'dna', pct:'1', ladder:'neb-1kb', look:'dark',
     lanes:[ {name:'Sample 1', sizes:'5000, 3000, 1000'}, {name:'Sample 2', sizes:'4200, 4000'} ] }; }
   function load(){ try{ var j=JSON.parse(lsGet('dd_gel')||'null'); if(j&&j.lanes) return j; }catch(e){} return defState(); }
-  function save(){ try{ lsSet('dd_gel',JSON.stringify(S)); }catch(e){} }
+  function save(){ try{ lsSetWarn('dd_gel',JSON.stringify(S)); }catch(e){} }
 
   function parseSizes(str){ return String(str||'').split(/[,;\s]+/).map(function(x){return SCI.parse(x);}).filter(function(n){return isFinite(n)&&n>0;}); }
   function unit(){ return S.type==='dna'?'bp':'kDa'; }
@@ -7378,7 +8051,7 @@ function dyeWorking(o){
       if(!n||!b.length){ showToast('Give the ladder a name and some band sizes','warn'); return; }
       var list=customLadders(); var id='cust-'+Date.now();
       list.push({id:id, v:'Custom', t:S.type, n:n, b:b, ref:[]});
-      try{ lsSet('dd_gel_ladders',JSON.stringify(list)); }catch(e){}
+      try{ lsSetWarn('dd_gel_ladders',JSON.stringify(list)); }catch(e){}
       S.ladder=id; renderControls(); render(); showToast('✓ Ladder saved','green');
     },
     png:function(dpi){
@@ -7435,7 +8108,7 @@ function dyeWorking(o){
 
   function load(){ try{ var j=JSON.parse(lsGet('dd_phg')||'null');
       if(j&&typeof j==='object') return Object.assign({},DEF,j); }catch(e){} return Object.assign({},DEF); }
-  function persist(){ try{ lsSet('dd_phg',JSON.stringify(S)); }catch(e){} }
+  function persist(){ try{ lsSetWarn('dd_phg',JSON.stringify(S)); }catch(e){} }
   function el(id){ return document.getElementById(id); }
   function n(x){ return SCI.parse(x); }
   function f(x,p){ return SCI.fmt(x,p||4); }
@@ -7643,11 +8316,34 @@ function dyeWorking(o){
     el('phgEditTiter').value=l?l.titer:'1e10';
     el('phgEditVol').value=l?l.vol:1000;
     el('phgEditHost').value=l?l.host:'';
+    // Must be set on the ADD path too, or the last edited strain leaks onto
+    // a brand-new lysate.
+    el('phgEditHostId').value=(l&&l.hostId)||'';
     el('phgEditDate').value=l&&/^\d{4}-\d{2}-\d{2}$/.test(l.date)?l.date:'';
     el('phgEditNote').value=l?l.note:'';
     el('phgEditDelete').style.display=l?'':'none';
+    renderHist(l);
     el('phgEdit').style.display='flex';
     setTimeout(function(){ try{ el('phgEditName').focus(); }catch(e){} },0);
+  }
+  // Where each titer came from. Newest first; every field escaped because
+  // history can arrive from an imported file.
+  function renderHist(l){
+    var wrap=el('phgEditHistWrap'), box=el('phgEditHist');
+    if(!wrap||!box)return;
+    var h=(l&&Array.isArray(l.titerHistory))?l.titerHistory.slice():[];
+    if(!h.length){ wrap.style.display='none'; box.innerHTML=''; return; }
+    h.sort(function(a,b){ return String(b.at||'').localeCompare(String(a.at||'')); });
+    var SRC={titering:'Titering',plate:'Plate',edit:'Typed'};
+    box.innerHTML=h.map(function(e){
+      var bits=[];
+      if(e.n>1) bits.push('n='+e.n+(e.sd>0&&e.v>0?' · CV '+(e.sd/e.v*100).toFixed(1)+'%':''));
+      if(e.host) bits.push('on '+e.host);
+      return '<div class="phg-hrow"><span class="phg-hv">'+escapeHtml(SCI.fmt(e.v,3))+'</span> PFU/mL'
+        +'<span class="phg-hm">'+escapeHtml((e.d||String(e.at||'').slice(0,10))+' · '+(SRC[e.src]||e.src||'—')
+        +(bits.length?' · '+bits.join(' · '):''))+'</span></div>';
+    }).join('');
+    wrap.style.display='';
   }
 
   window.PHG={
@@ -7666,8 +8362,12 @@ function dyeWorking(o){
         titer:SCI.parse(el('phgEditTiter').value),
         vol:parseFloat(el('phgEditVol').value)||0,
         host:el('phgEditHost').value.trim(),
+        // Registering on an explicit Save only. From an oninput path this
+        // would mint a strain for every keystroke prefix: E, E., E. c, …
+        hostId:(hostEnsure(el('phgEditHost').value.trim())||{}).id||'',
         date:el('phgEditDate').value,
-        note:el('phgEditNote').value.trim()
+        note:el('phgEditNote').value.trim(),
+        _src:'edit'
       });
       if(!rec){ showToast('Couldn’t save — browser storage is full or unavailable.','warn',6000); return; }
       S.lysId=rec.id; persist();
@@ -7816,9 +8516,12 @@ function dyeWorking(o){
   function defExp(n){
     // Two conditions from the start so EOP means something immediately.
     var c1='tc1',c2='tc2',l1='tl1';
-    return {id:'tx'+Date.now().toString(36),name:n||'Experiment 1',date:new Date().toISOString().slice(0,10),notes:'',
+    // Inherit the shared experiment name/date rather than making you type
+    // the same thing a second time.
+    var shared=(typeof curExp==='function')?curExp():{name:'',date:''};
+    return {id:'tx'+Date.now().toString(36),name:n||shared.name||'Experiment 1',date:shared.date||ddToday(),notes:'',
       mode:'plate',volUl:100,factor:10,refId:c1,
-      conds:[{id:c1,name:'Reference host'},{id:c2,name:'Test host'}],
+      conds:[{id:c1,name:'Reference host',hostId:''},{id:c2,name:'Test host',hostId:''}],
       lys:[{id:l1,name:'Phage 1',libId:''}],
       counts:[],
       entry:{lysId:l1,condId:c1,k:6,volUl:100},
@@ -7831,7 +8534,7 @@ function dyeWorking(o){
     }catch(e){}
     return defState();
   }
-  function save(){ if(window._sharedSession)return; if(!lsSet('dd_titer',JSON.stringify(S))) lsWarnOnce(); }
+  function save(){ if(ddShared())return; if(!lsSet('dd_titer',JSON.stringify(S))) lsWarnOnce(); }
   function E(){ S.active=Math.max(0,Math.min(S.active||0,S.experiments.length-1)); return S.experiments[S.active]; }
   function condById(exp,id){ return exp.conds.filter(function(c){return c.id===id;})[0]||null; }
   function lysById(exp,id){ return exp.lys.filter(function(l){return l.id===id;})[0]||null; }
@@ -8226,7 +8929,7 @@ function dyeWorking(o){
     h+='<div class="tit-sec">Conditions (hosts)</div>';
     exp.conds.forEach(function(c){
       h+='<div class="tit-row"><input type="radio" name="titRef" '+(exp.refId===c.id?'checked':'')+' onchange="TIT.setRef(\''+jsAttr(c.id)+'\')" aria-label="Use '+escapeHtml(c.name)+' as the EOP reference" title="EOP reference">'
-        +'<input type="text" value="'+escapeHtml(c.name)+'" aria-label="Condition name" onchange="TIT.renCond(\''+jsAttr(c.id)+'\',this.value)">'
+        +'<input type="text" list="ddHostsTit" value="'+escapeHtml(c.name)+'" aria-label="Condition name" title="'+(c.hostId&&hostGet(c.hostId)?'Linked to the registered strain '+escapeHtml(hostGet(c.hostId).name):'Type a registered strain name to link it')+'" onchange="TIT.renCond(\''+jsAttr(c.id)+'\',this.value)">'
         +'<button class="tit-del" onclick="TIT.delCond(\''+jsAttr(c.id)+'\')" aria-label="Delete condition '+escapeHtml(c.name)+'"'+(exp.conds.length<2?' disabled':'')+'>✕</button></div>';
     });
     h+='<button class="btn" style="width:100%;justify-content:center;" onclick="TIT.addCond()">＋ Add condition</button>'
@@ -8243,6 +8946,9 @@ function dyeWorking(o){
         +'<option value="">— pick a saved lysate —</option>'
         +lib.map(function(l){return '<option value="'+escapeHtml(l.id)+'">'+escapeHtml(l.name)+'</option>';}).join('')+'</select></div>';
     }
+    // A DISTINCT id from the app-wide #ddHosts: two elements sharing one id
+    // means getElementById returns whichever comes first and the other dies.
+    h+=hostDatalistHtml('ddHostsTit');
     document.getElementById('titSide').innerHTML=h;
   }
 
@@ -8521,10 +9227,17 @@ function dyeWorking(o){
     setF:function(k,v){ var exp=E();
       if(k==='volUl'||k==='factor'){ var n=SCI.parse(String(v)); if(k==='factor'&&!(n>1))n=10; if(k==='volUl'&&!(n>0))n=exp.volUl; exp[k]=n; }
       else exp[k]=String(v).slice(0,120);
+      // Flows the other way too: naming the run here fills a still-empty
+      // plate name. setCurExp never overwrites something you already typed.
+      if((k==='name'||k==='date')&&typeof setCurExp==='function') setCurExp(exp.name,exp.date);
       render(); },
     setRef:function(id){ var exp=E(); if(condById(exp,id))exp.refId=id; render(); },
-    addCond:function(){ var exp=E(); exp.conds.push({id:_id(),name:'Condition '+(exp.conds.length+1)}); render(); },
-    renCond:function(id,v){ var c=condById(E(),id); if(c)c.name=String(v).slice(0,60)||c.name; render(); },
+    addCond:function(){ var exp=E(); exp.conds.push({id:_id(),name:'Condition '+(exp.conds.length+1),hostId:''}); render(); },
+    // Set the registry link when the typed name resolves; NEVER clear it
+    // otherwise, or renaming a condition to a nickname would silently destroy
+    // an explicit link.
+    renCond:function(id,v){ var c=condById(E(),id); if(c){ c.name=String(v).slice(0,60)||c.name;
+      var h=hostByName(c.name); if(h)c.hostId=h.id; } render(); },
     delCond:function(id){ var exp=E(); if(exp.conds.length<2)return;
       var used=exp.counts.filter(function(r){return r.condId===id;}).length;
       if(used&&!confirm('Delete this condition and its '+used+' counts?'))return;
@@ -8608,11 +9321,21 @@ function dyeWorking(o){
     // with data) into the persistent lysate library via lysUpsert — the same
     // record the Phage Planner and the plate's stock editor read.
     pushTiter:function(lysId){ var exp=E(); var l=lysById(exp,lysId); if(!l)return;
-      var cc=cellCalc(exp,l.id,exp.refId);
-      if(!cc.st.n){ var withData=exp.conds.map(function(c){return cellCalc(exp,l.id,c.id);}).filter(function(x){return x.st.n;});
+      // Track WHICH condition supplied the number. The old fallback silently
+      // took the first condition with data, so a titer could come from a
+      // non-reference host and the library would never say so.
+      var cc=cellCalc(exp,l.id,exp.refId), condId=exp.refId;
+      if(!cc.st.n){ var withData=exp.conds.map(function(c){return {c:c,cc:cellCalc(exp,l.id,c.id)};})
+                       .filter(function(x){return x.cc.st.n;});
         if(!withData.length){ showToast('No countable rows for '+l.name+' yet','warn'); return; }
-        cc=withData[0]; }
-      var rec=lysUpsert({id:l.libId||'',name:l.name,titer:cc.st.mean,date:exp.date||''});
+        cc=withData[0].cc; condId=withData[0].c.id; }
+      var cond=condById(exp,condId);
+      // _ref uses exp.id (minted per experiment), never the active index —
+      // duplicating an experiment would otherwise collide with the original.
+      var rec=lysUpsert({id:l.libId||'',name:l.name,titer:cc.st.mean,date:exp.date||'',
+        hostId:(cond&&cond.hostId)||'',
+        _src:'titering', _ref:exp.id+'/'+l.id+'/'+condId,
+        _host:(cond?cond.name:''), _n:cc.st.n, _sd:cc.st.sd});
       if(rec){ l.libId=rec.id; save();
         // Keep an open plate in sync if it carries a stock of the same name.
         try{ if(window.phages){ var m=phages.filter(function(p){return p.name.toLowerCase()===l.name.toLowerCase();})[0];
@@ -8620,6 +9343,11 @@ function dyeWorking(o){
         if(window.PHG&&PHG.render)try{PHG.render();}catch(e){}
         showToast('✓ '+l.name+' → library at '+cc.st.mean.toExponential(2)+' PFU/mL','green');
       } },
+    // Titering is the only provider with a real, stable entity id ('tx…');
+    // reading dd_titer from storage would be stale between saves.
+    // Null-safe: state is lazy, so this is called before init() on a cold
+    // load (e.g. capturing to the notebook without opening Titering first).
+    _exp:function(){ return S?E():null; },
     blocks:blocks,
     _model:{cellCalc:cellCalc,rowTiter:rowTiter,chartData:chartData,svgFromModel:svgFromModel,
             pdfFromModel:pdfFromModel,buildXlsx:buildXlsx,xlsxSheets:xlsxSheets,pngWithDpi:pngWithDpi,
@@ -8636,6 +9364,9 @@ function dyeWorking(o){
   .nb-bhead{display:flex;align-items:center;gap:8px;padding:7px 11px;border-bottom:1px solid var(--border);background:var(--surface2);border-radius:10px 10px 0 0;}
   .nb-btype{font:600 9.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text3);}
   .nb-btitle{font-weight:700;font-size:12.5px;color:var(--text);flex:1;}
+  /* Theme tokens only — a literal colour here fails in night mode. */
+  .nb-borig{font:600 9.5px var(--mono);letter-spacing:.04em;color:var(--text3);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 8px;white-space:nowrap;max-width:42%;overflow:hidden;text-overflow:ellipsis;}
+  @media(max-width:640px){.nb-borig{display:none;}}
   .nb-bctl{margin-left:auto;display:flex;gap:2px;}
   .nb-bctl button{border:1px solid var(--border);background:var(--surface);color:var(--text2);border-radius:5px;cursor:pointer;font-size:11px;min-width:26px;min-height:26px;}
   .nb-bctl button:hover{background:var(--surface2);}
@@ -8704,7 +9435,7 @@ function dyeWorking(o){
   function all(){ if(!_list){ try{ _list=JSON.parse(lsGet('dd_notebook')||'[]'); }catch(e){ _list=[]; }
                               if(!Array.isArray(_list)) _list=[]; } return _list; }
   function persist(list){ _list=list;                       // keep the edit even if the write fails
-    if(window._sharedSession) return true;
+    if(ddShared()) return true;
     if(!lsSet('dd_notebook',JSON.stringify(list))){
       showToast('Notebook too large for this browser’s storage — export it to keep it safe.','warn',6000); return false; }
     return true; }
@@ -8734,6 +9465,48 @@ function dyeWorking(o){
     return (typeof m==='function')?m:null;
   }
 
+  // ── block provenance ──────────────────────────────────────────────
+  // A captured block used to keep no record of where it came from: the only
+  // trace was a human-readable title, so a table in a notebook entry could
+  // not be traced back to the experiment that produced it. One resolver per
+  // provider, each returning {id,label}. Three modules genuinely have no
+  // entity id (the plate, the gel and the dilution calculator are singletons
+  // or unnamed) — those return '' and rely on the label.
+  var ORIGIN={
+    tit:    function(){ var e=window.TIT&&TIT._exp&&TIT._exp();
+                        return {id:(e&&e.id)||'',label:(e&&e.name)||'Titering'}; },
+    phg:    function(){ var s=PHG._state&&PHG._state(); var id=(s&&s.lysId)||'';
+                        var l=id&&typeof lysGet==='function'?lysGet(id):null;
+                        return {id:id,label:l?l.name:'Phage Planner'}; },
+    calc:   function(){ var id=(window.MBC&&MBC._cur)||'';
+                        var c=(window.MBC&&MBC.calcs||[]).filter(function(x){return x.id===id;})[0];
+                        return {id:id,label:c?c.name:'Calculators'}; },
+    reagent:function(){ var id=(typeof rpSelectedId!=='undefined'&&rpSelectedId)||'';
+                        var r=(typeof rpAllRecipes!=='undefined'?rpAllRecipes:[]).filter(function(x){return x.id===id;})[0];
+                        return {id:id,label:r?r.name:'Reagent Prep'}; },
+    proto:  function(){ var id=lsGet('pr_last')||'';
+                        var p=(window.PROTO&&PROTO.list||[]).filter(function(x){return x.id===id;})[0];
+                        return {id:id,label:p?p.name:'Protocols'}; },
+    mic:    function(){ var id=lsGet('mic_last')||'';
+                        var d=(window.MIC&&MIC.list||[]).filter(function(x){return x.id===id;})[0];
+                        return {id:id,label:d?d.name:'Microscopy'}; },
+    plate:  function(){ var nm=''; try{ nm=P().expName||(plates[activePlate]&&plates[activePlate].name)||''; }catch(e){}
+                        return {id:'',label:nm||'Plate'}; },
+    gel:    function(){ var s=null; try{ s=GEL._model.state(); }catch(e){}
+                        return {id:'',label:s?(s.pct+'% '+(s.type==='dna'?'agarose':'SDS-PAGE')):'Gel'}; },
+    dilcalc:function(){ return {id:'',label:'Dilution & Molarity'}; }
+  };
+  // Stamp at capture time — the only moment the source is known. `!b.src`
+  // preserves provenance on blocks that arrived from an imported entry.
+  function stamp(bl,src){
+    var o={}; try{ o=(ORIGIN[src]&&ORIGIN[src]())||{}; }catch(e){}
+    var at=new Date().toISOString();
+    (bl||[]).forEach(function(b){ if(b&&typeof b==='object'&&!b.src){
+      b.src=src; b.srcLabel=(PROVIDERS[src]&&PROVIDERS[src].label)||src;
+      b.entityId=o.id||''; b.entityName=o.label||''; b.capturedAt=at; } });
+    return bl;
+  }
+
   // ── rendering
   function blockHtml(b,i){
     var body='';
@@ -8742,7 +9515,11 @@ function dyeWorking(o){
     else if(b.type==='image') body='<img class="nb-img" src="'+safeDataUrl(b.dataUrl)+'" alt="'+escapeHtml(b.title||'figure')+'">';
     else if(b.type==='kv') body='<div class="mbc-rows">'+(b.pairs||[]).map(function(p){return '<div class="mbc-row"><span class="mbc-rl">'+escapeHtml(p[0])+'</span><span class="mbc-rv">'+escapeHtml(String(p[1]))+'</span></div>';}).join('')+'</div>';
     else if(b.type==='steps') body='<ol class="nb-steps">'+(b.items||[]).map(function(s){return '<li class="'+(s.done?'done':'')+'"><b>'+escapeHtml(s.t)+'</b> — '+escapeHtml(String(s.d).replace(/<[^>]+>/g,''))+'</li>';}).join('')+'</ol>';
+    // Where this block came from. Entries captured before Stage 2 have no
+    // src and simply show nothing.
+    var og=b.src?((b.srcLabel||b.src)+(b.entityName?' · '+b.entityName:'')):'';
     return '<div class="nb-blk"><div class="nb-bhead"><span class="nb-btype">'+escapeHtml(b.type)+'</span><span class="nb-btitle">'+escapeHtml(b.title||(b.type==='text'?'Note':''))+'</span>'+
+      (og?'<span class="nb-borig" title="'+escapeHtml(og+(b.capturedAt?' · captured '+b.capturedAt:''))+'">'+escapeHtml(og)+'</span>':'')+
       '<span class="nb-bctl"><button onclick="NB.move('+i+',-1)" title="Move up" aria-label="Move block up">↑</button><button onclick="NB.move('+i+',1)" title="Move down" aria-label="Move block down">↓</button><button onclick="NB.delBlock('+i+')" title="Remove" aria-label="Remove block">✕</button></span></div>'+
       '<div class="nb-bbody">'+body+'</div></div>';
   }
@@ -8785,6 +9562,10 @@ function dyeWorking(o){
     L.push('*'+[e.date,e.author,(e.tags||[]).join(', ')].filter(Boolean).join(' · ')+'*','');
     (e.blocks||[]).forEach(function(b){
       if(b.title&&b.type!=='text') L.push('## '+b.title,'');
+      // After the heading, never before — a text block would otherwise get an
+      // orphan italic line above it.
+      if(b.src) L.push('*Captured from '+(b.srcLabel||b.src)+(b.entityName?' — '+b.entityName:'')
+                       +(b.capturedAt?' on '+b.capturedAt.slice(0,10):'')+'*','');
       if(b.type==='text') L.push(b.md||'','');
       else if(b.type==='table'){ // pipes must be escaped in the HEADER too, or the column count
         // stops matching the separator row and every viewer renders a broken table.
@@ -8834,8 +9615,14 @@ function dyeWorking(o){
   }
 
   window.NB={
+    // exposed so the self-test can assert every provider has a working
+    // provenance resolver, without opening the capture modal
+    _origin:ORIGIN, _stamp:stamp, _providers:PROVIDERS,
     init:function(){ var l=all(); if(!l.length){ } else if(!cur) cur=l[0].id; render(); },
-    newEntry:function(){ var e={id:'nb'+Date.now(), title:'Experiment '+today(), date:today(), author:'', tags:[], blocks:[]};
+    newEntry:function(){ var sh=(typeof curExp==='function')?curExp():{name:'',date:''};
+      // One clock for both fields — title and date must not disagree.
+      var d0=sh.date||today();
+      var e={id:'nb'+Date.now(), title:sh.name||('Experiment '+d0), date:d0, author:'', tags:[], blocks:[]};
       var l=all(); l.unshift(e); persist(l); cur=e.id; render(); showToast('✓ New entry','green'); },
     open:function(id){ cur=id; render(); },
     del:function(){ var e=curEntry(); if(!e) return; if(!confirm('Delete "'+(e.title||'Untitled')+'"? This cannot be undone.')) return;
@@ -8873,7 +9660,7 @@ function dyeWorking(o){
       var bg=btn.closest('.nb-modal-bg'), sel={};
       bg.querySelectorAll('input[type=checkbox]').forEach(function(cb){ if(cb.checked){ (sel[cb.dataset.src]=sel[cb.dataset.src]||{})[cb.dataset.k]=true; } });
       var blocks=[];
-      Object.keys(sel).forEach(function(k){ var fn=providerFn(k); if(fn){ try{ blocks=blocks.concat(fn(sel[k])||[]); }catch(e){} } });
+      Object.keys(sel).forEach(function(k){ var fn=providerFn(k); if(fn){ try{ blocks=blocks.concat(stamp(fn(sel[k])||[],k)); }catch(e){} } });
       bg.remove();
       if(!blocks.length){ showToast('Nothing selected','warn'); return; }
       NB.addBlocks(blocks);
@@ -9172,6 +9959,330 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
   // exposed so the archive can be verified structurally without downloading it
   window.NBDOCX.build=buildDocx;
   window.NBDOCX._zip={zip:zip,crc32:crc32,enc:enc};
+})();
+
+/* ══════════ HOST / STRAIN REGISTRY UI (lives in the Phage Planner) ══════════
+   Thin CRUD over hostAll/hostUpsert/hostDelete. Kept out of the PHG IIFE so
+   the sidebar list can be re-rendered from anywhere that changes a strain. */
+(function(){
+  function render(){
+    var el=document.getElementById('hostList'); if(!el)return;
+    var list=hostAll();
+    el.innerHTML=list.length?list.map(function(h){
+      var meta=[h.species,h.markers,h.source].filter(Boolean).join(' · ');
+      return '<div class="pal-item">'
+        +'<span class="pal-name" title="'+escapeHtml(h.note||h.name)+'">'+escapeHtml(h.name)+'</span>'
+        +(meta?'<span class="pal-val">'+escapeHtml(meta)+'</span>':'')
+        +'<div class="pal-actions" style="opacity:1;">'
+        +'<button class="pal-icobtn" onclick="HOSTUI.edit(\''+jsAttr(h.id)+'\')" aria-label="Edit strain '+escapeHtml(h.name)+'" title="Edit">✎</button>'
+        +'</div></div>';
+    }).join(''):'<div class="mbc-hint">No strains yet. Registering them makes host names autocomplete everywhere.</div>';
+    var t=document.getElementById('hostTools');
+    if(t) t.innerHTML='<div class="tit-row" style="margin-top:5px;">'
+      +'<button class="btn" style="flex:1;justify-content:center;" onclick="HOSTUI.exportJson()" title="Download the strain registry as JSON">⬇ Export</button>'
+      +'<button class="btn" style="flex:1;justify-content:center;" onclick="document.getElementById(\'hostImp\').click()" title="Merge strains from a JSON file">⬆ Import</button>'
+      +'<input type="file" id="hostImp" accept="application/json,.json" style="display:none" onchange="HOSTUI.importFile(event)" aria-label="Choose a strain registry file"></div>';
+    syncDatalist();
+  }
+  // One shared <datalist> the whole app points at, refreshed whenever the
+  // registry changes so every host input sees new strains immediately.
+  function syncDatalist(){
+    var dl=document.getElementById('ddHosts');
+    if(!dl){ var d=document.createElement('div'); d.innerHTML=hostDatalistHtml('ddHosts');
+      document.body.appendChild(d.firstChild); return; }
+    dl.innerHTML=hostAll().map(function(h){
+      return '<option value="'+escapeHtml(h.name)+'">'+escapeHtml(h.species||h.markers||'')+'</option>'; }).join('');
+  }
+  function edit(id){
+    var h=id?hostGet(id):null;
+    document.getElementById('hostEditTitle').textContent=h?'Edit strain':'Add strain';
+    document.getElementById('hostEditId').value=h?h.id:'';
+    document.getElementById('hostEditName').value=h?h.name:'';
+    document.getElementById('hostEditSpecies').value=h?h.species:'';
+    document.getElementById('hostEditMarkers').value=h?h.markers:'';
+    document.getElementById('hostEditSource').value=h?h.source:'';
+    document.getElementById('hostEditDate').value=h?h.date:'';
+    document.getElementById('hostEditNote').value=h?h.note:'';
+    document.getElementById('hostEditDelete').style.display=h?'':'none';
+    document.getElementById('hostEdit').style.display='flex';
+    document.getElementById('hostEditName').focus();
+  }
+  function close(){ document.getElementById('hostEdit').style.display='none'; }
+  function save(){
+    var name=document.getElementById('hostEditName').value.trim();
+    if(!name){ showToast('Give the strain a name','warn'); return; }
+    var rec=hostUpsert({id:document.getElementById('hostEditId').value,name:name,
+      species:document.getElementById('hostEditSpecies').value.trim(),
+      markers:document.getElementById('hostEditMarkers').value.trim(),
+      source:document.getElementById('hostEditSource').value.trim(),
+      date:document.getElementById('hostEditDate').value,
+      note:document.getElementById('hostEditNote').value.trim()});
+    if(!rec){ showToast('Could not save the strain','warn'); return; }
+    close(); render();
+    showToast('✓ '+rec.name+' saved','green');
+  }
+  function del(){
+    var id=document.getElementById('hostEditId').value; if(!id)return;
+    var h=hostGet(id); if(!h)return;
+    if(!confirm('Delete the strain "'+h.name+'"? Experiments keep the typed name — only the registry entry goes.'))return;
+    hostDelete(id); close(); render();
+    showToast('Strain deleted','green');
+  }
+  function exportJson(){
+    _dl(hostExportJson(),'dd-host-strains-'+new Date().toISOString().slice(0,10)+'.json','application/json');
+    showToast('✓ '+hostAll().length+' strains exported','green');
+  }
+  function importFile(ev){
+    var f=ev.target.files&&ev.target.files[0]; ev.target.value='';
+    if(!f)return;
+    var rd=new FileReader();
+    rd.onload=function(){
+      try{ var n=hostImportJson(rd.result); render(); showToast('✓ '+n+' strain'+(n===1?'':'s')+' merged','green'); }
+      catch(e){ showToast('Import failed: '+e.message,'warn'); }
+    };
+    rd.readAsText(f);
+  }
+  window.HOSTUI={render:render,edit:edit,close:close,save:save,del:del,
+                 exportJson:exportJson,importFile:importFile,syncDatalist:syncDatalist};
+  if(document.readyState!=='loading') syncDatalist();
+  else document.addEventListener('DOMContentLoaded',syncDatalist);
+})();
+
+/* ════════════ WORKSPACE BACKUP + COMMAND PALETTE (Ctrl/⌘+K) ════════════
+   Everything you own lives in this browser. These two make it durable and
+   findable: one file that carries the whole workspace, and one search box
+   that reaches every module. ════════════════════════════════════════════ */
+(function(){
+  var css=`
+  .ws-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-bottom:10px;}
+  .ws-card{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:11px 13px;}
+  .ws-v{font-size:17px;font-weight:800;color:var(--accent);letter-spacing:-.02em;}
+  .ws-l{font:10px var(--mono);color:var(--text3);margin-top:3px;text-transform:uppercase;letter-spacing:.1em;}
+  .ws-bar{height:7px;border-radius:4px;background:var(--surface2);overflow:hidden;margin-top:7px;}
+  .ws-bar i{display:block;height:100%;background:var(--accent2);}
+  .ws-tbl{width:100%;border-collapse:collapse;font:11px var(--mono);}
+  .ws-tbl th,.ws-tbl td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);}
+  .cp-bg{position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.42);display:flex;align-items:flex-start;justify-content:center;padding-top:11vh;}
+  .cp-box{width:min(640px,94vw);background:var(--surface);border:1px solid var(--border2);border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.34);overflow:hidden;}
+  .cp-in{width:100%;border:0;border-bottom:1px solid var(--border);background:transparent;color:var(--text);font:15px var(--sans);padding:14px 16px;outline:none;}
+  .cp-list{max-height:52vh;overflow:auto;}
+  .cp-it{display:flex;gap:10px;align-items:center;padding:9px 16px;cursor:pointer;border:0;background:none;width:100%;text-align:left;color:var(--text);}
+  .cp-it[aria-selected="true"]{background:var(--accent-bg);}
+  .cp-ic{width:20px;text-align:center;flex-shrink:0;}
+  .cp-nm{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cp-kind{font:9.5px var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:.09em;flex-shrink:0;}
+  .cp-empty{padding:18px 16px;font:12px var(--mono);color:var(--text3);}
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  function fmtBytes(b){ return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(2)+' MB'; }
+
+  // ── workspace panel on the Home hub ──
+  function renderHome(){
+    var el=document.getElementById('homeWs'); if(!el)return;
+    var snap=workspaceSnapshot();
+    var rows=DD_KEYS.map(function(d){
+      var raw=lsGet(d.k); if(raw==null)return null;
+      return {label:d.label,n:_ddCount(d.k,raw),bytes:d.k.length+raw.length};
+    }).filter(Boolean).sort(function(a,b){return b.bytes-a.bytes;});
+    el.innerHTML=
+      '<div class="ws-grid">'
+      +'<div class="ws-card"><div class="ws-v">'+fmtBytes(snap.bytes)+'</div><div class="ws-l">Stored in this browser</div>'
+        +'<div class="ws-bar"><i id="wsQuotaBar" style="width:0%"></i></div><div class="ws-l" id="wsQuota" style="text-transform:none;letter-spacing:0;">measuring…</div></div>'
+      +'<div class="ws-card"><div class="ws-v">'+snap.keys+' / '+DD_KEYS.length+'</div><div class="ws-l">Data sets in use</div></div>'
+      +'<div class="ws-card"><div class="ws-v">'+(rows[0]?escapeHtml(rows[0].label):'—')+'</div><div class="ws-l">Largest ('+(rows[0]?fmtBytes(rows[0].bytes):'—')+')</div></div>'
+      +'</div>'
+      +'<div class="ibox w" style="font-size:11px;">This data lives only in this browser profile. Clearing site data, a fresh device or a different browser will not have it — <strong>keep a backup file</strong>.</div>'
+      +'<div class="mbc-actions" style="margin-top:9px;">'
+        +'<button class="btn ac" onclick="WS.backup()">⬇ Back up everything</button>'
+        +'<button class="btn" onclick="document.getElementById(\'wsFile\').click()">⬆ Restore from file…</button>'
+        +'<input type="file" id="wsFile" accept="application/json,.json" style="display:none" onchange="WS.pick(event)" aria-label="Choose a workspace backup file">'
+      +'</div>'
+      +'<details style="margin-top:9px;"><summary tabindex="0" style="font:11px var(--mono);color:var(--text2);cursor:pointer;padding:4px 0;">What is in the backup</summary>'
+      +'<div class="mbc-tblwrap" style="margin-top:6px;"><table class="ws-tbl"><thead><tr><th>Data set</th><th>Records</th><th>Size</th></tr></thead><tbody>'
+      +rows.map(function(r){return '<tr><td>'+escapeHtml(r.label)+'</td><td>'+r.n+'</td><td>'+fmtBytes(r.bytes)+'</td></tr>';}).join('')
+      +'</tbody></table></div></details>';
+    // Quota is async and unsupported on some browsers — never block the panel on it.
+    if(navigator.storage&&navigator.storage.estimate){
+      navigator.storage.estimate().then(function(q){
+        var lab=document.getElementById('wsQuota'), bar=document.getElementById('wsQuotaBar');
+        if(!lab||!q||!q.quota)return;
+        var pct=Math.min(100,q.usage/q.quota*100);
+        bar.style.width=pct.toFixed(1)+'%';
+        lab.textContent=fmtBytes(q.usage)+' of '+fmtBytes(q.quota)+' browser storage ('+pct.toFixed(1)+'%)';
+        if(pct>80){ bar.style.background='var(--warn)'; lab.textContent+=' — running low, back up now'; }
+      }).catch(function(){ var l=document.getElementById('wsQuota'); if(l)l.textContent='Browser storage limit unknown'; });
+    } else { var l0=document.getElementById('wsQuota'); if(l0)l0.textContent='Browser storage limit unknown'; }
+  }
+
+  function backup(){
+    var snap=workspaceSnapshot();
+    var d=new Date().toISOString().slice(0,10);
+    _dl(JSON.stringify(snap,null,2),'dilution-designer-workspace-'+d+'.json','application/json');
+    showToast('✓ Workspace backed up ('+snap.keys+' data sets, '+fmtBytes(snap.bytes)+')','green');
+  }
+
+  // Restore is destructive, so it always previews first and never merges
+  // silently. The file is untrusted: every label rendered through escapeHtml.
+  var _pending=null;
+  function pick(ev){
+    var f=ev.target.files&&ev.target.files[0]; ev.target.value='';
+    if(!f)return;
+    var rd=new FileReader();
+    rd.onload=function(){
+      var payload;
+      try{ payload=JSON.parse(rd.result); }catch(e){ showToast('That file is not valid JSON','warn'); return; }
+      var rows;
+      try{ rows=workspacePlan(payload); }catch(e){ showToast('Restore failed: '+e.message,'warn'); return; }
+      _pending=payload;
+      var changing=rows.filter(function(r){return r.action==='replaced'||r.action==='added';});
+      document.getElementById('wsPrevWhen').textContent=payload.savedAt?String(payload.savedAt).slice(0,16).replace('T',' '):'unknown date';
+      document.getElementById('wsPrevBody').innerHTML=
+        (changing.length?'':'<div class="ibox">This backup matches what you already have — nothing would change.</div>')
+        +'<div class="mbc-tblwrap"><table class="ws-tbl"><thead><tr><th>Data set</th><th>Now</th><th>After</th><th></th></tr></thead><tbody>'
+        +rows.map(function(r){
+          var b=r.action==='replaced'?'bw':r.action==='added'?'bg':'bn';
+          return '<tr><td>'+escapeHtml(r.label)+'</td><td>'+r.from+'</td><td>'+r.to+'</td>'
+                +'<td><span class="badge '+b+'">'+r.action+'</span></td></tr>';}).join('')
+        +'</tbody></table></div>'
+        +(changing.length?'<div class="ibox d" style="margin-top:8px;">Restoring <strong>replaces</strong> the data sets marked above. Back up first if the current data matters.</div>':'');
+      document.getElementById('wsPrev').style.display='flex';
+    };
+    rd.readAsText(f);
+  }
+  function confirmRestore(){
+    if(!_pending)return;
+    var r=workspaceRestore(_pending);
+    _pending=null;
+    document.getElementById('wsPrev').style.display='none';
+    if(r.failed.length){
+      // Never claim success on a partial restore — the user would reload into
+      // a half-restored workspace and trust it.
+      showToast('⚠ Restored '+r.n+', but '+r.failed.length+' could not be written ('+r.failed.join(', ')
+               +'). Storage may be full — free space and restore again. Not reloading.','warn',9000);
+      return;
+    }
+    showToast('✓ Restored '+r.n+' data set'+(r.n===1?'':'s')+' — reloading…','green');
+    // Strip any #s= share hash first: reloading with it still in the address
+    // bar re-applies the shared layout over what was just restored.
+    setTimeout(function(){
+      try{ if((location.hash||'').indexOf('#s=')===0) location.replace(location.pathname+location.search);
+           else location.reload(); }
+      catch(e){ location.reload(); }
+    },700);
+  }
+
+  // ── command palette ──
+  var _cpItems=null,_cpSel=0;
+  function build(){
+    var out=[];
+    [['home','🏠','Home'],['plasmid','🧫','Plate Planner'],['phage','🧫','Plate Planner — phage mode'],
+     ['dilcalc','💧','Dilution & Molarity'],['reagent','⚗️','Reagent Prep'],['calc','🧬','Calculators'],
+     ['proto','📋','Protocols'],['phg','🦠','Phage Planner'],['titer','⭕','Titering & EOP'],
+     ['mic','🔬','Microscopy & Dyes'],['gel','🧪','Gel Simulator'],['notebook','📓','Lab Notebook']]
+      .forEach(function(m){ out.push({kind:'module',icon:m[1],name:m[2],hay:m[2],go:function(){setMode(m[0]);}}); });
+    try{ (window.MBC&&MBC.calcs||[]).forEach(function(c){
+      out.push({kind:'calculator',icon:'🧮',name:c.name,hay:c.name+' '+(c.tags||'')+' '+(c.blurb||''),
+                go:function(){ MBC._cur=c.id; setMode('calc'); }}); }); }catch(e){}
+    try{ (window.PROTO&&PROTO.list||[]).forEach(function(p){
+      out.push({kind:'protocol',icon:'📋',name:p.name,hay:p.name+' '+(p.tags||''),
+                go:function(){ setMode('proto'); if(PROTO.open)PROTO.open(p.id); }}); }); }catch(e){}
+    try{ (window.MIC&&MIC.list||[]).forEach(function(d){
+      out.push({kind:'dye',icon:'🔬',name:d.name,hay:d.name+' '+((d.aka||[]).join(' '))+' '+(d.target||''),
+                go:function(){ setMode('mic'); if(MIC.open)MIC.open(d.id); }}); }); }catch(e){}
+    try{ (window.rpLib&&rpLib.categories||[]).forEach(function(cat){
+      (cat.recipes||[]).forEach(function(r){
+        out.push({kind:'recipe',icon:'⚗️',name:r.name,hay:r.name+' '+(cat.name||''),
+                  go:function(){ setMode('reagent'); if(window.rpOpen)rpOpen(r.id); }}); }); }); }catch(e){}
+    try{ lysAll().forEach(function(l){
+      out.push({kind:'lysate',icon:'🦠',name:l.name+(l.titer>0?' — '+SCI.fmt(l.titer,3)+' PFU/mL':''),
+                hay:l.name+' '+(l.host||''), go:function(){ setMode('phg'); }}); }); }catch(e){}
+    try{ hostAll().forEach(function(h){
+      out.push({kind:'strain',icon:'🧫',name:h.name,
+                hay:h.name+' '+(h.species||'')+' '+(h.markers||'')+' '+(h.source||''),
+                go:function(){ setMode('phg'); if(window.HOSTUI){ HOSTUI.render(); HOSTUI.edit(h.id); } }}); }); }catch(e){}
+    try{ var t=JSON.parse(lsGet('dd_titer')||'null');
+      if(t&&t.experiments) t.experiments.forEach(function(x,i){
+        out.push({kind:'experiment',icon:'⭕',name:x.name||('Experiment '+(i+1)),
+                  hay:(x.name||'')+' '+(x.date||''), go:function(){ setMode('titer'); if(window.TIT)TIT.sel(i); }}); }); }catch(e){}
+    try{ (window.GEL&&GEL._model&&GEL._model.ladders()||[]).forEach(function(l){
+      out.push({kind:'ladder',icon:'🧪',name:l.n,hay:l.n+' '+(l.v||''), go:function(){ setMode('gel'); }}); }); }catch(e){}
+    out.push({kind:'action',icon:'⬇',name:'Back up my whole workspace',hay:'backup export save data',go:backup});
+    out.forEach(function(o){ o.hay=(o.hay||o.name).toLowerCase(); });
+    return out;
+  }
+  function results(q){
+    if(!_cpItems)_cpItems=build();
+    q=(q||'').toLowerCase().trim();
+    if(!q)return _cpItems.filter(function(o){return o.kind==='module';});
+    // All terms must appear, in any order — the module nav filters match one
+    // contiguous substring, which means "lb broth" misses "LB (Lysogeny
+    // Broth), Miller". Word-wise AND is what makes typed-from-memory queries
+    // land. Ranking then favours a whole-phrase hit, then a name hit.
+    var terms=q.split(/\s+/).filter(Boolean);
+    return _cpItems.filter(function(o){
+        return terms.every(function(t){ return o.hay.indexOf(t)>=0; });
+      })
+      .sort(function(a,b){
+        var al=a.name.toLowerCase(), bl=b.name.toLowerCase();
+        var ap=al.indexOf(q), bp=bl.indexOf(q);                    // whole phrase in the name
+        var as=ap===0?0:ap>0?1:(al.indexOf(terms[0])>=0?2:3);
+        var bs=bp===0?0:bp>0?1:(bl.indexOf(terms[0])>=0?2:3);
+        return as-bs || a.name.length-b.name.length;
+      }).slice(0,60);
+  }
+  function paint(){
+    var q=document.getElementById('cpIn').value, list=results(q);
+    _cpSel=Math.max(0,Math.min(_cpSel,list.length-1));
+    document.getElementById('cpList').innerHTML=list.length?list.map(function(o,i){
+      return '<button class="cp-it" role="option" aria-selected="'+(i===_cpSel)+'" onclick="WS.run('+i+')">'
+        +'<span class="cp-ic" aria-hidden="true">'+o.icon+'</span>'
+        +'<span class="cp-nm">'+escapeHtml(o.name)+'</span>'
+        +'<span class="cp-kind">'+escapeHtml(o.kind)+'</span></button>';}).join('')
+      :'<div class="cp-empty">Nothing matches “'+escapeHtml(q)+'”.</div>';
+    var sel=document.querySelector('.cp-it[aria-selected="true"]');
+    if(sel&&sel.scrollIntoView)sel.scrollIntoView({block:'nearest'});
+  }
+  function open(){
+    _cpItems=null; _cpSel=0;                        // rebuilt each open so new data shows up
+    ddWarmLibraries();                              // so dyes/recipes are searchable before you ever open those tabs
+    document.getElementById('cpBg').style.display='flex';
+    var i=document.getElementById('cpIn'); i.value=''; paint(); i.focus();
+  }
+  // A lazily-fetched library landing mid-search must appear without retyping.
+  document.addEventListener('dd:library',function(){
+    _cpItems=null;
+    if(document.getElementById('cpBg')&&document.getElementById('cpBg').style.display==='flex') paint();
+  });
+  function close(){ document.getElementById('cpBg').style.display='none'; }
+  function run(i){ var list=results(document.getElementById('cpIn').value); var o=list[i]; if(!o)return; close(); try{ o.go(); }catch(e){} }
+
+  var bg=document.createElement('div');
+  bg.className='cp-bg'; bg.id='cpBg'; bg.style.display='none';
+  bg.setAttribute('role','dialog'); bg.setAttribute('aria-modal','true'); bg.setAttribute('aria-label','Search everything');
+  bg.innerHTML='<div class="cp-box"><input id="cpIn" class="cp-in" placeholder="Search calculators, protocols, recipes, dyes, lysates, experiments…" '
+    +'aria-label="Search everything" aria-controls="cpList" autocomplete="off" spellcheck="false">'
+    +'<div class="cp-list" id="cpList" role="listbox" aria-label="Results"></div></div>';
+  bg.addEventListener('click',function(e){ if(e.target===bg)close(); });
+  document.addEventListener('DOMContentLoaded',function(){ document.body.appendChild(bg); });
+  if(document.readyState!=='loading')document.body.appendChild(bg);
+
+  // Deliberately NOT the app's other keydown handler: that one returns early
+  // when focus is in a field, which would make Ctrl+K dead exactly when you
+  // are mid-entry and want to jump somewhere.
+  document.addEventListener('keydown',function(e){
+    if((e.ctrlKey||e.metaKey)&&(e.key==='k'||e.key==='K')){ e.preventDefault();
+      if(document.getElementById('cpBg').style.display==='flex')close(); else open(); return; }
+    if(document.getElementById('cpBg').style.display!=='flex')return;
+    if(e.key==='Escape'){ e.preventDefault(); close(); }
+    else if(e.key==='ArrowDown'){ e.preventDefault(); _cpSel++; paint(); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); _cpSel--; paint(); }
+    else if(e.key==='Enter'){ e.preventDefault(); run(_cpSel); }
+  },true);
+  document.addEventListener('input',function(e){ if(e.target&&e.target.id==='cpIn'){ _cpSel=0; paint(); } });
+
+  window.WS={renderHome:renderHome,backup:backup,pick:pick,confirmRestore:confirmRestore,
+             open:open,close:close,run:run,_results:results,_snapshot:workspaceSnapshot};
 })();
 
 /* ══════════════════════════ PWA / OFFLINE ══════════════════════════ */
