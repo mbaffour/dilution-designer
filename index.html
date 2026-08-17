@@ -85,6 +85,17 @@ header{background:var(--head-bg);color:var(--head-fg);padding:10px 22px;display:
 .mode-tab{font-family:var(--mono);font-size:10.5px;padding:5px 12px;border:none;border-radius:4px;background:transparent;color:var(--head-fg-dim);cursor:pointer;white-space:nowrap;letter-spacing:0.04em;transition:all 0.15s;}
 .mode-tab:hover{color:var(--head-fg);background:rgba(255,255,255,0.10);}
 .mode-tab.active{background:var(--btn-primary);color:#fff;}
+/* Second row: the pages inside the selected group. Quieter than the group
+   row so the hierarchy reads at a glance. */
+.mode-sub{background:rgba(255,255,255,0.05);}
+.mode-sub .mode-tab{font-size:10px;padding:4px 10px;}
+.mode-sub .mode-tab.active{background:rgba(255,255,255,0.20);color:#fff;}
+/* In-module switch for the plate planner's two experiment types, which used
+   to be two separate top-level tabs. */
+.pm-sw{display:flex;gap:4px;margin-bottom:4px;}
+.pm-btn{flex:1;font-family:var(--mono);font-size:10.5px;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text2);cursor:pointer;white-space:nowrap;}
+.pm-btn:hover{border-color:var(--border2);color:var(--text);}
+.pm-btn.on{background:var(--accent-fill);color:var(--accent-fill-fg);border-color:var(--accent-fill);font-weight:700;}
 .theme-group{display:flex;gap:3px;background:rgba(255,255,255,0.08);border-radius:6px;padding:3px;}
 .theme-btn{font-family:var(--mono);font-size:10.5px;padding:5px 10px;border:none;border-radius:4px;background:transparent;color:var(--head-fg-dim);cursor:pointer;letter-spacing:0.04em;transition:all 0.15s;}
 .theme-btn:hover{color:var(--head-fg);background:rgba(255,255,255,0.10);}
@@ -355,20 +366,14 @@ body.print-plate-mode .excl-bar{display:none!important;}
     <span class="brand-name">Dilution Designer</span>
     <span class="brand-mantra">Built with passion for science and discovery</span>
   </div>
-  <div class="mode-tabs">
-    <button class="mode-tab" id="modeTabHome" onclick="setMode('home')">🏠 Home</button>
-    <button class="mode-tab active" id="modeTabPlasmid" onclick="setMode('plasmid')">Plasmid / Induction</button>
-    <button class="mode-tab" id="modeTabPhage" onclick="setMode('phage')">Phage Infection</button>
-    <button class="mode-tab" id="modeTabReagent" onclick="setMode('reagent')">Reagent Prep</button>
-    <button class="mode-tab" id="modeTabDilcalc" onclick="setMode('dilcalc')">Dilution Calc</button>
-    <button class="mode-tab" id="modeTabCalc" onclick="setMode('calc')">🧬 Calculators</button>
-    <button class="mode-tab" id="modeTabProto" onclick="setMode('proto')">📋 Protocols</button>
-    <button class="mode-tab" id="modeTabPhg" onclick="setMode('phg')">🦠 Phage Planner</button>
-    <button class="mode-tab" id="modeTabTit" onclick="setMode('titer')">⭕ Titering</button>
-    <button class="mode-tab" id="modeTabMic" onclick="setMode('mic')">🔬 Microscopy</button>
-    <button class="mode-tab" id="modeTabGel" onclick="setMode('gel')">🧪 Gel Sim</button>
-    <button class="mode-tab" id="modeTabNb" onclick="setMode('notebook')">📓 Notebook</button>
-  </div>
+  <!-- Two rows, not twelve peers. The modules divide into three kinds —
+       things you plan with, things that hold your data, and stateless tools
+       you look something up in — and presenting them as one flat list is what
+       made a bench tool start to feel like a suite. Ctrl+K still reaches
+       everything directly; this row is about telling you what KIND of thing
+       you are doing. Rendered by renderNavTabs() from MODE_GROUPS. -->
+  <div class="mode-tabs" id="modeGroups" role="tablist" aria-label="Sections"></div>
+  <div class="mode-tabs mode-sub" id="modeMembers" role="tablist" aria-label="Section pages"></div>
   <div class="theme-group">
     <button class="theme-btn active" data-theme="day" onclick="setTheme('day')">Day</button>
     <button class="theme-btn" data-theme="night" onclick="setTheme('night')">Night</button>
@@ -737,7 +742,9 @@ body.print-plate-mode .excl-bar{display:none!important;}
 <aside class="sidebar">
 
   <div>
-    <div class="sl">Experiment</div>
+    <div class="sl">Experiment type</div>
+    <div class="pm-sw" id="plateModeSw" role="group" aria-label="Plate experiment type"></div>
+    <div class="sl" style="margin-top:14px;">Experiment</div>
     <div class="f">
       <label style="font-weight:700;color:var(--text);" id="compLabel">Compound / reagent name</label>
       <input id="inducerName" placeholder="e.g. Crystal violet, IPTG, phage T4…" oninput="update()">
@@ -1426,22 +1433,68 @@ function setTheme(name) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// MODES
+// MODES — grouped navigation
+//
+// The twelve modules are not peers. Three kinds:
+//   plan    you set something up before the bench
+//   record  your data lives here
+//   tools   stateless: ask a question, get an answer, leave
+// The plate planner's plasmid and phage modes were two separate top-level
+// tabs for ONE module; they are one entry now, with the mode switch inside.
 // ══════════════════════════════════════════════════════════════════
+const MODE_GROUPS=[
+  {key:'plan',  label:'Plan',   modes:[
+    {m:'plasmid',label:'🧫 Plate Planner'},
+    {m:'phg',    label:'🦠 Phage Planner'}]},
+  {key:'record',label:'Record', modes:[
+    {m:'titer',  label:'⭕ Titering & EOP'},
+    {m:'notebook',label:'📓 Lab Notebook'}]},
+  {key:'tools', label:'Tools',  modes:[
+    {m:'dilcalc',label:'💧 Dilution Calc'},
+    {m:'reagent',label:'⚗️ Reagent Prep'},
+    {m:'calc',   label:'🧬 Calculators'},
+    {m:'proto',  label:'📋 Protocols'},
+    {m:'mic',    label:'🔬 Microscopy'},
+    {m:'gel',    label:'🧪 Gel Sim'}]}
+];
+// 'phage' is the plate planner's other mode, not its own destination.
+function groupOf(m){
+  if(m==='phage')m='plasmid';
+  for(var i=0;i<MODE_GROUPS.length;i++)
+    for(var j=0;j<MODE_GROUPS[i].modes.length;j++)
+      if(MODE_GROUPS[i].modes[j].m===m) return MODE_GROUPS[i].key;
+  return null;                                   // home belongs to no group
+}
+// Remember where you were in each group, so clicking "Tools" returns you to
+// the tool you last used rather than always the first one.
+var _lastInGroup={};
+function renderNavTabs(){
+  var g=groupOf(appMode);
+  var gr=document.getElementById('modeGroups'), me=document.getElementById('modeMembers');
+  if(!gr||!me)return;
+  gr.innerHTML='<button class="mode-tab'+(appMode==='home'?' active':'')+'" role="tab" aria-selected="'+(appMode==='home')+'" onclick="setMode(\'home\')">🏠 Home</button>'
+    +MODE_GROUPS.map(function(x){
+      return '<button class="mode-tab'+(g===x.key?' active':'')+'" role="tab" aria-selected="'+(g===x.key)+'" '
+        +'aria-controls="modeMembers" onclick="setGroup(\''+x.key+'\')">'+escapeHtml(x.label)+'</button>';
+    }).join('');
+  var grp=MODE_GROUPS.filter(function(x){return x.key===g;})[0];
+  if(!grp){ me.innerHTML=''; me.style.display='none'; return; }
+  me.style.display='';
+  me.innerHTML=grp.modes.map(function(x){
+    var on=(x.m===appMode)||(x.m==='plasmid'&&appMode==='phage');
+    return '<button class="mode-tab'+(on?' active':'')+'" role="tab" aria-selected="'+on+'" onclick="setMode(\''+x.m+'\')">'+escapeHtml(x.label)+'</button>';
+  }).join('');
+}
+function setGroup(key){
+  var grp=MODE_GROUPS.filter(function(x){return x.key===key;})[0];
+  if(!grp)return;
+  setMode(_lastInGroup[key]||grp.modes[0].m);
+}
+
 function setMode(m) {
   appMode = m;
-  document.getElementById('modeTabPlasmid').classList.toggle('active',m==='plasmid');
-  document.getElementById('modeTabPhage').classList.toggle('active',m==='phage');
-  var mtR=document.getElementById('modeTabReagent'); if(mtR) mtR.classList.toggle('active',m==='reagent');
-  var mtD=document.getElementById('modeTabDilcalc'); if(mtD) mtD.classList.toggle('active',m==='dilcalc');
-  var mtH=document.getElementById('modeTabHome'); if(mtH) mtH.classList.toggle('active',m==='home');
-  var mtC=document.getElementById('modeTabCalc'); if(mtC) mtC.classList.toggle('active',m==='calc');
-  var mtP=document.getElementById('modeTabProto'); if(mtP) mtP.classList.toggle('active',m==='proto');
-  var mtG=document.getElementById('modeTabGel'); if(mtG) mtG.classList.toggle('active',m==='gel');
-  var mtN=document.getElementById('modeTabNb'); if(mtN) mtN.classList.toggle('active',m==='notebook');
-  var mtL=document.getElementById('modeTabPhg'); if(mtL) mtL.classList.toggle('active',m==='phg');
-  var mtM=document.getElementById('modeTabMic'); if(mtM) mtM.classList.toggle('active',m==='mic');
-  var mtT=document.getElementById('modeTabTit'); if(mtT) mtT.classList.toggle('active',m==='titer');
+  var _g=groupOf(m); if(_g) _lastInGroup[_g]=m;
+  renderNavTabs();
   // Home, Reagent Prep, Dilution Calc and Calculators are self-contained views — hide the plate workspace when active.
   var appEl=document.querySelector('.app'), rv=document.getElementById('reagentView'), dv=document.getElementById('dilcalcView'),
       hv=document.getElementById('homeView'), cv=document.getElementById('calcView'), pv=document.getElementById('protoView'),
@@ -1470,6 +1523,11 @@ function setMode(m) {
   if(m==='phg'){ if(window.PHG) PHG.init(); if(window.HOSTUI) HOSTUI.render(); return; }
   if(m==='mic'){ if(window.MIC) MIC.init(); return; }
   if(m==='titer'){ if(window.TIT) TIT.init(); return; }
+  // The plate planner's two experiment types. One tab, switch inside.
+  var pm=document.getElementById('plateModeSw');
+  if(pm) pm.innerHTML=[['plasmid','Plasmid / Induction'],['phage','Phage Infection']].map(function(x){
+    return '<button class="pm-btn'+(m===x[0]?' on':'')+'" aria-pressed="'+(m===x[0])+'" onclick="setMode(\''+x[0]+'\')">'+x[1]+'</button>';
+  }).join('');
   document.getElementById('sbPlasmid').style.display = m==='plasmid'?'':'none';
   document.getElementById('sbPhage').style.display   = m==='phage'?'':'none';
   document.getElementById('moiPanel').style.display  = m==='phage'?'':'none';
@@ -2900,6 +2958,32 @@ function hostImportJson(text){
   if(!n) throw new Error('no readable strains in that file');
   if(!hostSave(order.map(function(k){return byId[k];}))) throw new Error('browser storage is full');
   return n;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CURRENT EXPERIMENT — one name and date for the afternoon.
+//
+// The plate had expName/expDate, Titering had its own name/date, and the
+// notebook had entry.title/date: three names for the same piece of work, so
+// nothing could tell you which plate went with which titration. This is the
+// shared default. It is only ever a DEFAULT — each module keeps its own
+// field and you can still diverge; this just stops you retyping.
+// ══════════════════════════════════════════════════════════════════
+function curExp(){
+  var n='',d='';
+  try{ n=(document.getElementById('expName')||{}).value||''; }catch(e){}
+  try{ d=(document.getElementById('expDate')||{}).value||''; }catch(e){}
+  if(!n){ try{ var t=JSON.parse(lsGet('dd_titer')||'null');
+    if(t&&t.experiments&&t.experiments[t.active||0]){ n=t.experiments[t.active||0].name||''; d=d||t.experiments[t.active||0].date||''; } }catch(e){} }
+  return {name:n,date:d||new Date().toISOString().slice(0,10)};
+}
+// Adopt a name/date as the shared one. Never overwrites a field the user has
+// already filled in — silently renaming someone's plate would be worse than
+// having two names.
+function setCurExp(name,date){
+  var n=document.getElementById('expName'), d=document.getElementById('expDate');
+  if(n&&name&&!n.value.trim()) n.value=name;
+  if(d&&date&&!d.value) d.value=date;
 }
 
 // One <datalist> the whole app shares, so every host field gets the same
@@ -8378,7 +8462,10 @@ function dyeWorking(o){
   function defExp(n){
     // Two conditions from the start so EOP means something immediately.
     var c1='tc1',c2='tc2',l1='tl1';
-    return {id:'tx'+Date.now().toString(36),name:n||'Experiment 1',date:new Date().toISOString().slice(0,10),notes:'',
+    // Inherit the shared experiment name/date rather than making you type
+    // the same thing a second time.
+    var shared=(typeof curExp==='function')?curExp():{name:'',date:''};
+    return {id:'tx'+Date.now().toString(36),name:n||shared.name||'Experiment 1',date:shared.date||new Date().toISOString().slice(0,10),notes:'',
       mode:'plate',volUl:100,factor:10,refId:c1,
       conds:[{id:c1,name:'Reference host',hostId:''},{id:c2,name:'Test host',hostId:''}],
       lys:[{id:l1,name:'Phage 1',libId:''}],
@@ -9086,6 +9173,9 @@ function dyeWorking(o){
     setF:function(k,v){ var exp=E();
       if(k==='volUl'||k==='factor'){ var n=SCI.parse(String(v)); if(k==='factor'&&!(n>1))n=10; if(k==='volUl'&&!(n>0))n=exp.volUl; exp[k]=n; }
       else exp[k]=String(v).slice(0,120);
+      // Flows the other way too: naming the run here fills a still-empty
+      // plate name. setCurExp never overwrites something you already typed.
+      if((k==='name'||k==='date')&&typeof setCurExp==='function') setCurExp(exp.name,exp.date);
       render(); },
     setRef:function(id){ var exp=E(); if(condById(exp,id))exp.refId=id; render(); },
     addCond:function(){ var exp=E(); exp.conds.push({id:_id(),name:'Condition '+(exp.conds.length+1),hostId:''}); render(); },
@@ -9475,7 +9565,8 @@ function dyeWorking(o){
     // provenance resolver, without opening the capture modal
     _origin:ORIGIN, _stamp:stamp, _providers:PROVIDERS,
     init:function(){ var l=all(); if(!l.length){ } else if(!cur) cur=l[0].id; render(); },
-    newEntry:function(){ var e={id:'nb'+Date.now(), title:'Experiment '+today(), date:today(), author:'', tags:[], blocks:[]};
+    newEntry:function(){ var sh=(typeof curExp==='function')?curExp():{name:'',date:''};
+      var e={id:'nb'+Date.now(), title:sh.name||('Experiment '+today()), date:sh.date||today(), author:'', tags:[], blocks:[]};
       var l=all(); l.unshift(e); persist(l); cur=e.id; render(); showToast('✓ New entry','green'); },
     open:function(id){ cur=id; render(); },
     del:function(){ var e=curEntry(); if(!e) return; if(!confirm('Delete "'+(e.title||'Untitled')+'"? This cannot be undone.')) return;
