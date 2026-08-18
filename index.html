@@ -303,6 +303,8 @@ tbody tr:hover{background:var(--bg);}
 /* ── PRINT ── */
 @media print{
   body{background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  /* Native Ctrl+P must hide the reagent editor exactly like rpPrint's pop-up does */
+  .rp-noprint,.rp-edit{display:none!important;}
   header{position:static;background:#fff!important;color:#000!important;border-bottom:2px solid #000;padding:10px 18px;}
   header .hactions,.theme-group,.mode-tabs{display:none!important;}
   .sidebar{display:none!important;}
@@ -5402,11 +5404,197 @@ showWelcomeBanner();
   .rp-src a{color:var(--accent,#2f7d5b);}
   .rp-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;}
   .rp-modal{background:var(--card,#fff);border-radius:14px;max-width:560px;width:100%;max-height:88vh;overflow:auto;padding:22px;}
+  /* ── Adjustable concentrations. Every colour is a theme var so the editor
+     follows dark mode; nothing here is a light-theme literal except the
+     fallback after the comma, which matches the rest of this block. */
+  .rp-sheettools{display:flex;gap:6px;flex-wrap:wrap;margin:9px 0 2px;}
+  .rp-einwrap{display:inline-flex;align-items:center;gap:5px;margin-top:4px;}
+  .rp-addrow .rc-row .rc-x{display:none;}
+  .rp-ein{width:90px;font:12px var(--mono,monospace);padding:3px 6px;border:1px solid var(--line,#d9d2c4);border-radius:5px;background:var(--card,#fff);color:var(--text,#2a2519);}
+  .rp-ein:focus{outline:2px solid var(--accent,#2f7d5b);outline-offset:1px;}
+  .rp-eunit{font:10.5px var(--mono,monospace);color:var(--text3,#8a8172);font-weight:400;}
+  .rp-nonum{font:11px var(--mono,monospace);color:var(--text3,#8a8172);cursor:help;}
+  /* The ✕ is painted, never written into the DOM: RPBLK scrapes this cell's
+     textContent for the notebook, and a stray glyph would land in the table. */
+  .rp-xbtn{border:1px solid var(--line,#d9d2c4);background:transparent;color:var(--text3,#8a8172);border-radius:5px;cursor:pointer;line-height:1;padding:2px 6px;font-size:11px;}
+  .rp-xbtn::before{content:'✕';}
+  .rp-xbtn:hover{color:var(--danger,#c0392b);border-color:var(--danger,#c0392b);}
+  .rp-modbanner{background:var(--accentL,#e7f1ec);color:var(--accent,#2f7d5b);border-radius:6px;padding:6px 10px;font:11px/1.45 var(--mono,monospace);margin:0 0 9px;}
+  .rp-modtag{font-size:.68em;font-weight:400;color:var(--text3,#8a8172);letter-spacing:.02em;}
+  .rp-addrow{padding-top:11px!important;}
+  .rp-addrow .rc-row{margin-bottom:7px;}
   `;
   var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
 })();
 
 var rpLib=null, rpAllRecipes=[], rpActiveCat='all', rpSelectedId=null, rpLoaded=false, rpLastText='';
+
+/* ── Adjustable concentrations ─────────────────────────────────────────
+   rpFlatten shallow-copies each library recipe, so rpAllRecipes[i].components
+   IS the array the library object holds — editing a number in place would
+   silently rewrite the shipped library and leak into rpExportLibrary. So an
+   edit never touches a library recipe: it deep-clones the selected one into
+   rpWork and every consumer reads rpCurrentRecipe(). rpWork is the ONLY
+   mutable recipe in the module, and it is thrown away on save or cancel.
+   Provenance rides along on '_'-prefixed keys (_was / _added / _removed /
+   _baseName) that rpStripInternal deletes before anything is persisted. */
+var rpWork=null, rpEditMode=false;
+function rpClone(r){ return JSON.parse(JSON.stringify(r)); }   // recipes are pure JSON — no Dates, no functions
+function rpStripInternal(r){
+  // Deep, not just top-level: components carry _was/_added, and a saved recipe
+  // that kept them would re-announce its edits every time it was reopened.
+  function strip(o){
+    if(!o||typeof o!=='object') return o;
+    if(Array.isArray(o)){ o.forEach(strip); return o; }
+    Object.keys(o).forEach(function(k){ if(k.charAt(0)==='_') delete o[k]; else strip(o[k]); });
+    return o;
+  }
+  return strip(rpClone(r));
+}
+function rpWorkDirty(){
+  if(!rpWork) return false;
+  if((rpWork._removed||[]).length) return true;
+  return (rpWork.components||[]).some(function(c){ return !!(c._was||c._added); });
+}
+function rpCurrentRecipe(){
+  var r=rpAllRecipes.find(function(x){ return x.id===rpSelectedId; });
+  return (rpWork && r && rpWork.id===r.id) ? rpWork : r;
+}
+/* The unit a component's editable number is expressed in — null means the line
+   is prose (a titrant, a cross-reference) with no number to adjust. The bucket
+   order here MUST match rpComponentAmount's dispatch, or the label would name a
+   field the amount calculation never reads. */
+function rpUnitLabel(c){
+  if(!c) return null;
+  if(c.gramsPerLiter!=null) return 'g/L';
+  if(c.molarity_M!=null&&c.mw_gmol!=null) return 'M';
+  if(c.percent) return (String(c.percent.type||'w/v').toLowerCase()==='v/v')?'% v/v':'% w/v';
+  if(c.volumeFraction) return '% v/v';
+  // A fromStock line only gets an edit box if the sheet can actually COMPUTE
+  // it — otherwise the row renders as prose and an input beside it would
+  // reject every value with a message contradicting what is on screen.
+  if(c.fromStock) return rpStockPair(c.fromStock)?((c.fromStock.finalUnit||'')+' final'):null;
+  return null;
+}
+function rpEditValue(c){
+  if(!c) return null;
+  if(c.gramsPerLiter!=null) return c.gramsPerLiter;
+  if(c.molarity_M!=null&&c.mw_gmol!=null) return c.molarity_M;
+  if(c.percent) return c.percent.value;
+  if(c.volumeFraction) return c.volumeFraction.value;
+  if(c.fromStock) return c.fromStock.finalConc;
+  return null;
+}
+function rpApplyEdit(c,raw){
+  var label=rpUnitLabel(c);
+  if(label==null) return {ok:false,err:'This line has no number to change — it is a note.'};
+  // The unit is FIXED by the field's label. SCI.parse is suffix-tolerant, so
+  // "50 mM" typed into an M-labelled box would silently commit 50 M — a
+  // thousand-fold error with no visible cue. Accept only pure number forms
+  // (decimals, commas, e-notation, ×10 powers); anything else is the user
+  // trying to state a unit, and the honest answer is to say which unit the
+  // field is in rather than guess.
+  var rawS=String(raw==null?'':raw).trim();
+  if(!( /^[+-]?[\d.,\s]+(e[+-]?\d+)?$/i.test(rawS)
+     || /^[+-]?[\d.,\s]*[x×]\s*10(\^?[+-]?\d+|[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)$/i.test(rawS) ))
+    return {ok:false,err:'Just the number — this field is in '+label+'.'};
+  var v=SCI.parse(raw);
+  if(!isFinite(v)) return {ok:false,err:'Enter a number.'};
+  if(v<=0) return {ok:false,err:'Must be greater than zero.'};
+  // Typing the number that is already there is not a change — minting _was for
+  // it would brand the sheet "(adjusted)" over nothing. Checked BEFORE the
+  // bucket guards so re-committing an odd library value (Mowiol's 120 % v/v)
+  // never draws a spurious warning.
+  var cur=rpEditValue(c);
+  if(v===cur&&!c._was) return {ok:true};
+  // Validate for the bucket that will actually be ASSIGNED — the same dispatch
+  // order rpComponentAmount and rpEditValue use. Testing `if(c.fromStock)`
+  // first meant a component carrying both percent and fromStock would be
+  // validated by the stock rules and then assigned to percent.
+  var isFS=c.fromStock&&c.gramsPerLiter==null&&!(c.molarity_M!=null&&c.mw_gmol!=null)&&!c.percent&&!c.volumeFraction;
+  if(isFS){
+    var s=c.fromStock;
+    var pr=rpStockPair(s,v);
+    if(!pr) return {ok:false,err:'Stock and final units are different kinds of concentration.'};
+    if(!(pr.sc.val>0)) return {ok:false,err:'The stock concentration is not usable.'};
+    // You cannot dilute up. Equality is legal — that is "use it neat".
+    if(pr.fc.val>pr.sc.val) return {ok:false,err:'That is stronger than the '+rpNum(s.stockConc)+' '+s.stockUnit+' stock.'};
+  } else if((c.percent&&String(c.percent.type||'w/v').toLowerCase()==='v/v')||c.volumeFraction){
+    // The ceiling is RELATIVE to the library value, not an absolute 100: the
+    // shipped Mowiol mountant legitimately uses 120 % v/v (multi-step
+    // dissolution is not volume-additive), and an absolute cap made that
+    // library value permanently unrestorable once edited away from.
+    var cap=Math.max(100,(c._was&&c._was.v)||cur||100);
+    if(v>cap) return {ok:false,err:'A volume fraction cannot exceed '+cap+'%.'};
+  }
+  // Snapshot the ORIGINAL once — a second edit of the same line must still
+  // report the distance from the library value, not from the last keystroke.
+  // Never on an _added component: "added (20 g/L)" already tells the story.
+  if(!c._was&&!c._added) c._was={v:cur, label:label};
+  if(c.gramsPerLiter!=null) c.gramsPerLiter=v;
+  else if(c.molarity_M!=null&&c.mw_gmol!=null) c.molarity_M=v;
+  else if(c.percent) c.percent.value=v;
+  else if(c.volumeFraction) c.volumeFraction.value=v;
+  else if(c.fromStock) c.fromStock.finalConc=v;
+  // Edited back to the library value = no longer a change. Without this, a
+  // 1.5→2→1.5 round trip left the banner claiming "Agar 1.5→1.5 % w/v".
+  if(c._was&&c._was.v===v) delete c._was;
+  return {ok:true};
+}
+function rpWorkEnsure(){
+  var r=rpAllRecipes.find(function(x){ return x.id===rpSelectedId; });
+  if(!r) return null;
+  if(rpWork&&rpWork.id===r.id) return rpWork;
+  rpWork=rpClone(r);
+  rpWork._removed=[];
+  rpWork._baseName=r.name;
+  return rpWork;
+}
+function rpWasStr(c){
+  // What the line read in the library, so a removal note survives an edit
+  // that happened before the removal.
+  var lab=(c&&c._was&&c._was.label)||rpUnitLabel(c);
+  if(lab==null) return null;
+  var v=(c&&c._was&&c._was.v!=null)?c._was.v:rpEditValue(c);
+  return v==null?null:(v+' '+lab);
+}
+function rpWorkRemove(ci){
+  if(!rpWork||!rpWork.components) return false;
+  var c=rpWork.components[ci];
+  if(!c) return false;
+  rpWork.components.splice(ci,1);
+  // Removing a component the user themselves ADDED is a net nothing: logging
+  // it wrote "X removed (was 20 g/L)" into saved provenance, asserting the
+  // LIBRARY recipe contained a component it never had.
+  if(!c._added) (rpWork._removed=rpWork._removed||[]).push({name:c.name, was:rpWasStr(c)});
+  return true;
+}
+function rpWorkAdd(comp){
+  if(!rpWork||!comp) return false;
+  (rpWork.components=rpWork.components||[]).push(Object.assign({_added:true},comp));
+  return true;
+}
+/* One human-readable line per change, in the order edited → removed → added.
+   This string is frozen: it is what a saved recipe's provenance note says, and
+   the notebook reads that note back months later. */
+function rpChangeSummary(work){
+  var out=[];
+  if(!work) return out;
+  var comps=work.components||[];
+  comps.forEach(function(c){
+    if(c._added||!c._was) return;
+    out.push(c.name+' '+c._was.v+'→'+rpEditValue(c)+' '+(rpUnitLabel(c)||c._was.label));
+  });
+  (work._removed||[]).forEach(function(d){
+    out.push(d.name+' removed'+(d.was?' (was '+d.was+')':''));
+  });
+  comps.forEach(function(c){
+    if(!c._added) return;
+    var lab=rpUnitLabel(c), v=rpEditValue(c);
+    out.push(c.name+' added'+((lab!=null&&v!=null)?' ('+v+' '+lab+')':''));
+  });
+  return out;
+}
 
 function rpInit(){
   if(rpLoaded){ rpRenderCats(); rpRenderList(); return; }
@@ -5427,34 +5615,186 @@ function rpFinishLoad(){ rpLoaded=true; rpMergeCustom(); rpFlatten(); rpRenderCa
   // Once the real number is known, refresh the hub so the two can never disagree.
   if(appMode==='home'&&window.renderHome) renderHome();
   ddLibraryLoaded('reagent'); }
-function rpFlatten(){ rpAllRecipes=[]; (rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ rpAllRecipes.push(Object.assign({_cat:c.title,_catKey:c.key}, r)); }); }); }
-function rpCustom(){ try{ return JSON.parse(lsGet('dd_reagent_custom')||'[]'); }catch(e){ return []; } }
-function rpMergeCustom(){ var cust=rpCustom(); var cat=(rpLib.categories||[]).find(function(c){return c.key==='custom';}); if(cust.length){ if(!cat){ cat={key:'custom',title:'My recipes',recipes:[]}; rpLib.categories.push(cat);} cat.recipes=cust; } else if(cat){ cat.recipes=[]; } }
+function rpFlatten(){
+  rpAllRecipes=[]; var _idx=Object.create(null);
+  (rpLib.categories||[]).forEach(function(c){ (Array.isArray(c.recipes)?c.recipes:[]).forEach(function(r){
+    if(!r||!r.id)return;
+    var e=Object.assign({_cat:c.title,_catKey:c.key}, r);
+    var at=_idx[r.id];
+    // One id, one entry. rpSelect and the palette resolve by id, so a second
+    // copy was an unreachable list row; a CUSTOM copy replaces the library one
+    // because an imported/saved recipe under a library id means "my version".
+    if(at==null){ _idx[r.id]=rpAllRecipes.length; rpAllRecipes.push(e); }
+    else if(c.key==='custom') rpAllRecipes[at]=e;
+  }); });
+}
+function rpCustom(){
+  // The store is user-reachable (imports, backup restores, devtools). A
+  // non-array here used to THROW during boot and brick the module while the
+  // error toast blamed the library file.
+  try{
+    var v=JSON.parse(lsGet('dd_reagent_custom')||'[]');
+    if(!Array.isArray(v)) return [];
+    return v.filter(function(r){ return r&&typeof r==='object'&&r.id&&r.name; })
+            .map(function(r){ if(!Array.isArray(r.components)) r.components=[]; return r; });
+  }catch(e){ return []; }
+}
+function rpMergeCustom(){ var cust=rpCustom(); var cat=(rpLib.categories||[]).find(function(c){return c.key==='custom';}); if(cust.length){ if(!cat){ cat={key:'custom',title:'My recipes',recipes:[]}; rpLib.categories.push(cat);} cat.recipes=cust; } else if(cat){ rpLib.categories.splice(rpLib.categories.indexOf(cat),1); } }
 function rpRenderCats(){ var el=document.getElementById('rpCatFilter'); if(!el) return; var cats=[{key:'all',title:'All',n:rpAllRecipes.length}].concat((rpLib.categories||[]).map(function(c){return {key:c.key,title:c.title,n:(c.recipes||[]).length};})).filter(function(c){return c.n>0;}); el.innerHTML=cats.map(function(c){return '<button class="rp-cat'+(rpActiveCat===c.key?' active':'')+'" onclick="rpSetCat(\''+jsAttr(c.key)+'\')">'+escapeHtml(c.title)+' <span class="rp-catn">'+c.n+'</span></button>';}).join(''); }
 function rpSetCat(k){ rpActiveCat=k; rpRenderCats(); rpRenderList(); }
 function rpRenderList(){ var q=(document.getElementById('rpSearch').value||'').trim().toLowerCase(); var list=rpAllRecipes.filter(function(r){return rpActiveCat==='all'||r._catKey===rpActiveCat;}); if(q) list=list.filter(function(r){ return (r.name+' '+(r.aka||[]).join(' ')+' '+(r.summary||'')+' '+r._cat).toLowerCase().indexOf(q)>=0; }); var el=document.getElementById('rpList'); if(!list.length){ el.innerHTML='<div class="rp-empty" style="padding:16px;">No matches.</div>'; return; } el.innerHTML=list.map(function(r){ return '<button class="rp-item'+(rpSelectedId===r.id?' active':'')+'" role="option" onclick="rpSelect(\''+jsAttr(r.id)+'\')"><div class="rp-item-name">'+escapeHtml(r.name)+'</div><div class="rp-item-sum">'+escapeHtml(r.summary||r._cat)+'</div></button>'; }).join(''); }
-function rpSelect(id){ rpSelectedId=id; rpRenderList(); rpCompute(); }
-function rpVolumeMl(){ var v=parseFloat(document.getElementById('rpVolume').value)||0; var u=document.getElementById('rpVolUnit').value; return u==='L'?v*1000:u==='uL'?v/1000:v; }
-function rpConcCanon(value,unit){ var u=(unit||'').trim().toLowerCase().replace(/µ/g,'u'); var mv={'mg/ml':1,'ug/ml':0.001,'g/ml':1000,'ng/ml':1e-6,'g/l':1,'mg/l':0.001,'ug/l':1e-6,'ug/ul':1,'mg/ul':1000,'ng/ul':0.001}; var mo={'m':1000,'mm':1,'um':0.001,'nm':1e-6,'pm':1e-9}; if(mv[u]!=null) return {fam:'massvol',val:value*mv[u]}; if(mo[u]!=null) return {fam:'molar',val:value*mo[u]}; if(u==='x'||u==='fold') return {fam:'fold',val:value}; if(u.indexOf('%')>=0) return {fam:'pct',val:value}; if(u==='u/ml'||u==='units/ml') return {fam:'act',val:value}; return null; }
+/* Switching to a DIFFERENT recipe throws the working copy away, because rpWork
+   is keyed to one id and carrying it across would silently attach one recipe's
+   edits to another. Re-clicking the recipe you are already on is not a switch,
+   so it keeps the work — otherwise every stray click on the list would wipe it.
+   The warning is a toast, not a confirm: an unsaved tweak is cheap to redo, and
+   a modal in the middle of browsing the library would cost more than it saves. */
+function rpSelect(id){
+  if(id!==rpSelectedId&&rpWorkDirty()){
+    showToast('Adjustments to '+((rpWork&&(rpWork._baseName||rpWork.name))||'the recipe')+' discarded','',3600);
+    rpWork=null; rpEditMode=false;
+  }
+  rpSelectedId=id; rpRenderList(); rpCompute();
+}
+// SCI.parse, not parseFloat: the field is typed into by hand, and "1,5" (half
+// the world's decimal comma) read as 15 through parseFloat — a silent 10× error
+// in the one number every amount on the sheet is multiplied by. ||0 still
+// swallows an empty or unparseable field.
+function rpVolumeMl(){ var v=SCI.parse(document.getElementById('rpVolume').value)||0; var u=document.getElementById('rpVolUnit').value; return u==='L'?v*1000:u==='uL'?v/1000:v; }
+function rpConcCanon(value,unit){ var u=(unit||'').trim().toLowerCase().replace(/[µμ]/g,'u'); var mv={'mg/ml':1,'ug/ml':0.001,'g/ml':1000,'ng/ml':1e-6,'g/l':1,'mg/l':0.001,'ug/l':1e-6,'ug/ul':1,'mg/ul':1000,'ng/ul':0.001}; var mo={'m':1000,'mm':1,'um':0.001,'nm':1e-6,'pm':1e-9}; var ac={'u/ml':1,'units/ml':1,'u/ul':1000,'units/ul':1000}; if(mv[u]!=null) return {fam:'massvol',val:value*mv[u]}; if(mo[u]!=null) return {fam:'molar',val:value*mo[u]}; if(u==='x'||u==='fold') return {fam:'fold',val:value}; if(u.indexOf('%')>=0) return {fam:'pct',val:value,sub:/w\/v/.test(u)?'wv':/v\/v/.test(u)?'vv':/w\/w/.test(u)?'ww':''}; if(ac[u]!=null) return {fam:'act',val:value*ac[u]}; return null; }
+// C1V1 is a RATIO, so two byte-identical unit strings need no unit table at
+// all — "0.5 mM each" from "10 mM each" is a 1:20 dilution whatever "each"
+// means. This is what lets shipped enzyme lines (U/µL) compute and be edited.
+function rpStockPair(s,v){
+  var sc=rpConcCanon(s.stockConc,s.stockUnit), fc=rpConcCanon(v!=null?v:s.finalConc,s.finalUnit);
+  if(sc&&fc&&sc.fam===fc.fam){
+    // % subtypes are NOT interconvertible without a density: 10% w/v into
+    // "% v/v" is not a 1:x dilution. Only block when BOTH sides are explicit.
+    if(sc.fam==='pct'&&sc.sub&&fc.sub&&sc.sub!==fc.sub) return null;
+    return {sc:sc,fc:fc};
+  }
+  var a=String(s.stockUnit||'').trim().toLowerCase().replace(/[µμ]/g,'u');
+  var b=String(s.finalUnit||'').trim().toLowerCase().replace(/[µμ]/g,'u');
+  if(a&&a===b) return {sc:{fam:'same',val:s.stockConc},fc:{fam:'same',val:(v!=null?v:s.finalConc)}};
+  return null;
+}
 function rpNum(n){ if(n==null||isNaN(n)) return '—'; return SCI.fmt(n,4); }
 function rpMass(g){ if(g>=1) return rpNum(g)+' g'; if(g>=0.001) return rpNum(g*1000)+' mg'; return rpNum(g*1e6)+' µg'; }
 function rpVol(mL){ if(mL>=1000) return rpNum(mL/1000)+' L'; if(mL>=1) return rpNum(mL)+' mL'; return rpNum(mL*1000)+' µL'; }
-function rpComponentAmount(c,volMl){ var volL=volMl/1000; if(c.gramsPerLiter!=null) return {kind:'mass',grams:c.gramsPerLiter*volL,detail:c.gramsPerLiter+' g/L'}; if(c.molarity_M!=null&&c.mw_gmol!=null) return {kind:'mass',grams:c.molarity_M*c.mw_gmol*volL,detail:rpNum(c.molarity_M)+' M · MW '+rpNum(c.mw_gmol)+(c.form?' · '+c.form:'')}; if(c.percent){ if((c.percent.type||'w/v').toLowerCase()==='v/v') return {kind:'vol',mL:(c.percent.value/100)*volMl,detail:c.percent.value+'% v/v'}; return {kind:'mass',grams:(c.percent.value/100)*volMl,detail:c.percent.value+'% w/v'}; } if(c.volumeFraction) return {kind:'vol',mL:(c.volumeFraction.value/100)*volMl,detail:c.volumeFraction.value+'% v/v'}; if(c.fromStock){ var s=c.fromStock; var sc=rpConcCanon(s.stockConc,s.stockUnit), fc=rpConcCanon(s.finalConc,s.finalUnit); if(sc&&fc&&sc.fam===fc.fam&&sc.val>0){ return {kind:'vol',mL:(fc.val*volMl)/sc.val,detail:'from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock → '+rpNum(s.finalConc)+' '+s.finalUnit}; } return {kind:'note',text:'to '+rpNum(s.finalConc)+' '+s.finalUnit+' from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock'}; } return {kind:'note',text:c.note||'(see notes)'}; }
+function rpComponentAmount(c,volMl){ var volL=volMl/1000; if(c.gramsPerLiter!=null) return {kind:'mass',grams:c.gramsPerLiter*volL,detail:c.gramsPerLiter+' g/L'}; if(c.molarity_M!=null&&c.mw_gmol!=null) return {kind:'mass',grams:c.molarity_M*c.mw_gmol*volL,detail:rpNum(c.molarity_M)+' M · MW '+rpNum(c.mw_gmol)+(c.form?' · '+c.form:'')}; if(c.percent){ if((c.percent.type||'w/v').toLowerCase()==='v/v') return {kind:'vol',mL:(c.percent.value/100)*volMl,detail:c.percent.value+'% v/v'}; return {kind:'mass',grams:(c.percent.value/100)*volMl,detail:c.percent.value+'% w/v'}; } if(c.volumeFraction) return {kind:'vol',mL:(c.volumeFraction.value/100)*volMl,detail:c.volumeFraction.value+'% v/v'}; if(c.fromStock){ var s=c.fromStock; var pr=rpStockPair(s); if(pr&&pr.sc.val>0){ return {kind:'vol',mL:(pr.fc.val*volMl)/pr.sc.val,detail:'from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock → '+rpNum(s.finalConc)+' '+s.finalUnit}; } return {kind:'note',text:'to '+rpNum(s.finalConc)+' '+s.finalUnit+' from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock'}; } return {kind:'note',text:c.note||'(see notes)'}; }
 function rpAmountStr(a){ return a.kind==='mass'?rpMass(a.grams):a.kind==='vol'?rpVol(a.mL):'—'; }
-function rpCompute(){ var r=rpAllRecipes.find(function(x){return x.id===rpSelectedId;}); var el=document.getElementById('rpSheet'); if(!r){ el.innerHTML='<div class="rp-empty">Pick a reagent from the library to see exactly what to weigh and pipette for your volume.</div>'; return; } var volMl=rpVolumeMl(); var lines=[]; var rows=(r.components||[]).map(function(c){ var a=rpComponentAmount(c,volMl); var amtTxt = a.kind==='note'?a.text:rpAmountStr(a); lines.push('  '+c.name+': '+amtTxt); var amt=a.kind==='note'?'<span class="rp-note-amt">'+escapeHtml(a.text)+'</span>':'<strong>'+escapeHtml(rpAmountStr(a))+'</strong>'; var SEP='<span class="rp-sep"> — </span>'; var det=a.detail?SEP+'<div class="rp-cdetail">'+escapeHtml(a.detail)+'</div>':''; var note=c.note?SEP+'<div class="rp-cnote">'+escapeHtml(c.note)+'</div>':''; var haz=c.hazard?SEP+'<div class="rp-chaz">⚠ '+escapeHtml(c.hazard)+'</div>':''; return '<tr><td class="rp-cname">'+escapeHtml(c.name)+det+note+haz+'</td><td class="rp-camt">'+amt+'</td></tr>'; }).join('');
+/* ── Edit-mode chrome ──────────────────────────────────────────────────
+   Three HTML builders kept out of rpCompute so the render stays readable.
+   Two of them are only ever called when rpEditMode is on, and the change
+   banner/tag/meta-row are all gated on rpWorkDirty(), so an untouched sheet
+   renders exactly the bytes it rendered before this feature existed — apart
+   from the one toolbar that has to be there for the feature to be findable. */
+function rpSheetToolsHtml(dirty){
+  var t='<button class="btn" onclick="rpToggleEdit()" title="Change a component’s concentration, or add and remove components">'+
+        (rpEditMode?'Done adjusting':'✎ Adjust amounts')+'</button>';
+  if(dirty) t+='<button class="btn" onclick="rpResetWork()" title="Throw these adjustments away and go back to the library recipe">↺ Reset to library</button>'+
+               '<button class="btn ac" onclick="rpSaveWorkModal()" title="Keep these amounts as a recipe of your own">💾 Save as my version</button>';
+  return '<div class="rp-sheettools rp-noprint">'+t+'</div>';
+}
+/* The editor for one component, rendered INSIDE the name cell so the sheet
+   stays two columns wide. Handlers carry the array INDEX only — never a name —
+   so nothing the user typed is ever spliced into an inline handler string. */
+function rpEditCellHtml(c,ci){
+  var nm=escapeHtml(c.name||'component');
+  var rm='<button class="rp-xbtn rp-noprint" aria-label="Remove '+nm+'" title="Remove '+nm+'" onclick="rpEditRemove('+ci+')"></button>';
+  var lab=rpUnitLabel(c);
+  if(lab==null) return '<span class="rp-edit rp-einwrap"><span class="rp-nonum" title="This line is prose — a titrant or a cross-reference — so it has no numeric amount to adjust.">—</span>'+rm+'</span>';
+  // Enter must commit: these inputs sit in no <form>, so Chrome fires no
+  // change on Enter — blur() forces it, and blur is also what commits on Tab.
+  return '<span class="rp-edit rp-einwrap"><input type="text" inputmode="decimal" class="rp-ein" id="rpEd'+ci+'" data-cn="'+nm+'" value="'+
+    escapeHtml(String(rpEditValue(c)))+'" onchange="rpEditConc('+ci+',this.value)" onkeydown="if(event.key===\'Enter\'||event.keyCode===13)this.blur()" aria-label="'+nm+' concentration ('+escapeHtml(lab)+')">'+
+    '<span class="rp-eunit">'+escapeHtml(lab)+'</span>'+rm+'</span>';
+}
+function rpAddRowHtml(){
+  return '<tr class="rp-edit"><td colspan="2" class="rp-addrow">'+rpCompRowHtml()+
+    '<button class="btn" onclick="rpEditAdd()" title="Add this component to the working copy">＋ Add component</button></td></tr>';
+}
+/* A committed-but-unrendered edit must never survive a render. If rpCompute
+   runs while a concentration input holds an uncommitted value (the natural
+   trigger: #rpVolume's oninput fires mid-adjustment), the HTML would be built
+   from the pre-edit model; tearing the focused input out of the DOM then fires
+   its change into a nested render whose output the OUTER innerHTML assignment
+   overwrites — last writer wins, and it is the stale one. So: flush the pending
+   value into the model FIRST, and make the teardown-fired change a no-op. */
+var rpRenderBusy=false;
+function rpFlushPendingEdit(){
+  var ae=document.activeElement;
+  if(!ae||!ae.id||ae.id.indexOf('rpEd')!==0)return;
+  if(!ae.closest||!ae.closest('#rpSheet'))return;
+  var ci=parseInt(ae.id.slice(4),10); if(!isFinite(ci))return;
+  var r=rpCurrentRecipe(); var c=r&&r.components&&r.components[ci]; if(!c)return;
+  // The input remembers WHICH component it was rendered for. If the model
+  // shifted under it (a removal, a recipe switch) the index alone would write
+  // the pending value into whatever now occupies that slot.
+  var cn=ae.getAttribute&&ae.getAttribute('data-cn');
+  if(cn!=null&&cn!==String(c.name||''))return;
+  var cur=rpEditValue(c);
+  if(cur==null||String(ae.value).trim()===String(cur))return;   // nothing pending
+  ae.onchange=null;                              // the teardown must not re-fire this edit
+  rpEditApply(ci,ae.value);
+}
+function rpCompute(){ var r=rpCurrentRecipe(); var el=document.getElementById('rpSheet'); if(!r){ el.innerHTML='<div class="rp-empty">Pick a reagent from the library to see exactly what to weigh and pipette for your volume.</div>'; return; } if(!rpRenderBusy) rpFlushPendingEdit();
+  // Re-resolve AFTER the flush: committing a first-ever edit just created the
+  // working copy, and rendering the pre-flush recipe drew library rows under a
+  // working-copy banner — the exact split-brain the flush exists to prevent.
+  r=rpCurrentRecipe();
+  rpRenderBusy=true; try{ rpComputeInner(r); } finally { rpRenderBusy=false; } }
+function rpComputeInner(r){ var el=document.getElementById('rpSheet'); var volMl=rpVolumeMl();
+  // Imports and hand-edited storage can deliver components that are not an
+  // array of objects; throwing mid-render left the PREVIOUS recipe's sheet on
+  // screen under the NEW selection — a wrong-recipe bench sheet. Bad entries
+  // become inert placeholders rather than being filtered, so the row indexes
+  // the edit handlers carry still line up with the working copy's array.
+  var _comps=(Array.isArray(r.components)?r.components:[]).map(function(c){
+    return (c&&typeof c==='object')?c:{name:'(invalid component)',note:'This entry is malformed — remove it or re-import the recipe.'};
+  });
+  // "Dirty" is a property of THIS recipe's working copy. rpWork can be a
+  // leftover from another recipe (rpSaveCustom jumps rpSelectedId without
+  // going through rpSelect), and branding an unrelated sheet "(adjusted)"
+  // with another recipe's banner was a real, reachable bug.
+  var dirty=!!(rpWork&&rpWork.id===r.id&&rpWorkDirty()); var sumArr=dirty?rpChangeSummary(rpWork):[]; var sum=sumArr.join('; '); var lines=[]; var rows=_comps.map(function(c,ci){ var a=rpComponentAmount(c,volMl); var amtTxt = a.kind==='note'?a.text:rpAmountStr(a); lines.push('  '+c.name+': '+amtTxt); var amt=a.kind==='note'?'<span class="rp-note-amt">'+escapeHtml(a.text)+'</span>':'<strong>'+escapeHtml(rpAmountStr(a))+'</strong>'; var SEP='<span class="rp-sep"> — </span>'; var dtxt=(a.detail||'')+((c._was&&!c._added)?' · was '+c._was.v+' '+c._was.label:''); var det=dtxt?SEP+'<div class="rp-cdetail">'+escapeHtml(dtxt)+'</div>':''; var ntxt=c.note?((c._was&&!c._added)?'Library note (for '+c._was.v+' '+c._was.label+'): '+c.note:c.note):''; var note=ntxt?SEP+'<div class="rp-cnote">'+escapeHtml(ntxt)+'</div>':''; var haz=c.hazard?SEP+'<div class="rp-chaz">⚠ '+escapeHtml(c.hazard)+'</div>':''; var ed=rpEditMode?rpEditCellHtml(c,ci):''; return '<tr><td class="rp-cname">'+escapeHtml(c.name)+det+ed+note+haz+'</td><td class="rp-camt">'+amt+'</td></tr>'; }).join('');
   var meta=[]; function m(k,v){ if(v!=null&&v!=='') meta.push('<dt>'+k+'</dt><dd>'+escapeHtml(String(v))+'</dd>'); }
+  if(dirty) m('Adjusted', sum);
   m('Bring to volume with', r.solvent); m('Final pH', r.finalPH); m('Adjust pH with', r.adjustPHWith); m('Sterilize', r.sterilization); m('Storage', r.storage); m('Shelf life', r.shelfLife); if(r.hazards) meta.push('<dt style="color:var(--danger,#c0392b)">Hazards</dt><dd style="color:var(--danger,#c0392b)">'+escapeHtml(r.hazards)+'</dd>');
   var notes=(r.notes&&r.notes.length)?'<div class="rp-notes"><strong>Notes</strong><ul>'+r.notes.map(function(n){return '<li>'+escapeHtml(n)+'</li>';}).join('')+'</ul></div>':'';
-  var src=(r.sources&&r.sources.length)?'<div class="rp-src">Sources: '+r.sources.map(function(s){ return s.url?'<a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">'+escapeHtml(s.title||s.url)+'</a>'+(s.license?' <em>('+escapeHtml(s.license)+')</em>':''):escapeHtml(s.title||''); }).join(' · ')+'</div>':'';
+  var src=(r.sources&&r.sources.length)?'<div class="rp-src">Sources: '+r.sources.map(function(s){ return (s.url&&/^https?:/i.test(String(s.url).trim()))?'<a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">'+escapeHtml(s.title||s.url)+'</a>'+(s.license?' <em>('+escapeHtml(s.license)+')</em>':''):escapeHtml(s.title||s.url||''); }).join(' · ')+'</div>':'';
   var unc=r.uncertain?'<div class="rp-chaz" style="margin:6px 0 0">⚠ Marked uncertain — verify against your own protocol before use.</div>':'';
   var gap=r.openSourceGap?'<div class="rp-cnote" style="margin-top:4px">Note: no open-source citation yet for this recipe.</div>':'';
-  el.innerHTML='<h2 class="rp-title">'+escapeHtml(r.name)+'</h2>'+(r.aka&&r.aka.length?'<div class="rp-sub">a.k.a. '+escapeHtml(r.aka.join(', '))+'</div>':'')+(r.summary?'<div class="rp-sub">'+escapeHtml(r.summary)+'</div>':'')+'<div class="rp-vol-badge">For '+rpVol(volMl)+'</div>'+unc+'<table class="rp-tbl"><tbody>'+rows+'</tbody></table><dl class="rp-meta">'+meta.join('')+'</dl>'+notes+gap+src;
-  rpLastText=r.name+' — for '+rpVol(volMl)+'\n'+lines.join('\n')+'\nBring to volume with '+(r.solvent||'')+(r.finalPH!=null?'\npH '+r.finalPH:'')+(r.sterilization?'\nSterilize: '+r.sterilization:'');
+  var banner=dirty?'<div class="rp-modbanner">'+escapeHtml('Adjusted from the library recipe · '+sumArr.length+' change'+(sumArr.length===1?'':'s')+': '+sum)+'</div>':'';
+  el.innerHTML='<h2 class="rp-title">'+escapeHtml(r.name)+(dirty?' <span class="rp-modtag">(adjusted)</span>':'')+'</h2>'+(r.aka&&r.aka.length?'<div class="rp-sub">a.k.a. '+escapeHtml(r.aka.join(', '))+'</div>':'')+(r.summary?'<div class="rp-sub">'+escapeHtml(r.summary)+'</div>':'')+banner+'<div class="rp-vol-badge">For '+rpVol(volMl)+'</div>'+rpSheetToolsHtml(dirty)+unc+'<table class="rp-tbl"><tbody>'+rows+(rpEditMode?rpAddRowHtml():'')+'</tbody></table><dl class="rp-meta">'+meta.join('')+'</dl>'+notes+gap+src;
+  rpLastText=r.name+' — for '+rpVol(volMl)+(dirty?'\nAdjusted from library: '+sum:'')+'\n'+lines.join('\n')+'\nBring to volume with '+(r.solvent||'')+(r.finalPH!=null?'\npH '+r.finalPH:'')+(r.sterilization?'\nSterilize: '+r.sterilization:'');
 }
 function rpCopy(){ if(!rpLastText){ showToast('Pick a recipe first','warn'); return; } (navigator.clipboard?navigator.clipboard.writeText(rpLastText):Promise.reject()).then(function(){ showToast('Prep sheet copied'); }).catch(function(){ var ta=document.createElement('textarea'); ta.value=rpLastText; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy'); showToast('Prep sheet copied');}catch(e){showToast('Copy failed','warn');} ta.remove(); }); }
-function rpPrint(){ var sheet=document.getElementById('rpSheet'); if(!rpSelectedId){ showToast('Pick a recipe first','warn'); return; } var w=window.open('','_blank'); if(!w){ showToast('Pop-up blocked','warn'); return; } w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Prep sheet</title><style>body{font-family:Georgia,serif;max-width:640px;margin:24px auto;padding:0 16px;color:#1a1a1a;}h2{margin:0 0 6px;}table{width:100%;border-collapse:collapse;margin:10px 0;}td{padding:6px 4px;border-bottom:1px solid #ddd;vertical-align:top;}.rp-camt{text-align:right;white-space:nowrap;}dl{display:grid;grid-template-columns:130px 1fr;gap:3px 10px;font-size:13px;}dt{font-weight:700;}dd{margin:0;}.rp-cdetail,.rp-cnote,.rp-src{font-size:11px;color:#666;}.rp-chaz{color:#b00;font-size:11px;}small{color:#888;}</style></head><body>'+sheet.innerHTML+'<p><small>Generated by Dilution Designer · verify against your lab protocol.</small></p></body></html>'); w.document.close(); w.focus(); setTimeout(function(){ w.print(); }, 250); }
+function rpPrint(){ var sheet=document.getElementById('rpSheet'); if(!rpSelectedId){ showToast('Pick a recipe first','warn'); return; } var w=window.open('','_blank'); if(!w){ showToast('Pop-up blocked','warn'); return; } w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Prep sheet</title><style>body{font-family:Georgia,serif;max-width:640px;margin:24px auto;padding:0 16px;color:#1a1a1a;}h2{margin:0 0 6px;}table{width:100%;border-collapse:collapse;margin:10px 0;}td{padding:6px 4px;border-bottom:1px solid #ddd;vertical-align:top;}.rp-camt{text-align:right;white-space:nowrap;}dl{display:grid;grid-template-columns:130px 1fr;gap:3px 10px;font-size:13px;}dt{font-weight:700;}dd{margin:0;}.rp-cdetail,.rp-cnote,.rp-src{font-size:11px;color:#666;}.rp-chaz{color:#b00;font-size:11px;}small{color:#888;}.rp-noprint,.rp-edit{display:none!important}</style></head><body>'+sheet.innerHTML+'<p><small>Generated by Dilution Designer · verify against your lab protocol.</small></p></body></html>'); w.document.close(); w.focus(); setTimeout(function(){ w.print(); }, 250); }
 function rpExportLibrary(){ var data=JSON.stringify({version:(rpLib&&rpLib.version)||'1.0',categories:(rpLib?rpLib.categories:[])},null,1); var blob=new Blob([data],{type:'application/json'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='reagent-library.json'; a.click(); setTimeout(function(){URL.revokeObjectURL(a.href);},1000); showToast('Library exported'); }
-function rpImportLibrary(ev){ var f=ev.target.files&&ev.target.files[0]; if(!f) return; var rd=new FileReader(); rd.onload=function(){ try{ var d=JSON.parse(rd.result); var recipes=[]; if(Array.isArray(d)) recipes=d; else if(d.categories) recipes=d.categories.reduce(function(a,c){return a.concat(c.recipes||[]);},[]); else if(d.recipes) recipes=d.recipes; if(!recipes.length) throw new Error('no recipes found'); var cust=rpCustom(); var byId={}; cust.forEach(function(r){byId[r.id]=r;}); recipes.forEach(function(r){ if(r&&r.id&&r.name) byId[r.id]=r; }); var merged=Object.keys(byId).map(function(k){return byId[k];}); lsSet('dd_reagent_custom',JSON.stringify(merged)); rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes'; showToast('Imported '+recipes.length+' recipe(s)'); }catch(e){ showToast('Import failed: '+e.message,'warn'); } ev.target.value=''; }; rd.readAsText(f); }
+function rpImportLibrary(ev){ var f=ev.target.files&&ev.target.files[0]; if(!f) return; var rd=new FileReader(); rd.onload=function(){ try{ var d=JSON.parse(rd.result); var recipes=[]; if(Array.isArray(d)) recipes=d; else if(d.categories) recipes=(Array.isArray(d.categories)?d.categories:[]).reduce(function(a,c){return a.concat((c&&c.recipes)||[]);},[]); else if(d.recipes) recipes=d.recipes; if(!Array.isArray(recipes)||!recipes.length) throw new Error('no recipes found in that file');
+  // Skip entries that are byte-identical to a shipped library recipe: a user
+  // re-importing an exported library would otherwise clone all 243 recipes
+  // into localStorage as shadowing duplicates. Report REAL counts — the old
+  // toast said "Imported N" for records it silently dropped or never wrote.
+  var shipped={}; try{ (rpLib&&rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ if(c.key!=='custom'&&r&&r.id) shipped[r.id]=JSON.stringify(r); }); }); }catch(e){}
+  var cust=rpCustom(); var byId={}; cust.forEach(function(r){byId[r.id]=r;});
+  var kept=0, same=0, invalid=0;
+  recipes.forEach(function(r){
+    if(!(r&&typeof r==='object'&&r.id&&r.name)){ invalid++; return; }
+    if(shipped[r.id]&&shipped[r.id]===JSON.stringify(r)){ same++; return; }
+    if(!Array.isArray(r.components)) r.components=[];
+    byId[r.id]=r; kept++;
+  });
+  if(!kept){ showToast(same?('Nothing new — all '+same+' recipes are already in the library unchanged'):'No usable recipes in that file (each needs an id and a name)','warn',6000); ev.target.value=''; return; }
+  var merged=Object.keys(byId).map(function(k){return byId[k];});
+  if(!lsSet('dd_reagent_custom',JSON.stringify(merged))){ showToast('Couldn’t import — browser storage is full or unavailable.','warn',6000); ev.target.value=''; return; }
+  rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes';
+  var bits=['✓ imported '+kept+' recipe'+(kept===1?'':'s')];
+  if(same) bits.push(same+' identical to the library, skipped');
+  if(invalid) bits.push(invalid+' unusable, skipped');
+  showToast(bits.join(' · '),(same||invalid)?'warn':'green',5000);
+ }catch(e){ showToast('Import failed: '+e.message,'warn'); } ev.target.value=''; }; rd.readAsText(f); }
 function rpAddCustom(){
   var bg=document.createElement('div'); bg.className='rp-modal-bg'; bg.onclick=function(e){ if(e.target===bg) bg.remove(); };
   bg.innerHTML='<div class="rp-modal"><h2 style="margin:0 0 4px;font-family:var(--serif,Georgia,serif);">Add a recipe</h2><p style="font-size:12px;color:var(--text3,#8a8172);margin:0 0 12px;">Saved in this browser. Each component: pick a type and fill the amount.</p>'+
@@ -5467,10 +5807,212 @@ function rpAddCustom(){
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;"><button class="btn" onclick="this.closest(\'.rp-modal-bg\').remove()">Cancel</button><button class="btn ac" onclick="rpSaveCustom()">Save recipe</button></div></div>';
   document.body.appendChild(bg); rpAddCompRow(); rpAddCompRow();
 }
-function rpAddCompRow(){ var box=document.getElementById('rcRows'); if(!box) return; var row=document.createElement('div'); row.className='rc-row'; row.style.cssText='display:grid;grid-template-columns:1fr 110px 1fr 24px;gap:5px;margin-bottom:5px;align-items:center;'; row.innerHTML='<input class="rc-cn" placeholder="component"><select class="rc-ct"><option value="gL">g/L</option><option value="M">molarity+MW</option><option value="pctwv">% w/v</option><option value="pctvv">% v/v</option><option value="stock">from stock</option></select><input class="rc-cv" placeholder="value"><button class="btn" style="padding:2px 6px;" onclick="this.parentNode.remove()" title="remove">✕</button>'; box.appendChild(row); }
-function rpSaveCustom(){ var name=(document.getElementById('rcName').value||'').trim(); if(!name){ showToast('Name is required','warn'); return; } var comps=[]; document.querySelectorAll('#rcRows .rc-row').forEach(function(row){ var cn=(row.querySelector('.rc-cn').value||'').trim(); var ct=row.querySelector('.rc-ct').value; var cv=(row.querySelector('.rc-cv').value||'').trim(); if(!cn) return; if(ct==='gL'){ comps.push({name:cn,gramsPerLiter:parseFloat(cv)||0}); } else if(ct==='M'){ var p=cv.split(/[,;\s]+/).filter(Boolean); comps.push({name:cn,molarity_M:parseFloat(p[0])||0,mw_gmol:parseFloat(p[1])||0}); } else if(ct==='pctwv'){ comps.push({name:cn,percent:{value:parseFloat(cv)||0,type:'w/v'}}); } else if(ct==='pctvv'){ comps.push({name:cn,percent:{value:parseFloat(cv)||0,type:'v/v'}}); } else if(ct==='stock'){ var q=cv.split(/[,;]+/); comps.push({name:cn,note:'from stock: '+cv,fromStock:null}); if(!cv) comps[comps.length-1].note='from stock (add details)'; } }); if(!comps.length){ showToast('Add at least one component','warn'); return; } var rec={ id:'custom-'+Date.now(), name:name, summary:(document.getElementById('rcSum').value||'').trim()||'Custom recipe', components:comps, solvent:(document.getElementById('rcSolvent').value||'').trim(), sterilization:(document.getElementById('rcSteril').value||'').trim(), notes:['Custom recipe added by you.'], sources:[{title:'My lab protocol',license:'custom'}] }; var cust=rpCustom(); cust.push(rec);
- if(!lsSet('dd_reagent_custom',JSON.stringify(cust))){ showToast('Couldn’t save the recipe — browser storage is full or unavailable.','warn',6000); return; }
- rpMergeCustom(); rpFlatten(); rpActiveCat='custom'; rpSelectedId=rec.id; rpRenderCats(); rpRenderList(); rpCompute(); var bg=document.querySelector('.rp-modal-bg'); if(bg) bg.remove(); showToast('Recipe saved'); }
+/* ── Component row: one markup source, one reader ──────────────────────
+   The value area is type-dependent, because "molarity+MW" and "from stock"
+   are not one number. The old single field packed them into one string and
+   the stock branch then threw the parse away and wrote fromStock:null — a
+   "from stock" component that could never compute a volume. These two
+   functions are the only place the row's shape is described, so the Add-recipe
+   modal and the adjust-a-recipe flow cannot drift apart. */
+function rpCompRowVals(t){
+  var st=' style="min-width:0;flex:1 1 46px;"';
+  if(t==='M') return '<input class="rc-cv" placeholder="molarity (M)" title="Molarity in M" aria-label="Molarity in M"'+st+'>'+
+                     '<input class="rc-cv2" placeholder="MW g/mol" title="Molecular weight in g/mol" aria-label="Molecular weight in g/mol"'+st+'>';
+  if(t==='stock') return '<input class="rc-sc" placeholder="2" title="Stock concentration" aria-label="Stock concentration"'+st+'>'+
+                         '<input class="rc-su" placeholder="M" title="Stock unit (M, mM, mg/mL, %, X…)" aria-label="Stock unit"'+st+'>'+
+                         '<input class="rc-fc" placeholder="10" title="Final concentration" aria-label="Final concentration"'+st+'>'+
+                         '<input class="rc-fu" placeholder="mM" title="Final unit (M, mM, mg/mL, %, X…)" aria-label="Final unit"'+st+'>';
+  return '<input class="rc-cv" placeholder="value" aria-label="Amount value"'+st+'>';
+}
+function rpCompRowHtml(){
+  return '<div class="rc-row" style="display:grid;grid-template-columns:1fr 110px 1.5fr 24px;gap:5px;margin-bottom:5px;align-items:center;">'+
+    '<input class="rc-cn" placeholder="component" aria-label="Component name">'+
+    '<select class="rc-ct" onchange="rpCompRowType(this)" aria-label="Component type">'+
+      '<option value="gL">g/L</option><option value="M">molarity+MW</option><option value="pctwv">% w/v</option>'+
+      '<option value="pctvv">% v/v</option><option value="stock">from stock</option></select>'+
+    '<span class="rc-cvals" style="display:flex;gap:4px;min-width:0;flex-wrap:wrap;">'+rpCompRowVals('gL')+'</span>'+
+    '<button class="btn rc-x" style="padding:2px 6px;" onclick="this.closest(\'.rc-row\').remove()" title="remove">✕</button>'+
+  '</div>';
+}
+function rpCompRowType(sel){ var row=sel&&sel.closest('.rc-row'); if(!row) return; var box=row.querySelector('.rc-cvals'); if(box) box.innerHTML=rpCompRowVals(sel.value); }
+function rpCompRowRead(row){
+  if(!row) return {err:'Missing component row'};
+  function val(sel){ var el=row.querySelector(sel); return el?String(el.value==null?'':el.value).trim():''; }
+  var cn=val('.rc-cn');
+  if(!cn) return {err:'Every component needs a name'};
+  var ctEl=row.querySelector('.rc-ct'), ct=ctEl?ctEl.value:'gL';
+  if(ct==='gL'){
+    var g=SCI.parse(val('.rc-cv'));
+    if(!isFinite(g)||g<=0) return {err:cn+': enter a g/L amount greater than zero'};
+    return {name:cn, gramsPerLiter:g};
+  }
+  if(ct==='M'){
+    var m=SCI.parse(val('.rc-cv')), mw=SCI.parse(val('.rc-cv2'));
+    if(!isFinite(m)||m<=0)   return {err:cn+': enter a molarity greater than zero'};
+    if(!isFinite(mw)||mw<=0) return {err:cn+': enter a molecular weight (g/mol) — molarity alone cannot be weighed out'};
+    return {name:cn, molarity_M:m, mw_gmol:mw};
+  }
+  if(ct==='pctwv'||ct==='pctvv'){
+    var p=SCI.parse(val('.rc-cv'));
+    if(!isFinite(p)||p<=0) return {err:cn+': enter a percentage greater than zero'};
+    if(ct==='pctvv'&&p>100) return {err:cn+': a volume fraction cannot exceed 100%'};
+    return {name:cn, percent:{value:p, type:(ct==='pctwv'?'w/v':'v/v')}};
+  }
+  if(ct==='stock'){
+    var sc=SCI.parse(val('.rc-sc')), su=val('.rc-su'), fc=SCI.parse(val('.rc-fc')), fu=val('.rc-fu');
+    if(!isFinite(sc)||sc<=0) return {err:cn+': enter the stock concentration'};
+    if(!su)                  return {err:cn+': the stock needs a unit (M, mM, mg/mL, %, X…)'};
+    if(!isFinite(fc)||fc<=0) return {err:cn+': enter the final concentration'};
+    if(!fu)                  return {err:cn+': the final concentration needs a unit'};
+    var a=rpConcCanon(sc,su), b=rpConcCanon(fc,fu);
+    if(!a) return {err:cn+': “'+su+'” is not a unit this app knows'};
+    if(!b) return {err:cn+': “'+fu+'” is not a unit this app knows'};
+    if(a.fam!==b.fam) return {err:cn+': “'+su+'” and “'+fu+'” are different kinds of concentration — C1V1 cannot cross them'};
+    if(b.val>a.val)   return {err:cn+': the final concentration is stronger than the stock'};
+    return {name:cn, fromStock:{stockConc:sc, stockUnit:su, finalConc:fc, finalUnit:fu}};
+  }
+  return {err:cn+': unknown component type'};
+}
+function rpAddCompRow(){ var box=document.getElementById('rcRows'); if(!box) return; var w=document.createElement('div'); w.innerHTML=rpCompRowHtml(); var row=w.firstElementChild; if(row) box.appendChild(row); }
+function rpSaveCustom(){
+  var name=(document.getElementById('rcName').value||'').trim();
+  if(!name){ showToast('Name is required','warn'); return; }
+  var comps=[], err=null;
+  document.querySelectorAll('#rcRows .rc-row').forEach(function(row){
+    if(err) return;
+    var nm=row.querySelector('.rc-cn');
+    if(!nm||!String(nm.value||'').trim()) return;      // an untouched blank row is not an error, as before
+    var c=rpCompRowRead(row);
+    if(c.err){ err=c.err; return; }
+    comps.push(c);
+  });
+  if(err){ showToast(err,'warn',6000); return; }
+  if(!comps.length){ showToast('Add at least one component','warn'); return; }
+  var rec={ id:'custom-'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), name:name, summary:(document.getElementById('rcSum').value||'').trim()||'Custom recipe', components:comps, solvent:(document.getElementById('rcSolvent').value||'').trim(), sterilization:(document.getElementById('rcSteril').value||'').trim(), notes:['Custom recipe added by you.'], sources:[{title:'My lab protocol',license:'custom'}] };
+  var cust=rpCustom(); cust.push(rec);
+  if(!lsSet('dd_reagent_custom',JSON.stringify(cust))){ showToast('Couldn’t save the recipe — browser storage is full or unavailable.','warn',6000); return; }
+  // This jumps the selection without rpSelect, so its dirty-work discard must
+  // happen here too — otherwise a leftover working copy haunts the new recipe.
+  if(rpWork&&rpWorkDirty()) showToast('Adjustments to '+(rpWork._baseName||'the previous recipe')+' discarded','',3600);
+  rpWork=null; rpEditMode=false;
+  rpMergeCustom(); rpFlatten(); rpActiveCat='custom'; rpSelectedId=rec.id;
+  var _q0=document.getElementById('rpSearch'); if(_q0) _q0.value='';   // a stale query would filter the new recipe out of its own list
+  rpRenderCats(); rpRenderList(); rpCompute(); var bg=document.querySelector('.rp-modal-bg'); if(bg) bg.remove(); showToast('Recipe saved'); }
+/* Save the adjusted working copy as a recipe of your own. The library recipe is
+   never touched — this is a new record with a new id, and the note records the
+   arithmetic distance from the original so the bench copy can be audited. */
+function rpSaveWorkAsCustom(name){
+  if(!rpWork){ showToast('Nothing has been adjusted yet','warn'); return null; }
+  // The working copy is keyed to ONE recipe. If the selection has moved on
+  // (rpSaveCustom jumps rpSelectedId without rpSelect), saving would persist a
+  // recipe the user is no longer even looking at.
+  if(rpWork.id!==rpSelectedId){ showToast('These adjustments belong to '+(rpWork._baseName||'another recipe')+' — go back to it to save them','warn',5000); return null; }
+  if(!(rpWork.components&&rpWork.components.length)){ showToast('Add at least one component — an empty recipe cannot be prepared','warn'); return null; }
+  var base=rpWork._baseName||rpWork.name||'recipe';
+  // Annotate BEFORE stripping: a component note that says "15 g/L. Use 1.5%…"
+  // beside a component now at 2% would read as the recipe contradicting
+  // itself, forever, in storage. Work on a clone — rpWork keeps its _was.
+  var w=rpClone(rpWork);
+  (w.components||[]).forEach(function(c){
+    if(c._was&&c.note&&!c._added) c.note='(Library note, for '+c._was.v+' '+c._was.label+') '+c.note;
+  });
+  var rec=rpStripInternal(w);
+  rec.id='custom-'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  rec.name=(name&&String(name).trim())||(base+' (modified)');
+  var chg=rpChangeSummary(rpWork);
+  if(chg.length) rec.notes=(rec.notes||[]).concat(['Modified from library recipe "'+base+'": '+chg.join('; ')+'.']);
+  var cust=rpCustom(); cust.push(rec);
+  if(!lsSet('dd_reagent_custom',JSON.stringify(cust))){ showToast('Couldn’t save the recipe — browser storage is full or unavailable.','warn',6000); return null; }
+  rpMergeCustom(); rpFlatten();
+  rpActiveCat='custom'; rpSelectedId=rec.id; rpWork=null; rpEditMode=false;
+  // The search box still holds whatever query found the LIBRARY recipe, and the
+  // name you just chose usually does not match it — "LB Agar Bottom" does not
+  // contain "LB bottom agar 2%". Leaving it set drops you into My recipes with
+  // your own new recipe filtered out of it and the list reading empty.
+  var _q=document.getElementById('rpSearch'); if(_q) _q.value='';
+  rpRenderCats(); rpRenderList(); rpCompute();
+  showToast('Saved to My recipes as “'+rec.name+'”');
+  return rec.id;
+}
+
+/* ── Edit-mode lifecycle ───────────────────────────────────────────────
+   rpWork is created lazily by the first actual edit, not by entering edit
+   mode, so opening the editor and closing it again leaves nothing behind and
+   rpWorkDirty() stays false. */
+function rpToggleEdit(){ rpEditMode=!rpEditMode; rpCompute(); }
+function rpResetWork(){
+  // A still-focused input holds a value the user is throwing away. Neutralise
+  // it BEFORE the render, or rpFlushPendingEdit would commit it and quietly
+  // re-create the working copy the reset just destroyed.
+  var ae=document.activeElement;
+  if(ae&&ae.id&&ae.id.indexOf('rpEd')===0){ ae.onchange=null; try{ae.blur();}catch(e){} }
+  rpWork=null; rpEditMode=false; rpCompute(); showToast('Restored the library recipe'); }
+// Model-only: ensure the working copy, apply, toast a rejection. No render —
+// callers decide, so the flush path can commit without recursing into rpCompute.
+function rpEditApply(ci,raw){
+  rpWorkEnsure();
+  if(!rpWork||!rpWork.components||!rpWork.components[ci]) return {ok:false,err:'No such component'};
+  var res=rpApplyEdit(rpWork.components[ci],raw);
+  if(!res.ok) showToast(res.err,'warn',5000);
+  return res;
+}
+function rpEditConc(ci,raw){
+  var res=rpEditApply(ci,raw);
+  if(res&&!res.ok){
+    var bad=document.getElementById('rpEd'+ci);
+    if(bad&&rpWork&&rpWork.components&&rpWork.components[ci])
+      bad.value=String(rpEditValue(rpWork.components[ci]));   // or the flush re-rejects it: two toasts per keystroke
+  }
+  // A change event fired by a render's own DOM teardown must not start a
+  // second render inside the first — the model is already committed by the
+  // flush, and the outer render is being built from it.
+  if(rpRenderBusy) return;
+  rpCompute();
+  // rpCompute replaces the whole sheet, so the field the user was typing in no
+  // longer exists. Put the caret back on its replacement, or a rejected value
+  // would silently steal focus and the next keystroke would go nowhere.
+  var elx=document.getElementById('rpEd'+ci);
+  if(elx){ elx.focus(); elx.select&&elx.select(); }
+}
+function rpEditRemove(ci){
+  // Commit any pending typed value FIRST: its rpEd<i> index was minted before
+  // this splice, and flushing after the removal wrote the value into whatever
+  // component had shifted into that slot.
+  rpFlushPendingEdit();
+  rpWorkEnsure();
+  if(!rpWorkRemove(ci)){ showToast('That line could not be removed','warn'); return; }
+  rpCompute();
+}
+function rpEditAdd(){
+  rpFlushPendingEdit();
+  var row=document.querySelector('#rpSheet .rc-row');
+  if(!row){ showToast('No component row to read','warn'); return; }
+  var c=rpCompRowRead(row);
+  if(c.err){ showToast(c.err,'warn',6000); return; }
+  if(!rpWorkEnsure()){ showToast('Pick a recipe first','warn'); return; }
+  rpWorkAdd(c); rpCompute();
+}
+/* Saving asks for a name rather than assuming one, because "<base> (modified)"
+   collides with itself the second time you adjust the same recipe. */
+function rpSaveWorkModal(){
+  if(!(rpWork&&rpWork.id===rpSelectedId&&rpWorkDirty())){ showToast('Nothing has been adjusted on this recipe yet','warn'); return; }
+  var base=(rpWork&&(rpWork._baseName||rpWork.name))||'recipe';
+  var bg=document.createElement('div'); bg.className='rp-modal-bg'; bg.onclick=function(e){ if(e.target===bg) bg.remove(); };
+  bg.innerHTML='<div class="rp-modal" style="max-width:430px;"><h2 style="margin:0 0 4px;font-family:var(--serif,Georgia,serif);">Save as my version</h2>'+
+    '<p style="font-size:12px;color:var(--text3,#8a8172);margin:0 0 12px;">Saved in this browser under <strong>My recipes</strong>. The library recipe is left untouched.</p>'+
+    '<div class="f"><label>Name</label><input id="rpSaveName" value="'+escapeHtml(base+' (modified)')+'" aria-label="Name for your version"></div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;"><button class="btn" onclick="this.closest(\'.rp-modal-bg\').remove()">Cancel</button>'+
+    '<button class="btn ac" onclick="rpSaveWorkDo()">Save recipe</button></div></div>';
+  document.body.appendChild(bg);
+  var inp=document.getElementById('rpSaveName');
+  if(inp){ inp.focus(); inp.select&&inp.select(); inp.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); rpSaveWorkDo(); } }; }
+}
+function rpSaveWorkDo(){
+  var inp=document.getElementById('rpSaveName');
+  // rpSaveWorkAsCustom clears rpWork and re-renders; only close on success, so a
+  // storage-full failure leaves the modal (and the typed name) in place.
+  if(rpSaveWorkAsCustom(inp?inp.value:'')){ var bg=document.querySelector('.rp-modal-bg'); if(bg) bg.remove(); }
+}
 
 /* ══════════════════════════ DILUTION & MOLARITY CALCULATOR ══════════════════════════ */
 (function(){
@@ -6773,7 +7315,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       DD_KEYS.forEach(function(d){ if(_dup[d.k])_dupes.push(d.k); _dup[d.k]=1; });
       if(_dupes.length) fails.push('DD_KEYS has duplicate entries: '+_dupes.join(','));
       // Every key any module persists must be in DD_KEYS or it misses backups.
-      n++; var _known=['dd_state','dd_layouts','dd_titer','dd_lysates','dd_hosts','dd_notebook','dd_reagent_custom',
+      n++; var _known=['dd_state','dd_layouts','dd_titer','dd_lysates','dd_hosts','dd_notebook','dd_seq','dd_reagent_custom',
         'dd_gel','dd_gel_ladders','dd_phg','dd_mic_panel','dd_mic_dyes','dd_sci','dd_welcomed',
         'mbc_last','pr_last','mic_last'];
       var _missing=_known.filter(function(k){ return !DD_KEYS.some(function(d){return d.k===k;}); });
@@ -7344,6 +7886,410 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
         fails.push('stamp() did not attach provenance');
       n++; var _b2={type:'text',md:'x',src:'imported'}; NB._stamp([_b2],'plate');
       if(_b2.src!=='imported') fails.push('stamp() overwrote an existing src');
+    }
+    // ── Reagent Prep: adjustable concentrations. Every fixture below is an
+    // inline literal — the recipe library is fetched, and a file:// run never
+    // gets it, so a test that leaned on it would silently stop asserting.
+    if(typeof rpApplyEdit==='function'){
+      // Amount arithmetic the whole feature rests on, hand-computed.
+      // 2 % w/v = 2 g per 100 mL; 500 mL is five of those → 10 g.
+      n++; var _rpA=rpComponentAmount({name:'Agar',percent:{value:2,type:'w/v'}},500);
+      if(_rpA.kind!=='mass'||!_near(_rpA.grams,10,1e-9)) fails.push('2 % w/v agar in 500 mL = '+_rpA.grams+' g, want 10');
+      // Baseline it was adjusted from: 1.5 g/100 mL × 5 = 7.5 g.
+      n++; var _rpB=rpComponentAmount({name:'Agar',percent:{value:1.5,type:'w/v'}},500);
+      if(!_near(_rpB.grams,7.5,1e-9)) fails.push('1.5 % w/v agar in 500 mL = '+_rpB.grams+' g, want 7.5');
+      // 0.2 M × 58.44 g/mol × 0.25 L = 11.688 × 0.25 = 2.922 g.
+      n++; var _rpC=rpComponentAmount({name:'NaCl',molarity_M:0.2,mw_gmol:58.44},250);
+      if(!_near(_rpC.grams,2.922,1e-9)) fails.push('0.2 M NaCl in 250 mL = '+_rpC.grams+' g, want 2.922');
+      // C1V1: 0.5 X × 1000 mL / 50 X = 500/50 = 10 mL of stock.
+      n++; var _rpD=rpComponentAmount({name:'Buffer',fromStock:{stockConc:50,stockUnit:'X',finalConc:0.5,finalUnit:'X'}},1000);
+      if(_rpD.kind!=='vol'||!_near(_rpD.mL,10,1e-9)) fails.push('50X → 0.5X in 1 L = '+_rpD.mL+' mL, want 10');
+
+      // ── THE CLONE BOUNDARY. rpFlatten shallow-copies, so a library recipe's
+      // components array is shared; an edit that reached it would rewrite the
+      // shipped library and leak straight into rpExportLibrary.
+      var _rpBase={id:'t',components:[{name:'x',gramsPerLiter:5}]};
+      var _rpWk=rpClone(_rpBase);
+      var _rpEd=rpApplyEdit(_rpWk.components[0],'9');
+      n++; if(!_rpEd.ok||_rpBase.components[0].gramsPerLiter!==5||_rpBase.components===_rpWk.components)
+        fails.push('editing a cloned recipe reached the original (base now '+_rpBase.components[0].gramsPerLiter+' g/L)');
+      // 5 g/L × 1 L = 5 g on the original; 9 g/L × 1 L = 9 g on the copy.
+      n++; if(!_near(rpComponentAmount(_rpBase.components[0],1000).grams,5,1e-9)||
+              !_near(rpComponentAmount(_rpWk.components[0],1000).grams,9,1e-9))
+        fails.push('clone boundary: amounts disagree with the fields');
+
+      // Decimal comma must parse as 1.5, not 15 — and _was is written ONCE.
+      var _rpG={name:'Agar',gramsPerLiter:5};
+      n++; var _rpR1=rpApplyEdit(_rpG,'1,5');
+      if(!_rpR1.ok||!_near(_rpG.gramsPerLiter,1.5,1e-12)||!_rpG._was||_rpG._was.v!==5||_rpG._was.label!=='g/L')
+        fails.push('rpApplyEdit("1,5") gave '+_rpG.gramsPerLiter+' / _was '+JSON.stringify(_rpG._was)+', want 1.5 from 5 g/L');
+      n++; rpApplyEdit(_rpG,'2');
+      if(_rpG.gramsPerLiter!==2||!_rpG._was||_rpG._was.v!==5)
+        fails.push('a second edit overwrote the original snapshot (_was.v='+(_rpG._was&&_rpG._was.v)+', want 5)');
+
+      // Rejections leave the field exactly as it was, and never mint a _was.
+      var _rpJ={name:'Agar',gramsPerLiter:5};
+      n++; if(rpApplyEdit(_rpJ,'0').ok||_rpJ.gramsPerLiter!==5) fails.push('rpApplyEdit accepted 0');
+      n++; if(rpApplyEdit(_rpJ,'-1').ok||_rpJ.gramsPerLiter!==5) fails.push('rpApplyEdit accepted a negative amount');
+      n++; if(rpApplyEdit(_rpJ,'abc').ok||_rpJ.gramsPerLiter!==5||_rpJ._was)
+        fails.push('rpApplyEdit accepted junk, or a rejected edit still stamped _was');
+      // A prose line (titrant, cross-reference) has no number to adjust.
+      n++; if(rpApplyEdit({name:'HCl',note:'titrant'},'5').ok||rpUnitLabel({name:'HCl',note:'titrant'})!==null)
+        fails.push('a prose component was treated as editable');
+
+      // fromStock edits the FINAL only, and you cannot dilute upwards.
+      var _rpS={name:'Buffer',fromStock:{stockConc:50,stockUnit:'X',finalConc:1,finalUnit:'X'}};
+      n++; if(rpApplyEdit(_rpS,'100').ok||_rpS.fromStock.finalConc!==1)
+        fails.push('a 100X final was accepted from a 50X stock');
+      n++; var _rpS2=rpApplyEdit(_rpS,'50');                    // equality = use it neat
+      if(!_rpS2.ok||_rpS.fromStock.finalConc!==50||_rpS.fromStock.stockConc!==50||!_rpS._was||_rpS._was.v!==1)
+        fails.push('final == stock should be legal, and only finalConc may move');
+
+      // Working-copy add / remove bookkeeping.
+      var _rpSavedWork=rpWork;
+      try{
+        rpWork={id:'t',_baseName:'T',_removed:[],components:[
+          {name:'NaCl',molarity_M:0.1,mw_gmol:58.44},{name:'Agar',percent:{value:1.5,type:'w/v'}}]};
+        n++; var _rpRm=rpWorkRemove(0);
+        if(!_rpRm||rpWork.components.length!==1||rpWork.components[0].name!=='Agar'||
+           rpWork._removed.length!==1||rpWork._removed[0].name!=='NaCl'||rpWork._removed[0].was!=='0.1 M')
+          fails.push('rpWorkRemove logged '+JSON.stringify(rpWork._removed)+', want [{name:"NaCl",was:"0.1 M"}]');
+        n++; rpWorkAdd({name:'Glucose',gramsPerLiter:20});
+        var _rpAdded=rpWork.components[rpWork.components.length-1];
+        if(!_rpAdded._added||_rpAdded.name!=='Glucose'||_rpAdded.gramsPerLiter!==20)
+          fails.push('rpWorkAdd did not mark the component as added');
+        // 20 g/L × 0.5 L = 10 g.
+        n++; if(!_near(rpComponentAmount(_rpAdded,500).grams,10,1e-9))
+          fails.push('an added 20 g/L component in 500 mL = '+rpComponentAmount(_rpAdded,500).grams+' g, want 10');
+      } finally { rpWork=_rpSavedWork; }
+
+      // The provenance sentence is FROZEN — a saved recipe's note is this string.
+      n++; var _rpSum=rpChangeSummary({name:'LB agar',_baseName:'LB agar',
+        _removed:[{name:'NaCl',was:'0.1 M'}],
+        components:[{name:'Agar',percent:{value:2,type:'w/v'},_was:{v:1.5,label:'% w/v'}},
+                    {name:'Glucose',gramsPerLiter:20,_added:true}]}).join('; ');
+      if(_rpSum!=='Agar 1.5→2 % w/v; NaCl removed (was 0.1 M); Glucose added (20 g/L)')
+        fails.push('rpChangeSummary drifted: “'+_rpSum+'”');
+
+      // ── The component-row reader, driven through a DETACHED row so the test
+      // never depends on the Add-recipe modal being open.
+      if(typeof rpCompRowHtml==='function'&&typeof document!=='undefined'){
+        var _rpRow=function(name,type,fill){
+          var d=document.createElement('div'); d.innerHTML=rpCompRowHtml();
+          var row=d.firstElementChild;
+          row.querySelector('.rc-cn').value=name;
+          row.querySelector('.rc-ct').value=type;
+          // Assigning .value does not fire onchange, so paint the value area the
+          // way rpCompRowType would have.
+          row.querySelector('.rc-cvals').innerHTML=rpCompRowVals(type);
+          Object.keys(fill).forEach(function(k){ var el=row.querySelector(k); if(el) el.value=fill[k]; });
+          return row;
+        };
+        n++; var _rpSt=rpCompRowRead(_rpRow('MgCl2','stock',
+          {'.rc-sc':'2','.rc-su':'M','.rc-fc':'10','.rc-fu':'mM'}));
+        if(_rpSt.err||!_rpSt.fromStock||_rpSt.fromStock.stockConc!==2||_rpSt.fromStock.stockUnit!=='M'||
+           _rpSt.fromStock.finalConc!==10||_rpSt.fromStock.finalUnit!=='mM')
+          fails.push('the stock row did not build a real fromStock: '+JSON.stringify(_rpSt));
+        // 2 M = 2000 mM, so 10 mM × 1000 mL / 2000 mM = 5 mL.
+        n++; var _rpStA=_rpSt.fromStock?rpComponentAmount(_rpSt,1000):{};
+        if(_rpStA.kind!=='vol'||!_near(_rpStA.mL,5,1e-9))
+          fails.push('2 M → 10 mM in 1 L = '+_rpStA.mL+' mL, want 5');
+        n++; var _rpGl=rpCompRowRead(_rpRow('NaCl','gL',{'.rc-cv':'10'}));
+        if(_rpGl.err||_rpGl.gramsPerLiter!==10||_rpGl.percent||_rpGl.fromStock)
+          fails.push('the g/L row read as '+JSON.stringify(_rpGl));
+        n++; var _rpMo=rpCompRowRead(_rpRow('Tris','M',{'.rc-cv':'0.05','.rc-cv2':'121.14'}));
+        if(_rpMo.err||_rpMo.molarity_M!==0.05||_rpMo.mw_gmol!==121.14)
+          fails.push('the molarity+MW row read as '+JSON.stringify(_rpMo));
+      }
+
+      // Nothing '_'-prefixed may ever reach storage or an export.
+      var _rpDirty={id:'t',_cat:'Media',_catKey:'media',_baseName:'LB',name:'LB',
+        _removed:[{name:'x',was:null}],
+        components:[{name:'Agar',gramsPerLiter:15,_was:{v:12,label:'g/L'}},{name:'G',gramsPerLiter:1,_added:true}]};
+      var _rpClean=rpStripInternal(_rpDirty);
+      var _rpHasU=function(o){
+        if(!o||typeof o!=='object') return false;
+        if(Array.isArray(o)) return o.some(_rpHasU);
+        return Object.keys(o).some(function(k){ return k.charAt(0)==='_'||_rpHasU(o[k]); });
+      };
+      n++; if(_rpHasU(_rpClean)) fails.push('rpStripInternal left an internal key: '+JSON.stringify(_rpClean));
+      n++; if(_rpClean.name!=='LB'||_rpClean.components.length!==2||_rpClean.components[0].gramsPerLiter!==15||
+              !_rpDirty._baseName||!_rpDirty.components[0]._was)
+        fails.push('rpStripInternal dropped real data, or mutated its input instead of cloning');
+
+      // ── Round trip through storage. Scratch copy only: the real
+      // dd_reagent_custom (and the module's selection state) is put back.
+      if(typeof rpSaveWorkAsCustom==='function'){
+        var _rpLsSaved=lsGet('dd_reagent_custom');
+        var _rpLibSaved=rpLib, _rpAllSaved=rpAllRecipes, _rpSelSaved=rpSelectedId,
+            _rpCatSaved=rpActiveCat, _rpWorkSaved=rpWork, _rpEditSaved=rpEditMode;
+        var _rpQEl=document.getElementById('rpSearch'), _rpQSaved=_rpQEl?_rpQEl.value:null;
+        var _rpHadCust=!!(rpLib&&(rpLib.categories||[]).some(function(c){return c.key==='custom';}));
+        try{
+          lsSet('dd_reagent_custom','[]');
+          if(_rpQEl) _rpQEl.value='a query that matches nothing saved';   // must not survive the save
+          if(!rpLib) rpLib={version:'selftest',categories:[]};   // inline fixture — works on file://
+          rpWork={id:'lb',name:'LB',_baseName:'LB',_removed:[],notes:['Original note.'],
+                  components:[{name:'Agar',percent:{value:2,type:'w/v'},_was:{v:1.5,label:'% w/v'},
+                               note:'15 g/L. Use 1.5% for standard plates.'}]};
+          rpSelectedId='lb';
+          var _rpNewId=rpSaveWorkAsCustom('LB 2% agar');
+          var _rpStored=JSON.parse(lsGet('dd_reagent_custom')||'[]');
+          var _rpRec=_rpStored[0]||{};
+          n++; if(_rpStored.length!==1||!/^custom-/.test(String(_rpRec.id))||_rpNewId!==_rpRec.id)
+            fails.push('rpSaveWorkAsCustom stored '+_rpStored.length+' record(s), id '+_rpRec.id+' vs returned '+_rpNewId);
+          n++; if(_rpHasU(_rpRec)) fails.push('a working-copy internal key was written to storage: '+JSON.stringify(_rpRec));
+          n++; if((_rpRec.notes||[]).join('|')!=='Original note.|Modified from library recipe "LB": Agar 1.5→2 % w/v.')
+            fails.push('the provenance note drifted: '+JSON.stringify(_rpRec.notes));
+          // The component note said "15 g/L. Use 1.5%…" — beside a 2% component
+          // that prose is a contradiction the stored recipe would carry forever.
+          n++; if(((_rpRec.components||[])[0]||{}).note!=='(Library note, for 1.5 % w/v) 15 g/L. Use 1.5% for standard plates.')
+            fails.push('an edited component\'s library note was stored un-annotated: '+JSON.stringify((_rpRec.components||[])[0]));
+          n++; if(rpWork!==null||rpEditMode!==false||rpSelectedId!==_rpRec.id||rpActiveCat!=='custom')
+            fails.push('saving did not hand off to the new recipe and clear the working copy');
+          // The query that found the library recipe almost never matches the new
+          // name, so leaving it set hides the saved recipe inside My recipes.
+          n++; if((document.getElementById('rpSearch')||{value:''}).value!=='')
+            fails.push('the library search query survived the save, which filters the new recipe out of its own category');
+        }catch(e){ n++; fails.push('rpSaveWorkAsCustom threw — '+e.message); }
+        finally{
+          if(_rpLsSaved==null) lsDel('dd_reagent_custom'); else lsSet('dd_reagent_custom',_rpLsSaved);
+          rpLib=_rpLibSaved; rpAllRecipes=_rpAllSaved; rpSelectedId=_rpSelSaved;
+          rpActiveCat=_rpCatSaved; rpWork=_rpWorkSaved; rpEditMode=_rpEditSaved;
+          if(_rpQEl&&_rpQSaved!=null) _rpQEl.value=_rpQSaved;
+          // The save called rpMergeCustom on the REAL rpLib object, which pushes
+          // a "My recipes" category that restoring the reference cannot remove —
+          // rpExportLibrary would then ship an empty category the user never made.
+          if(rpLib&&!_rpHadCust) rpLib.categories=(rpLib.categories||[]).filter(function(c){ return !(c.key==='custom'&&!(c.recipes||[]).length); });
+          try{ if(rpLib){ rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); } rpCompute(); }catch(e){}
+        }
+        n++; if(rpLib&&!_rpHadCust&&(rpLib.categories||[]).some(function(c){return c.key==='custom'&&!(c.recipes||[]).length;}))
+          fails.push('the self-test leaked an empty My-recipes category into rpLib');
+      }
+
+      // ── Supervisor regressions: the verifiers' surviving objections, pinned.
+      if(typeof rpEditValue==='function'&&typeof rpSaveWorkAsCustom==='function'){
+        // Editing back to the library value is NOT a change: 5→9 marks, 9→5 unmarks.
+        var _rvC={name:'x',gramsPerLiter:5};
+        rpApplyEdit(_rvC,'9');
+        n++; if(!_rvC._was||_rvC._was.v!==5||_rvC.gramsPerLiter!==9) fails.push('5→9 must record was=5 and apply 9');
+        rpApplyEdit(_rvC,'5');
+        n++; if(_rvC._was||_rvC.gramsPerLiter!==5)
+          fails.push('9→5 must clear the change marker — a 1.5→2→1.5 round trip branded the sheet "(adjusted)" over nothing');
+        // Typing the number already there mints no marker at all.
+        var _rvD={name:'y',gramsPerLiter:7};
+        rpApplyEdit(_rvD,'7');
+        n++; if(_rvD._was) fails.push('typing the value already there is not a change');
+        // An added component never gets a was-clause: "added (20 g/L)" is its story.
+        var _rvE={name:'z',gramsPerLiter:20,_added:true};
+        rpApplyEdit(_rvE,'25');
+        n++; if(_rvE._was||_rvE.gramsPerLiter!==25) fails.push('_added components must not mint _was');
+        // ── Audit-pass regressions, each reproduced before being fixed. ──
+      // The shipped Mowiol mountant uses 120 % v/v (dissolution is not volume-
+      // additive). An absolute 100 cap made that value unrestorable: edit away,
+      // and editing BACK was rejected — the sheet stuck wrong forever.
+      n++; var _mw={name:'Tris-HCl',percent:{value:120,type:'v/v'}};
+      var _mwR=rpApplyEdit(_mw,'60');
+      if(!_mwR.ok||_mw._was.v!==120) fails.push('120→60 %v/v must apply and record was=120');
+      _mwR=rpApplyEdit(_mw,'120');
+      if(!_mwR.ok||_mw._was||_mw.percent.value!==120)
+        fails.push('editing BACK to the library 120 %v/v must be accepted and clear the marker, got '+JSON.stringify(_mwR));
+      n++; if(rpApplyEdit({name:'x',percent:{value:50,type:'v/v'}},'120').ok)
+        fails.push('a 50 %v/v component must still refuse 120%');
+      // Add-then-remove is a net nothing: logging it wrote "X removed (was 20
+      // g/L)" into provenance, asserting the library had a component it never did.
+      n++; var _arW={id:'ar',_baseName:'LB',_removed:[],components:[{name:'T',gramsPerLiter:10}]};
+      var _svW=rpWork; rpWork=_arW;
+      rpWorkAdd({name:'D-Glucose',gramsPerLiter:20});
+      rpWorkRemove(1);
+      if(rpWorkDirty()||(_arW._removed||[]).length)
+        fails.push('add-then-remove must leave the copy clean, got removed='+JSON.stringify(_arW._removed));
+      rpWork=_svW;
+      // Same-unit fromStock lines (U/µL enzymes, "mM each" dNTPs) are plain
+      // ratios: 2 from 40 in 20 µL = 1 µL by hand. They must compute AND edit.
+      n++; var _uu={name:'RNase inhibitor',fromStock:{stockConc:40,stockUnit:'U/uL',finalConc:2,finalUnit:'U/uL'}};
+      var _uuA=rpComponentAmount(_uu,0.02);
+      if(_uuA.kind!=='vol'||!_near(_uuA.mL,0.001,1e-12))
+        fails.push('40→2 U/µL in 20 µL must compute 0.001 mL (1 µL), got '+JSON.stringify(_uuA));
+      n++; if(!rpApplyEdit(_uu,'4').ok||_uu.fromStock.finalConc!==4)
+        fails.push('a same-unit fromStock line must accept an edit');
+      n++; if(rpApplyEdit(_uu,'80').ok) fails.push('4→80 exceeds the 40 U/µL stock and must refuse');
+      // A typed unit suffix must REFUSE, not silently misparse: "50 mM" in an
+      // M-labelled field would commit 50 M — a thousand-fold error.
+      n++; var _sfx={name:'Tris',molarity_M:0.025,mw_gmol:121.14};
+      if(rpApplyEdit(_sfx,'50 mM').ok||_sfx.molarity_M!==0.025)
+        fails.push('"50 mM" in an M field must be refused, not committed as 50 M');
+      n++; if(!rpApplyEdit(_sfx,'2e-3').ok) fails.push('e-notation must still be accepted');
+      n++; if(!rpApplyEdit({name:'y',gramsPerLiter:5},'1,5').ok) fails.push('decimal-comma must still be accepted');
+      // Hostile storage must not brick boot: a non-array store reads as empty.
+      n++; var _hsSaved=lsGet('dd_reagent_custom');
+      try{
+        lsSet('dd_reagent_custom','"pwned"');
+        if(!Array.isArray(rpCustom())||rpCustom().length!==0) fails.push('a string store must read as []');
+        lsSet('dd_reagent_custom','null');
+        if(rpCustom().length!==0) fails.push('a null store must read as []');
+        lsSet('dd_reagent_custom','[{"id":"k","name":"K","components":"ten"}]');
+        var _hsK=rpCustom()[0];
+        if(!_hsK||!Array.isArray(_hsK.components)) fails.push('a non-array components field must be coerced to []');
+      } finally { if(_hsSaved==null) lsDel('dd_reagent_custom'); else lsSet('dd_reagent_custom',_hsSaved); }
+      // A stale working copy (selection moved on) and an emptied recipe must both refuse to save.
+        var _rvW=rpWork,_rvS=rpSelectedId,_rvLs=lsGet('dd_reagent_custom');
+        try{
+          rpWork={id:'aaa',_baseName:'A',_removed:[],components:[{name:'k',gramsPerLiter:1,_was:{v:2,label:'g/L'}}]};
+          rpSelectedId='bbb';
+          n++; if(rpSaveWorkAsCustom('nope')!==null||lsGet('dd_reagent_custom')!==_rvLs)
+            fails.push('a working copy whose recipe the user has moved off must not save');
+          rpWork={id:'bbb',_baseName:'B',_removed:[{name:'k',was:null}],components:[]};
+          n++; if(rpSaveWorkAsCustom('nope')!==null||lsGet('dd_reagent_custom')!==_rvLs)
+            fails.push('an empty working copy must not save — it cannot be prepared');
+        } finally { rpWork=_rvW; rpSelectedId=_rvS; if(_rvLs==null) lsDel('dd_reagent_custom'); else if(lsGet('dd_reagent_custom')!==_rvLs) lsSet('dd_reagent_custom',_rvLs); }
+      }
+
+      // ── Edit-mode RENDERING, driven through the live #rpSheet on an inline
+      // fixture library. Every global rpCompute reads is put back in finally.
+      if(typeof rpEditCellHtml==='function'&&document.getElementById('rpSheet')&&document.getElementById('rpVolume')){
+        var _rpUiAll=rpAllRecipes, _rpUiSel=rpSelectedId, _rpUiWk=rpWork, _rpUiEd=rpEditMode, _rpUiCat=rpActiveCat;
+        var _rpUiV=document.getElementById('rpVolume'), _rpUiU=document.getElementById('rpVolUnit');
+        var _rpUiVT=_rpUiV.type, _rpUiVV=_rpUiV.value, _rpUiUU=_rpUiU.value;
+        var _rpSheetEl=document.getElementById('rpSheet');
+        try{
+          _rpUiV.type='text'; _rpUiV.value='100'; _rpUiU.value='mL'; rpActiveCat='all';
+          rpAllRecipes=[{id:'st',_cat:'T',_catKey:'t',name:'Test agar',solvent:'water',
+                         components:[{name:'Agar',percent:{value:2,type:'w/v'}}]},
+                        {id:'st2',_cat:'T',_catKey:'t',name:'Other',solvent:'water',
+                         components:[{name:'NaCl',gramsPerLiter:10}]}];
+          rpSelectedId='st'; rpWork=null; rpEditMode=false; rpCompute();
+          var _rpH=_rpSheetEl.innerHTML;
+          // A clean sheet carries none of the adjustment chrome…
+          n++; if(/rp-edit|rp-modbanner|rp-modtag/.test(_rpH))
+            fails.push('a clean sheet rendered adjustment chrome');
+          // …and the Copy text still has the component on line 2.
+          // 2 % w/v = 2 g per 100 mL, and the volume is 100 mL → 2 g.
+          n++; if(rpLastText.split('\n')[1]!=='  Agar: 2 g')
+            fails.push('clean rpLastText line 2 = “'+rpLastText.split('\n')[1]+'”, want “  Agar: 2 g”');
+          // The toolbar is the feature's only entry point, so it is always present.
+          n++; if(_rpH.indexOf('rp-sheettools')<0||_rpH.indexOf('rpToggleEdit()')<0)
+            fails.push('the Adjust-amounts toolbar is missing from a clean sheet');
+
+          // Entering edit mode alone must NOT create a working copy or go dirty.
+          rpToggleEdit();
+          n++; if(rpEditMode!==true||rpWork!==null||rpWorkDirty())
+            fails.push('opening the editor created a working copy before any edit');
+          // The editable field carries the CURRENT value, 2, and its ✕ is painted
+          // by CSS — a literal glyph would land in the notebook scrape.
+          var _rpIn=document.getElementById('rpEd0');
+          n++; if(!_rpIn||_rpIn.value!=='2')
+            fails.push('the editor field for a 2 % w/v component reads “'+(_rpIn&&_rpIn.value)+'”, want “2”');
+          n++; if((_rpSheetEl.querySelector('.rp-xbtn')||{textContent:'x'}).textContent!=='')
+            fails.push('the remove button wrote its ✕ into the DOM instead of CSS ::before');
+
+          // Editing through the handler: 2 → 4 % w/v in 100 mL = 4 g, and the
+          // detail line gains the provenance suffix.
+          rpEditConc(0,'4');
+          n++; if(!rpWork||rpWork.components[0].percent.value!==4||rpAllRecipes[0].components[0].percent.value!==2)
+            fails.push('rpEditConc wrote through to the library recipe instead of the working copy');
+          n++; if(rpLastText.split('\n')[2]!=='  Agar: 4 g')
+            fails.push('after 2→4 % w/v the sheet says “'+rpLastText.split('\n')[2]+'”, want “  Agar: 4 g”');
+          // Dirty disclosure: banner, tag, meta row and the extra Copy line.
+          var _rpH2=_rpSheetEl.innerHTML;
+          n++; if(_rpH2.indexOf('rp-modbanner')<0||_rpH2.indexOf('rp-modtag')<0||_rpH2.indexOf('<dt>Adjusted</dt>')<0)
+            fails.push('an adjusted sheet is missing its banner, tag or Adjusted meta row');
+          n++; if(rpLastText.split('\n')[1]!=='Adjusted from library: Agar 2→4 % w/v')
+            fails.push('rpLastText line 2 = “'+rpLastText.split('\n')[1]+'”, want “Adjusted from library: Agar 2→4 % w/v”');
+          // …and the title reads back with the suffix the notebook will use.
+          n++; if((_rpSheetEl.querySelector('.rp-title')||{}).textContent!=='Test agar (adjusted)')
+            fails.push('the adjusted title reads “'+(_rpSheetEl.querySelector('.rp-title')||{}).textContent+'”');
+
+          // A rejected edit leaves the number alone: 120 % v/v is impossible.
+          rpWork.components[0].percent.type='v/v'; rpCompute();
+          rpEditConc(0,'120');
+          n++; if(rpWork.components[0].percent.value!==4)
+            fails.push('a 120 % v/v edit was accepted (value now '+rpWork.components[0].percent.value+')');
+          rpWork.components[0].percent.type='w/v'; rpCompute();
+
+          // ── The notebook scrape must not see the editor. With the add-row on
+          // screen the table has 2 <tr>; only 1 of them is a real component.
+          if(typeof _tblFrom==='function'){
+            var _rpRaw=_tblFrom('#rpSheet .rp-tbl');
+            var _rpCln=_tblFrom('#rpSheet .rp-tbl',0,'.rp-edit');
+            n++; if(!_rpRaw||_rpRaw.rows.length!==2)
+              fails.push('expected the add-row to make 2 raw rows, got '+(_rpRaw&&_rpRaw.rows.length));
+            n++; if(!_rpCln||_rpCln.rows.length!==1||_rpCln.rows[0][1]!=='4 g')
+              fails.push('the filtered scrape gave '+JSON.stringify(_rpCln&&_rpCln.rows)+', want one row amounting to 4 g');
+            // The component cell keeps its name/detail and none of the chrome.
+            n++; if(!_rpCln||_rpCln.rows[0][0].indexOf('Agar')!==0||/✕|from stock/.test(_rpCln.rows[0][0]))
+              fails.push('editor chrome leaked into the notebook cell: “'+(_rpCln&&_rpCln.rows[0][0])+'”');
+          }
+
+          // Removing the only component empties the table but keeps the recipe.
+          rpEditRemove(0);
+          n++; if(rpWork.components.length!==0||rpWork._removed.length!==1||rpWork._removed[0].name!=='Agar')
+            fails.push('rpEditRemove did not log the removal: '+JSON.stringify(rpWork._removed));
+
+          // Reset drops the working copy and closes the editor.
+          rpResetWork();
+          n++; if(rpWork!==null||rpEditMode!==false||rpWorkDirty())
+            fails.push('rpResetWork left a working copy behind');
+
+          // Re-selecting the SAME recipe keeps the work; a different one discards.
+          rpWork=rpClone(rpAllRecipes[0]); rpWork._removed=[]; rpWork._baseName='Test agar';
+          rpApplyEdit(rpWork.components[0],'3'); rpEditMode=true;
+          n++; if(!rpWorkDirty()) fails.push('the fixture working copy is not dirty, so the switch test proves nothing');
+          rpSelect('st');
+          n++; if(rpWork===null) fails.push('re-selecting the same recipe threw the adjustments away');
+          rpSelect('st2');
+          n++; if(rpWork!==null||rpEditMode!==false)
+            fails.push('switching to another recipe kept a working copy keyed to the old one');
+        }catch(e){ n++; fails.push('the edit-mode render tests threw — '+e.message); }
+        finally{
+          rpAllRecipes=_rpUiAll; rpSelectedId=_rpUiSel; rpWork=_rpUiWk; rpEditMode=_rpUiEd; rpActiveCat=_rpUiCat;
+          _rpUiV.type=_rpUiVT; _rpUiV.value=_rpUiVV; _rpUiU.value=_rpUiUU;
+          try{ rpCompute(); }catch(e){}
+        }
+      }
+
+      // Print must never carry an input or a button onto paper.
+      n++; if(typeof rpPrint==='function'&&String(rpPrint).indexOf('.rp-noprint,.rp-edit{display:none!important}')<0)
+        fails.push('rpPrint lost the rule that hides the editor from the printed sheet');
+
+      // ── Provenance: a sheet captured mid-adjustment must say so in the
+      // notebook, and ONLY when the working copy belongs to the selected id.
+      if(window.NB&&NB._origin&&typeof NB._origin.reagent==='function'){
+        var _rpOAll=rpAllRecipes, _rpOSel=rpSelectedId, _rpOWk=rpWork;
+        try{
+          rpAllRecipes=[{id:'zz',name:'Zed buffer',components:[{name:'A',gramsPerLiter:2}]}];
+          rpSelectedId='zz';
+          // _was on a component is what rpWorkDirty() keys on → dirty.
+          rpWork={id:'zz',name:'Zed buffer',_baseName:'Zed buffer',_removed:[],
+                  components:[{name:'A',gramsPerLiter:2,_was:{v:1,label:'g/L'}}]};
+          var _rpO=NB._origin.reagent();
+          n++; if(_rpO.label!=='Zed buffer (adjusted)'||_rpO.id!=='zz')
+            fails.push('ORIGIN.reagent gave '+JSON.stringify(_rpO)+', want id zz / label “Zed buffer (adjusted)”');
+          // A working copy keyed to a DIFFERENT recipe must not relabel this one.
+          rpWork.id='other';
+          n++; if(NB._origin.reagent().label!=='Zed buffer')
+            fails.push('a stale working copy relabelled an unadjusted recipe as adjusted');
+          // No working copy at all → the plain library name.
+          rpWork=null;
+          n++; if(NB._origin.reagent().label!=='Zed buffer')
+            fails.push('ORIGIN.reagent added “(adjusted)” with no working copy');
+        }catch(e){ n++; fails.push('the ORIGIN.reagent tests threw — '+e.message); }
+        finally{ rpAllRecipes=_rpOAll; rpSelectedId=_rpOSel; rpWork=_rpOWk; }
+      }
+
+      // rpVolumeMl must read the field with SCI.parse. #rpVolume is type=number,
+      // which sanitises "1,5" to '' before JS ever sees it, so borrow the field
+      // as text for the assertion and hand it straight back.
+      var _rpVEl=document.getElementById('rpVolume'), _rpUEl=document.getElementById('rpVolUnit');
+      if(_rpVEl&&_rpUEl){
+        var _rpVT=_rpVEl.type, _rpVV=_rpVEl.value, _rpVU=_rpUEl.value;
+        try{
+          _rpVEl.type='text'; _rpVEl.value='1,5'; _rpUEl.value='mL';
+          n++; if(!_near(rpVolumeMl(),1.5,1e-12)) fails.push('rpVolumeMl("1,5" mL) = '+rpVolumeMl()+', want 1.5 (parseFloat would say 15)');
+          _rpVEl.value='2'; _rpUEl.value='L';
+          n++; if(!_near(rpVolumeMl(),2000,1e-9)) fails.push('rpVolumeMl("2" L) = '+rpVolumeMl()+', want 2000');
+        } finally { _rpVEl.type=_rpVT; _rpVEl.value=_rpVV; _rpUEl.value=_rpVU; }
+      }
     }
     return {total:n, passed:n-fails.length, failures:fails};
   }
@@ -11046,9 +11992,15 @@ function dyeWorking(o){
     calc:   function(){ var id=(window.MBC&&MBC._cur)||'';
                         var c=(window.MBC&&MBC.calcs||[]).filter(function(x){return x.id===id;})[0];
                         return {id:id,label:c?c.name:'Calculators'}; },
+    // A sheet captured mid-adjustment is NOT the library recipe, and months
+    // later the notebook is the only thing that can say so — hence the suffix.
+    // Guarded on rpWork.id===id so a working copy left over from another
+    // recipe can never mislabel this one.
     reagent:function(){ var id=(typeof rpSelectedId!=='undefined'&&rpSelectedId)||'';
                         var r=(typeof rpAllRecipes!=='undefined'?rpAllRecipes:[]).filter(function(x){return x.id===id;})[0];
-                        return {id:id,label:r?r.name:'Reagent Prep'}; },
+                        var adj=false;
+                        try{ adj=!!(r&&typeof rpWorkDirty==='function'&&rpWorkDirty()&&rpWork&&rpWork.id===id); }catch(e){}
+                        return {id:id,label:r?(r.name+(adj?' (adjusted)':'')):'Reagent Prep'}; },
     proto:  function(){ var id=lsGet('pr_last')||'';
                         var p=(window.PROTO&&PROTO.list||[]).filter(function(x){return x.id===id;})[0];
                         return {id:id,label:p?p.name:'Protocols'}; },
@@ -11274,8 +12226,14 @@ function dyeWorking(o){
 /* ══════════ NOTEBOOK CAPTURE PROVIDERS (one per module) ══════════ */
 // Each returns an array of notebook blocks for the ticked items. Kept out of the
 // modules themselves so the notebook stays the only place that knows the block schema.
-function _tblFrom(sel,limit){
+/* `skip` is an optional CSS selector for chrome that must not reach the export.
+   Rows and cells are read as textContent, so an on-screen editor would otherwise
+   land in the notebook as its own junk row plus a duplicated unit label. Cloning
+   first means the live sheet is never mutated. Callers that pass no `skip` get
+   exactly the behaviour they had before. */
+function _tblFrom(sel,limit,skip){
   var t=document.querySelector(sel); if(!t) return null;
+  if(skip){ t=t.cloneNode(true); [].forEach.call(t.querySelectorAll(skip),function(x){ if(x.parentNode) x.parentNode.removeChild(x); }); }
   var cols=[].map.call(t.querySelectorAll('thead th'),function(x){return x.textContent.trim();});
   var rows=[].map.call(t.querySelectorAll('tbody tr'),function(tr){
     return [].map.call(tr.querySelectorAll('td'),function(td){return td.textContent.trim();});
@@ -11321,7 +12279,7 @@ function RPBLK(sel){
   var out=[], sheet=document.getElementById('rpSheet'); if(!sheet) return out;
   var title=(sheet.querySelector('.rp-title')||{}).textContent||'Reagent';
   if(sel.sheet){
-    var t=_tblFrom('#rpSheet .rp-tbl');
+    var t=_tblFrom('#rpSheet .rp-tbl',0,'.rp-edit');
     if(t) out.push({type:'table', title:title+' — '+((document.querySelector('#rpSheet .rp-vol-badge')||{}).textContent||''), cols:['Component','Amount'], rows:t.rows.length?t.rows:[]});
     var meta=[].map.call(sheet.querySelectorAll('.rp-meta dt'),function(dt,i){ return [dt.textContent.trim(), (sheet.querySelectorAll('.rp-meta dd')[i]||{textContent:''}).textContent.trim()]; });
     if(meta.length) out.push({type:'kv', title:title+' — conditions', pairs:meta});
@@ -13180,8 +14138,30 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
                 go:function(){ setMode('mic'); if(MIC.open)MIC.open(d.id); }}); }); }catch(e){}
     try{ (window.rpLib&&rpLib.categories||[]).forEach(function(cat){
       (cat.recipes||[]).forEach(function(r){
-        out.push({kind:'recipe',icon:'⚗️',name:r.name,hay:r.name+' '+(cat.name||''),
-                  go:function(){ setMode('reagent'); if(window.rpOpen)rpOpen(r.id); }}); }); }); }catch(e){}
+        // cat.title, not cat.name — categories have no .name, so every recipe
+        // used to search as its bare name with no category words behind it.
+        out.push({kind:'recipe',icon:'⚗️',name:r.name,hay:r.name+' '+(cat.title||''),
+                  go:function(){
+                    setMode('reagent');
+                    var want=r.id;
+                    // rpOpen has never existed — the palette silently opened the
+                    // module and selected nothing. rpSelect is the real entry.
+                    function pick(){
+                      if(typeof rpSelect!=='function') return false;
+                      rpSelect(want);
+                      return (typeof rpAllRecipes!=='undefined')&&rpAllRecipes.some(function(x){return x.id===want;});
+                    }
+                    if(pick()) return;
+                    // The library is fetched lazily, so on a cold start rpSelect
+                    // runs before the JSON lands and finds nothing. Re-select once
+                    // rpFinishLoad announces it, then unhook.
+                    function once(ev){
+                      if(ev&&ev.detail&&ev.detail.which&&ev.detail.which!=='reagent') return;
+                      document.removeEventListener('dd:library',once);
+                      pick();
+                    }
+                    document.addEventListener('dd:library',once);
+                  }}); }); }); }catch(e){}
     try{ lysAll().forEach(function(l){
       out.push({kind:'lysate',icon:'🦠',name:l.name+(l.titer>0?' — '+SCI.fmt(l.titer,3)+' PFU/mL':''),
                 hay:l.name+' '+(l.host||''), go:function(){ setMode('phg'); }}); }); }catch(e){}
