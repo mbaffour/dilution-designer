@@ -10702,7 +10702,7 @@
         "finalConc": 100,
         "finalUnit": "ug/mL"
        },
-       "note": "Add after autoclaving and cooling; 1 mL of 10 mg/mL stock per litre"
+       "note": "Add after autoclaving and cooling; 10 mL of 10 mg/mL stock per litre (a 1:100 dilution to reach 100 ug/mL)"
       }
      ],
      "solvent": "deionized water (bring to final volume)",
@@ -13286,7 +13286,7 @@
         "type": "v/v"
        },
        "mwSource": "PubChem CID 1004",
-       "note": "100 mL of 85% phosphoric acid per litre, which is about 8.5% (w/v) H3PO4 in the finished reagent. Add slowly and with stirring after the dye has dissolved in ethanol.",
+       "note": "100 mL of 85% phosphoric acid per litre, which is about 14.3% (w/v) H3PO4 in the finished reagent (85% acid is w/w at density ~1.685 g/mL, so 100 mL carries ~143 g). Add slowly and with stirring after the dye has dissolved in ethanol.",
        "hazard": "Corrosive - causes severe skin burns and eye damage."
       }
      ],

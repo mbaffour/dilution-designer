@@ -5470,7 +5470,10 @@ function rpUnitLabel(c){
   if(c.molarity_M!=null&&c.mw_gmol!=null) return 'M';
   if(c.percent) return (String(c.percent.type||'w/v').toLowerCase()==='v/v')?'% v/v':'% w/v';
   if(c.volumeFraction) return '% v/v';
-  if(c.fromStock) return (c.fromStock.finalUnit||'')+' final';
+  // A fromStock line only gets an edit box if the sheet can actually COMPUTE
+  // it — otherwise the row renders as prose and an input beside it would
+  // reject every value with a message contradicting what is on screen.
+  if(c.fromStock) return rpStockPair(c.fromStock)?((c.fromStock.finalUnit||'')+' final'):null;
   return null;
 }
 function rpEditValue(c){
@@ -5485,9 +5488,25 @@ function rpEditValue(c){
 function rpApplyEdit(c,raw){
   var label=rpUnitLabel(c);
   if(label==null) return {ok:false,err:'This line has no number to change — it is a note.'};
+  // The unit is FIXED by the field's label. SCI.parse is suffix-tolerant, so
+  // "50 mM" typed into an M-labelled box would silently commit 50 M — a
+  // thousand-fold error with no visible cue. Accept only pure number forms
+  // (decimals, commas, e-notation, ×10 powers); anything else is the user
+  // trying to state a unit, and the honest answer is to say which unit the
+  // field is in rather than guess.
+  var rawS=String(raw==null?'':raw).trim();
+  if(!( /^[+-]?[\d.,\s]+(e[+-]?\d+)?$/i.test(rawS)
+     || /^[+-]?[\d.,\s]*[x×]\s*10(\^?[+-]?\d+|[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)$/i.test(rawS) ))
+    return {ok:false,err:'Just the number — this field is in '+label+'.'};
   var v=SCI.parse(raw);
   if(!isFinite(v)) return {ok:false,err:'Enter a number.'};
   if(v<=0) return {ok:false,err:'Must be greater than zero.'};
+  // Typing the number that is already there is not a change — minting _was for
+  // it would brand the sheet "(adjusted)" over nothing. Checked BEFORE the
+  // bucket guards so re-committing an odd library value (Mowiol's 120 % v/v)
+  // never draws a spurious warning.
+  var cur=rpEditValue(c);
+  if(v===cur&&!c._was) return {ok:true};
   // Validate for the bucket that will actually be ASSIGNED — the same dispatch
   // order rpComponentAmount and rpEditValue use. Testing `if(c.fromStock)`
   // first meant a component carrying both percent and fromStock would be
@@ -5495,18 +5514,19 @@ function rpApplyEdit(c,raw){
   var isFS=c.fromStock&&c.gramsPerLiter==null&&!(c.molarity_M!=null&&c.mw_gmol!=null)&&!c.percent&&!c.volumeFraction;
   if(isFS){
     var s=c.fromStock;
-    var sc=rpConcCanon(s.stockConc,s.stockUnit), fc=rpConcCanon(v,s.finalUnit);
-    if(!sc||!fc||sc.fam!==fc.fam) return {ok:false,err:'Stock and final units are different kinds of concentration.'};
-    if(!(sc.val>0)) return {ok:false,err:'The stock concentration is not usable.'};
+    var pr=rpStockPair(s,v);
+    if(!pr) return {ok:false,err:'Stock and final units are different kinds of concentration.'};
+    if(!(pr.sc.val>0)) return {ok:false,err:'The stock concentration is not usable.'};
     // You cannot dilute up. Equality is legal — that is "use it neat".
-    if(fc.val>sc.val) return {ok:false,err:'That is stronger than the '+rpNum(s.stockConc)+' '+s.stockUnit+' stock.'};
+    if(pr.fc.val>pr.sc.val) return {ok:false,err:'That is stronger than the '+rpNum(s.stockConc)+' '+s.stockUnit+' stock.'};
   } else if((c.percent&&String(c.percent.type||'w/v').toLowerCase()==='v/v')||c.volumeFraction){
-    if(v>100) return {ok:false,err:'A volume fraction cannot exceed 100%.'};
+    // The ceiling is RELATIVE to the library value, not an absolute 100: the
+    // shipped Mowiol mountant legitimately uses 120 % v/v (multi-step
+    // dissolution is not volume-additive), and an absolute cap made that
+    // library value permanently unrestorable once edited away from.
+    var cap=Math.max(100,(c._was&&c._was.v)||cur||100);
+    if(v>cap) return {ok:false,err:'A volume fraction cannot exceed '+cap+'%.'};
   }
-  // Typing the number that is already there is not a change — minting _was for
-  // it would brand the sheet "(adjusted)" over nothing.
-  var cur=rpEditValue(c);
-  if(v===cur&&!c._was) return {ok:true};
   // Snapshot the ORIGINAL once — a second edit of the same line must still
   // report the distance from the library value, not from the last keystroke.
   // Never on an _added component: "added (20 g/L)" already tells the story.
@@ -5543,7 +5563,10 @@ function rpWorkRemove(ci){
   var c=rpWork.components[ci];
   if(!c) return false;
   rpWork.components.splice(ci,1);
-  (rpWork._removed=rpWork._removed||[]).push({name:c.name, was:rpWasStr(c)});
+  // Removing a component the user themselves ADDED is a net nothing: logging
+  // it wrote "X removed (was 20 g/L)" into saved provenance, asserting the
+  // LIBRARY recipe contained a component it never had.
+  if(!c._added) (rpWork._removed=rpWork._removed||[]).push({name:c.name, was:rpWasStr(c)});
   return true;
 }
 function rpWorkAdd(comp){
@@ -5592,9 +5615,31 @@ function rpFinishLoad(){ rpLoaded=true; rpMergeCustom(); rpFlatten(); rpRenderCa
   // Once the real number is known, refresh the hub so the two can never disagree.
   if(appMode==='home'&&window.renderHome) renderHome();
   ddLibraryLoaded('reagent'); }
-function rpFlatten(){ rpAllRecipes=[]; (rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ rpAllRecipes.push(Object.assign({_cat:c.title,_catKey:c.key}, r)); }); }); }
-function rpCustom(){ try{ return JSON.parse(lsGet('dd_reagent_custom')||'[]'); }catch(e){ return []; } }
-function rpMergeCustom(){ var cust=rpCustom(); var cat=(rpLib.categories||[]).find(function(c){return c.key==='custom';}); if(cust.length){ if(!cat){ cat={key:'custom',title:'My recipes',recipes:[]}; rpLib.categories.push(cat);} cat.recipes=cust; } else if(cat){ cat.recipes=[]; } }
+function rpFlatten(){
+  rpAllRecipes=[]; var _idx=Object.create(null);
+  (rpLib.categories||[]).forEach(function(c){ (Array.isArray(c.recipes)?c.recipes:[]).forEach(function(r){
+    if(!r||!r.id)return;
+    var e=Object.assign({_cat:c.title,_catKey:c.key}, r);
+    var at=_idx[r.id];
+    // One id, one entry. rpSelect and the palette resolve by id, so a second
+    // copy was an unreachable list row; a CUSTOM copy replaces the library one
+    // because an imported/saved recipe under a library id means "my version".
+    if(at==null){ _idx[r.id]=rpAllRecipes.length; rpAllRecipes.push(e); }
+    else if(c.key==='custom') rpAllRecipes[at]=e;
+  }); });
+}
+function rpCustom(){
+  // The store is user-reachable (imports, backup restores, devtools). A
+  // non-array here used to THROW during boot and brick the module while the
+  // error toast blamed the library file.
+  try{
+    var v=JSON.parse(lsGet('dd_reagent_custom')||'[]');
+    if(!Array.isArray(v)) return [];
+    return v.filter(function(r){ return r&&typeof r==='object'&&r.id&&r.name; })
+            .map(function(r){ if(!Array.isArray(r.components)) r.components=[]; return r; });
+  }catch(e){ return []; }
+}
+function rpMergeCustom(){ var cust=rpCustom(); var cat=(rpLib.categories||[]).find(function(c){return c.key==='custom';}); if(cust.length){ if(!cat){ cat={key:'custom',title:'My recipes',recipes:[]}; rpLib.categories.push(cat);} cat.recipes=cust; } else if(cat){ rpLib.categories.splice(rpLib.categories.indexOf(cat),1); } }
 function rpRenderCats(){ var el=document.getElementById('rpCatFilter'); if(!el) return; var cats=[{key:'all',title:'All',n:rpAllRecipes.length}].concat((rpLib.categories||[]).map(function(c){return {key:c.key,title:c.title,n:(c.recipes||[]).length};})).filter(function(c){return c.n>0;}); el.innerHTML=cats.map(function(c){return '<button class="rp-cat'+(rpActiveCat===c.key?' active':'')+'" onclick="rpSetCat(\''+jsAttr(c.key)+'\')">'+escapeHtml(c.title)+' <span class="rp-catn">'+c.n+'</span></button>';}).join(''); }
 function rpSetCat(k){ rpActiveCat=k; rpRenderCats(); rpRenderList(); }
 function rpRenderList(){ var q=(document.getElementById('rpSearch').value||'').trim().toLowerCase(); var list=rpAllRecipes.filter(function(r){return rpActiveCat==='all'||r._catKey===rpActiveCat;}); if(q) list=list.filter(function(r){ return (r.name+' '+(r.aka||[]).join(' ')+' '+(r.summary||'')+' '+r._cat).toLowerCase().indexOf(q)>=0; }); var el=document.getElementById('rpList'); if(!list.length){ el.innerHTML='<div class="rp-empty" style="padding:16px;">No matches.</div>'; return; } el.innerHTML=list.map(function(r){ return '<button class="rp-item'+(rpSelectedId===r.id?' active':'')+'" role="option" onclick="rpSelect(\''+jsAttr(r.id)+'\')"><div class="rp-item-name">'+escapeHtml(r.name)+'</div><div class="rp-item-sum">'+escapeHtml(r.summary||r._cat)+'</div></button>'; }).join(''); }
@@ -5616,11 +5661,27 @@ function rpSelect(id){
 // in the one number every amount on the sheet is multiplied by. ||0 still
 // swallows an empty or unparseable field.
 function rpVolumeMl(){ var v=SCI.parse(document.getElementById('rpVolume').value)||0; var u=document.getElementById('rpVolUnit').value; return u==='L'?v*1000:u==='uL'?v/1000:v; }
-function rpConcCanon(value,unit){ var u=(unit||'').trim().toLowerCase().replace(/µ/g,'u'); var mv={'mg/ml':1,'ug/ml':0.001,'g/ml':1000,'ng/ml':1e-6,'g/l':1,'mg/l':0.001,'ug/l':1e-6,'ug/ul':1,'mg/ul':1000,'ng/ul':0.001}; var mo={'m':1000,'mm':1,'um':0.001,'nm':1e-6,'pm':1e-9}; if(mv[u]!=null) return {fam:'massvol',val:value*mv[u]}; if(mo[u]!=null) return {fam:'molar',val:value*mo[u]}; if(u==='x'||u==='fold') return {fam:'fold',val:value}; if(u.indexOf('%')>=0) return {fam:'pct',val:value}; if(u==='u/ml'||u==='units/ml') return {fam:'act',val:value}; return null; }
+function rpConcCanon(value,unit){ var u=(unit||'').trim().toLowerCase().replace(/[µμ]/g,'u'); var mv={'mg/ml':1,'ug/ml':0.001,'g/ml':1000,'ng/ml':1e-6,'g/l':1,'mg/l':0.001,'ug/l':1e-6,'ug/ul':1,'mg/ul':1000,'ng/ul':0.001}; var mo={'m':1000,'mm':1,'um':0.001,'nm':1e-6,'pm':1e-9}; var ac={'u/ml':1,'units/ml':1,'u/ul':1000,'units/ul':1000}; if(mv[u]!=null) return {fam:'massvol',val:value*mv[u]}; if(mo[u]!=null) return {fam:'molar',val:value*mo[u]}; if(u==='x'||u==='fold') return {fam:'fold',val:value}; if(u.indexOf('%')>=0) return {fam:'pct',val:value,sub:/w\/v/.test(u)?'wv':/v\/v/.test(u)?'vv':/w\/w/.test(u)?'ww':''}; if(ac[u]!=null) return {fam:'act',val:value*ac[u]}; return null; }
+// C1V1 is a RATIO, so two byte-identical unit strings need no unit table at
+// all — "0.5 mM each" from "10 mM each" is a 1:20 dilution whatever "each"
+// means. This is what lets shipped enzyme lines (U/µL) compute and be edited.
+function rpStockPair(s,v){
+  var sc=rpConcCanon(s.stockConc,s.stockUnit), fc=rpConcCanon(v!=null?v:s.finalConc,s.finalUnit);
+  if(sc&&fc&&sc.fam===fc.fam){
+    // % subtypes are NOT interconvertible without a density: 10% w/v into
+    // "% v/v" is not a 1:x dilution. Only block when BOTH sides are explicit.
+    if(sc.fam==='pct'&&sc.sub&&fc.sub&&sc.sub!==fc.sub) return null;
+    return {sc:sc,fc:fc};
+  }
+  var a=String(s.stockUnit||'').trim().toLowerCase().replace(/[µμ]/g,'u');
+  var b=String(s.finalUnit||'').trim().toLowerCase().replace(/[µμ]/g,'u');
+  if(a&&a===b) return {sc:{fam:'same',val:s.stockConc},fc:{fam:'same',val:(v!=null?v:s.finalConc)}};
+  return null;
+}
 function rpNum(n){ if(n==null||isNaN(n)) return '—'; return SCI.fmt(n,4); }
 function rpMass(g){ if(g>=1) return rpNum(g)+' g'; if(g>=0.001) return rpNum(g*1000)+' mg'; return rpNum(g*1e6)+' µg'; }
 function rpVol(mL){ if(mL>=1000) return rpNum(mL/1000)+' L'; if(mL>=1) return rpNum(mL)+' mL'; return rpNum(mL*1000)+' µL'; }
-function rpComponentAmount(c,volMl){ var volL=volMl/1000; if(c.gramsPerLiter!=null) return {kind:'mass',grams:c.gramsPerLiter*volL,detail:c.gramsPerLiter+' g/L'}; if(c.molarity_M!=null&&c.mw_gmol!=null) return {kind:'mass',grams:c.molarity_M*c.mw_gmol*volL,detail:rpNum(c.molarity_M)+' M · MW '+rpNum(c.mw_gmol)+(c.form?' · '+c.form:'')}; if(c.percent){ if((c.percent.type||'w/v').toLowerCase()==='v/v') return {kind:'vol',mL:(c.percent.value/100)*volMl,detail:c.percent.value+'% v/v'}; return {kind:'mass',grams:(c.percent.value/100)*volMl,detail:c.percent.value+'% w/v'}; } if(c.volumeFraction) return {kind:'vol',mL:(c.volumeFraction.value/100)*volMl,detail:c.volumeFraction.value+'% v/v'}; if(c.fromStock){ var s=c.fromStock; var sc=rpConcCanon(s.stockConc,s.stockUnit), fc=rpConcCanon(s.finalConc,s.finalUnit); if(sc&&fc&&sc.fam===fc.fam&&sc.val>0){ return {kind:'vol',mL:(fc.val*volMl)/sc.val,detail:'from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock → '+rpNum(s.finalConc)+' '+s.finalUnit}; } return {kind:'note',text:'to '+rpNum(s.finalConc)+' '+s.finalUnit+' from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock'}; } return {kind:'note',text:c.note||'(see notes)'}; }
+function rpComponentAmount(c,volMl){ var volL=volMl/1000; if(c.gramsPerLiter!=null) return {kind:'mass',grams:c.gramsPerLiter*volL,detail:c.gramsPerLiter+' g/L'}; if(c.molarity_M!=null&&c.mw_gmol!=null) return {kind:'mass',grams:c.molarity_M*c.mw_gmol*volL,detail:rpNum(c.molarity_M)+' M · MW '+rpNum(c.mw_gmol)+(c.form?' · '+c.form:'')}; if(c.percent){ if((c.percent.type||'w/v').toLowerCase()==='v/v') return {kind:'vol',mL:(c.percent.value/100)*volMl,detail:c.percent.value+'% v/v'}; return {kind:'mass',grams:(c.percent.value/100)*volMl,detail:c.percent.value+'% w/v'}; } if(c.volumeFraction) return {kind:'vol',mL:(c.volumeFraction.value/100)*volMl,detail:c.volumeFraction.value+'% v/v'}; if(c.fromStock){ var s=c.fromStock; var pr=rpStockPair(s); if(pr&&pr.sc.val>0){ return {kind:'vol',mL:(pr.fc.val*volMl)/pr.sc.val,detail:'from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock → '+rpNum(s.finalConc)+' '+s.finalUnit}; } return {kind:'note',text:'to '+rpNum(s.finalConc)+' '+s.finalUnit+' from '+rpNum(s.stockConc)+' '+s.stockUnit+' stock'}; } return {kind:'note',text:c.note||'(see notes)'}; }
 function rpAmountStr(a){ return a.kind==='mass'?rpMass(a.grams):a.kind==='vol'?rpVol(a.mL):'—'; }
 /* ── Edit-mode chrome ──────────────────────────────────────────────────
    Three HTML builders kept out of rpCompute so the render stays readable.
@@ -5645,7 +5706,7 @@ function rpEditCellHtml(c,ci){
   if(lab==null) return '<span class="rp-edit rp-einwrap"><span class="rp-nonum" title="This line is prose — a titrant or a cross-reference — so it has no numeric amount to adjust.">—</span>'+rm+'</span>';
   // Enter must commit: these inputs sit in no <form>, so Chrome fires no
   // change on Enter — blur() forces it, and blur is also what commits on Tab.
-  return '<span class="rp-edit rp-einwrap"><input type="text" inputmode="decimal" class="rp-ein" id="rpEd'+ci+'" value="'+
+  return '<span class="rp-edit rp-einwrap"><input type="text" inputmode="decimal" class="rp-ein" id="rpEd'+ci+'" data-cn="'+nm+'" value="'+
     escapeHtml(String(rpEditValue(c)))+'" onchange="rpEditConc('+ci+',this.value)" onkeydown="if(event.key===\'Enter\'||event.keyCode===13)this.blur()" aria-label="'+nm+' concentration ('+escapeHtml(lab)+')">'+
     '<span class="rp-eunit">'+escapeHtml(lab)+'</span>'+rm+'</span>';
 }
@@ -5667,6 +5728,11 @@ function rpFlushPendingEdit(){
   if(!ae.closest||!ae.closest('#rpSheet'))return;
   var ci=parseInt(ae.id.slice(4),10); if(!isFinite(ci))return;
   var r=rpCurrentRecipe(); var c=r&&r.components&&r.components[ci]; if(!c)return;
+  // The input remembers WHICH component it was rendered for. If the model
+  // shifted under it (a removal, a recipe switch) the index alone would write
+  // the pending value into whatever now occupies that slot.
+  var cn=ae.getAttribute&&ae.getAttribute('data-cn');
+  if(cn!=null&&cn!==String(c.name||''))return;
   var cur=rpEditValue(c);
   if(cur==null||String(ae.value).trim()===String(cur))return;   // nothing pending
   ae.onchange=null;                              // the teardown must not re-fire this edit
@@ -5679,16 +5745,24 @@ function rpCompute(){ var r=rpCurrentRecipe(); var el=document.getElementById('r
   r=rpCurrentRecipe();
   rpRenderBusy=true; try{ rpComputeInner(r); } finally { rpRenderBusy=false; } }
 function rpComputeInner(r){ var el=document.getElementById('rpSheet'); var volMl=rpVolumeMl();
+  // Imports and hand-edited storage can deliver components that are not an
+  // array of objects; throwing mid-render left the PREVIOUS recipe's sheet on
+  // screen under the NEW selection — a wrong-recipe bench sheet. Bad entries
+  // become inert placeholders rather than being filtered, so the row indexes
+  // the edit handlers carry still line up with the working copy's array.
+  var _comps=(Array.isArray(r.components)?r.components:[]).map(function(c){
+    return (c&&typeof c==='object')?c:{name:'(invalid component)',note:'This entry is malformed — remove it or re-import the recipe.'};
+  });
   // "Dirty" is a property of THIS recipe's working copy. rpWork can be a
   // leftover from another recipe (rpSaveCustom jumps rpSelectedId without
   // going through rpSelect), and branding an unrelated sheet "(adjusted)"
   // with another recipe's banner was a real, reachable bug.
-  var dirty=!!(rpWork&&rpWork.id===r.id&&rpWorkDirty()); var sumArr=dirty?rpChangeSummary(rpWork):[]; var sum=sumArr.join('; '); var lines=[]; var rows=(r.components||[]).map(function(c,ci){ var a=rpComponentAmount(c,volMl); var amtTxt = a.kind==='note'?a.text:rpAmountStr(a); lines.push('  '+c.name+': '+amtTxt); var amt=a.kind==='note'?'<span class="rp-note-amt">'+escapeHtml(a.text)+'</span>':'<strong>'+escapeHtml(rpAmountStr(a))+'</strong>'; var SEP='<span class="rp-sep"> — </span>'; var dtxt=(a.detail||'')+((c._was&&!c._added)?' · was '+c._was.v+' '+c._was.label:''); var det=dtxt?SEP+'<div class="rp-cdetail">'+escapeHtml(dtxt)+'</div>':''; var ntxt=c.note?((c._was&&!c._added)?'Library note (for '+c._was.v+' '+c._was.label+'): '+c.note:c.note):''; var note=ntxt?SEP+'<div class="rp-cnote">'+escapeHtml(ntxt)+'</div>':''; var haz=c.hazard?SEP+'<div class="rp-chaz">⚠ '+escapeHtml(c.hazard)+'</div>':''; var ed=rpEditMode?rpEditCellHtml(c,ci):''; return '<tr><td class="rp-cname">'+escapeHtml(c.name)+det+ed+note+haz+'</td><td class="rp-camt">'+amt+'</td></tr>'; }).join('');
+  var dirty=!!(rpWork&&rpWork.id===r.id&&rpWorkDirty()); var sumArr=dirty?rpChangeSummary(rpWork):[]; var sum=sumArr.join('; '); var lines=[]; var rows=_comps.map(function(c,ci){ var a=rpComponentAmount(c,volMl); var amtTxt = a.kind==='note'?a.text:rpAmountStr(a); lines.push('  '+c.name+': '+amtTxt); var amt=a.kind==='note'?'<span class="rp-note-amt">'+escapeHtml(a.text)+'</span>':'<strong>'+escapeHtml(rpAmountStr(a))+'</strong>'; var SEP='<span class="rp-sep"> — </span>'; var dtxt=(a.detail||'')+((c._was&&!c._added)?' · was '+c._was.v+' '+c._was.label:''); var det=dtxt?SEP+'<div class="rp-cdetail">'+escapeHtml(dtxt)+'</div>':''; var ntxt=c.note?((c._was&&!c._added)?'Library note (for '+c._was.v+' '+c._was.label+'): '+c.note:c.note):''; var note=ntxt?SEP+'<div class="rp-cnote">'+escapeHtml(ntxt)+'</div>':''; var haz=c.hazard?SEP+'<div class="rp-chaz">⚠ '+escapeHtml(c.hazard)+'</div>':''; var ed=rpEditMode?rpEditCellHtml(c,ci):''; return '<tr><td class="rp-cname">'+escapeHtml(c.name)+det+ed+note+haz+'</td><td class="rp-camt">'+amt+'</td></tr>'; }).join('');
   var meta=[]; function m(k,v){ if(v!=null&&v!=='') meta.push('<dt>'+k+'</dt><dd>'+escapeHtml(String(v))+'</dd>'); }
   if(dirty) m('Adjusted', sum);
   m('Bring to volume with', r.solvent); m('Final pH', r.finalPH); m('Adjust pH with', r.adjustPHWith); m('Sterilize', r.sterilization); m('Storage', r.storage); m('Shelf life', r.shelfLife); if(r.hazards) meta.push('<dt style="color:var(--danger,#c0392b)">Hazards</dt><dd style="color:var(--danger,#c0392b)">'+escapeHtml(r.hazards)+'</dd>');
   var notes=(r.notes&&r.notes.length)?'<div class="rp-notes"><strong>Notes</strong><ul>'+r.notes.map(function(n){return '<li>'+escapeHtml(n)+'</li>';}).join('')+'</ul></div>':'';
-  var src=(r.sources&&r.sources.length)?'<div class="rp-src">Sources: '+r.sources.map(function(s){ return s.url?'<a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">'+escapeHtml(s.title||s.url)+'</a>'+(s.license?' <em>('+escapeHtml(s.license)+')</em>':''):escapeHtml(s.title||''); }).join(' · ')+'</div>':'';
+  var src=(r.sources&&r.sources.length)?'<div class="rp-src">Sources: '+r.sources.map(function(s){ return (s.url&&/^https?:/i.test(String(s.url).trim()))?'<a href="'+encodeURI(s.url)+'" target="_blank" rel="noopener">'+escapeHtml(s.title||s.url)+'</a>'+(s.license?' <em>('+escapeHtml(s.license)+')</em>':''):escapeHtml(s.title||s.url||''); }).join(' · ')+'</div>':'';
   var unc=r.uncertain?'<div class="rp-chaz" style="margin:6px 0 0">⚠ Marked uncertain — verify against your own protocol before use.</div>':'';
   var gap=r.openSourceGap?'<div class="rp-cnote" style="margin-top:4px">Note: no open-source citation yet for this recipe.</div>':'';
   var banner=dirty?'<div class="rp-modbanner">'+escapeHtml('Adjusted from the library recipe · '+sumArr.length+' change'+(sumArr.length===1?'':'s')+': '+sum)+'</div>':'';
@@ -5698,7 +5772,29 @@ function rpComputeInner(r){ var el=document.getElementById('rpSheet'); var volMl
 function rpCopy(){ if(!rpLastText){ showToast('Pick a recipe first','warn'); return; } (navigator.clipboard?navigator.clipboard.writeText(rpLastText):Promise.reject()).then(function(){ showToast('Prep sheet copied'); }).catch(function(){ var ta=document.createElement('textarea'); ta.value=rpLastText; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy'); showToast('Prep sheet copied');}catch(e){showToast('Copy failed','warn');} ta.remove(); }); }
 function rpPrint(){ var sheet=document.getElementById('rpSheet'); if(!rpSelectedId){ showToast('Pick a recipe first','warn'); return; } var w=window.open('','_blank'); if(!w){ showToast('Pop-up blocked','warn'); return; } w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Prep sheet</title><style>body{font-family:Georgia,serif;max-width:640px;margin:24px auto;padding:0 16px;color:#1a1a1a;}h2{margin:0 0 6px;}table{width:100%;border-collapse:collapse;margin:10px 0;}td{padding:6px 4px;border-bottom:1px solid #ddd;vertical-align:top;}.rp-camt{text-align:right;white-space:nowrap;}dl{display:grid;grid-template-columns:130px 1fr;gap:3px 10px;font-size:13px;}dt{font-weight:700;}dd{margin:0;}.rp-cdetail,.rp-cnote,.rp-src{font-size:11px;color:#666;}.rp-chaz{color:#b00;font-size:11px;}small{color:#888;}.rp-noprint,.rp-edit{display:none!important}</style></head><body>'+sheet.innerHTML+'<p><small>Generated by Dilution Designer · verify against your lab protocol.</small></p></body></html>'); w.document.close(); w.focus(); setTimeout(function(){ w.print(); }, 250); }
 function rpExportLibrary(){ var data=JSON.stringify({version:(rpLib&&rpLib.version)||'1.0',categories:(rpLib?rpLib.categories:[])},null,1); var blob=new Blob([data],{type:'application/json'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='reagent-library.json'; a.click(); setTimeout(function(){URL.revokeObjectURL(a.href);},1000); showToast('Library exported'); }
-function rpImportLibrary(ev){ var f=ev.target.files&&ev.target.files[0]; if(!f) return; var rd=new FileReader(); rd.onload=function(){ try{ var d=JSON.parse(rd.result); var recipes=[]; if(Array.isArray(d)) recipes=d; else if(d.categories) recipes=d.categories.reduce(function(a,c){return a.concat(c.recipes||[]);},[]); else if(d.recipes) recipes=d.recipes; if(!recipes.length) throw new Error('no recipes found'); var cust=rpCustom(); var byId={}; cust.forEach(function(r){byId[r.id]=r;}); recipes.forEach(function(r){ if(r&&r.id&&r.name) byId[r.id]=r; }); var merged=Object.keys(byId).map(function(k){return byId[k];}); lsSet('dd_reagent_custom',JSON.stringify(merged)); rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes'; showToast('Imported '+recipes.length+' recipe(s)'); }catch(e){ showToast('Import failed: '+e.message,'warn'); } ev.target.value=''; }; rd.readAsText(f); }
+function rpImportLibrary(ev){ var f=ev.target.files&&ev.target.files[0]; if(!f) return; var rd=new FileReader(); rd.onload=function(){ try{ var d=JSON.parse(rd.result); var recipes=[]; if(Array.isArray(d)) recipes=d; else if(d.categories) recipes=(Array.isArray(d.categories)?d.categories:[]).reduce(function(a,c){return a.concat((c&&c.recipes)||[]);},[]); else if(d.recipes) recipes=d.recipes; if(!Array.isArray(recipes)||!recipes.length) throw new Error('no recipes found in that file');
+  // Skip entries that are byte-identical to a shipped library recipe: a user
+  // re-importing an exported library would otherwise clone all 243 recipes
+  // into localStorage as shadowing duplicates. Report REAL counts — the old
+  // toast said "Imported N" for records it silently dropped or never wrote.
+  var shipped={}; try{ (rpLib&&rpLib.categories||[]).forEach(function(c){ (c.recipes||[]).forEach(function(r){ if(c.key!=='custom'&&r&&r.id) shipped[r.id]=JSON.stringify(r); }); }); }catch(e){}
+  var cust=rpCustom(); var byId={}; cust.forEach(function(r){byId[r.id]=r;});
+  var kept=0, same=0, invalid=0;
+  recipes.forEach(function(r){
+    if(!(r&&typeof r==='object'&&r.id&&r.name)){ invalid++; return; }
+    if(shipped[r.id]&&shipped[r.id]===JSON.stringify(r)){ same++; return; }
+    if(!Array.isArray(r.components)) r.components=[];
+    byId[r.id]=r; kept++;
+  });
+  if(!kept){ showToast(same?('Nothing new — all '+same+' recipes are already in the library unchanged'):'No usable recipes in that file (each needs an id and a name)','warn',6000); ev.target.value=''; return; }
+  var merged=Object.keys(byId).map(function(k){return byId[k];});
+  if(!lsSet('dd_reagent_custom',JSON.stringify(merged))){ showToast('Couldn’t import — browser storage is full or unavailable.','warn',6000); ev.target.value=''; return; }
+  rpMergeCustom(); rpFlatten(); rpRenderCats(); rpRenderList(); var s=document.getElementById('rpLibStatus'); if(s) s.textContent=rpAllRecipes.length+' recipes';
+  var bits=['✓ imported '+kept+' recipe'+(kept===1?'':'s')];
+  if(same) bits.push(same+' identical to the library, skipped');
+  if(invalid) bits.push(invalid+' unusable, skipped');
+  showToast(bits.join(' · '),(same||invalid)?'warn':'green',5000);
+ }catch(e){ showToast('Import failed: '+e.message,'warn'); } ev.target.value=''; }; rd.readAsText(f); }
 function rpAddCustom(){
   var bg=document.createElement('div'); bg.className='rp-modal-bg'; bg.onclick=function(e){ if(e.target===bg) bg.remove(); };
   bg.innerHTML='<div class="rp-modal"><h2 style="margin:0 0 4px;font-family:var(--serif,Georgia,serif);">Add a recipe</h2><p style="font-size:12px;color:var(--text3,#8a8172);margin:0 0 12px;">Saved in this browser. Each component: pick a type and fill the amount.</p>'+
@@ -5792,7 +5888,7 @@ function rpSaveCustom(){
   });
   if(err){ showToast(err,'warn',6000); return; }
   if(!comps.length){ showToast('Add at least one component','warn'); return; }
-  var rec={ id:'custom-'+Date.now(), name:name, summary:(document.getElementById('rcSum').value||'').trim()||'Custom recipe', components:comps, solvent:(document.getElementById('rcSolvent').value||'').trim(), sterilization:(document.getElementById('rcSteril').value||'').trim(), notes:['Custom recipe added by you.'], sources:[{title:'My lab protocol',license:'custom'}] };
+  var rec={ id:'custom-'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), name:name, summary:(document.getElementById('rcSum').value||'').trim()||'Custom recipe', components:comps, solvent:(document.getElementById('rcSolvent').value||'').trim(), sterilization:(document.getElementById('rcSteril').value||'').trim(), notes:['Custom recipe added by you.'], sources:[{title:'My lab protocol',license:'custom'}] };
   var cust=rpCustom(); cust.push(rec);
   if(!lsSet('dd_reagent_custom',JSON.stringify(cust))){ showToast('Couldn’t save the recipe — browser storage is full or unavailable.','warn',6000); return; }
   // This jumps the selection without rpSelect, so its dirty-work discard must
@@ -5821,7 +5917,7 @@ function rpSaveWorkAsCustom(name){
     if(c._was&&c.note&&!c._added) c.note='(Library note, for '+c._was.v+' '+c._was.label+') '+c.note;
   });
   var rec=rpStripInternal(w);
-  rec.id='custom-'+Date.now();
+  rec.id='custom-'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   rec.name=(name&&String(name).trim())||(base+' (modified)');
   var chg=rpChangeSummary(rpWork);
   if(chg.length) rec.notes=(rec.notes||[]).concat(['Modified from library recipe "'+base+'": '+chg.join('; ')+'.']);
@@ -5844,7 +5940,13 @@ function rpSaveWorkAsCustom(name){
    mode, so opening the editor and closing it again leaves nothing behind and
    rpWorkDirty() stays false. */
 function rpToggleEdit(){ rpEditMode=!rpEditMode; rpCompute(); }
-function rpResetWork(){ rpWork=null; rpEditMode=false; rpCompute(); showToast('Restored the library recipe'); }
+function rpResetWork(){
+  // A still-focused input holds a value the user is throwing away. Neutralise
+  // it BEFORE the render, or rpFlushPendingEdit would commit it and quietly
+  // re-create the working copy the reset just destroyed.
+  var ae=document.activeElement;
+  if(ae&&ae.id&&ae.id.indexOf('rpEd')===0){ ae.onchange=null; try{ae.blur();}catch(e){} }
+  rpWork=null; rpEditMode=false; rpCompute(); showToast('Restored the library recipe'); }
 // Model-only: ensure the working copy, apply, toast a rejection. No render —
 // callers decide, so the flush path can commit without recursing into rpCompute.
 function rpEditApply(ci,raw){
@@ -5855,7 +5957,12 @@ function rpEditApply(ci,raw){
   return res;
 }
 function rpEditConc(ci,raw){
-  rpEditApply(ci,raw);
+  var res=rpEditApply(ci,raw);
+  if(res&&!res.ok){
+    var bad=document.getElementById('rpEd'+ci);
+    if(bad&&rpWork&&rpWork.components&&rpWork.components[ci])
+      bad.value=String(rpEditValue(rpWork.components[ci]));   // or the flush re-rejects it: two toasts per keystroke
+  }
   // A change event fired by a render's own DOM teardown must not start a
   // second render inside the first — the model is already committed by the
   // flush, and the outer render is being built from it.
@@ -5868,11 +5975,16 @@ function rpEditConc(ci,raw){
   if(elx){ elx.focus(); elx.select&&elx.select(); }
 }
 function rpEditRemove(ci){
+  // Commit any pending typed value FIRST: its rpEd<i> index was minted before
+  // this splice, and flushing after the removal wrote the value into whatever
+  // component had shifted into that slot.
+  rpFlushPendingEdit();
   rpWorkEnsure();
   if(!rpWorkRemove(ci)){ showToast('That line could not be removed','warn'); return; }
   rpCompute();
 }
 function rpEditAdd(){
+  rpFlushPendingEdit();
   var row=document.querySelector('#rpSheet .rc-row');
   if(!row){ showToast('No component row to read','warn'); return; }
   var c=rpCompRowRead(row);
@@ -7203,7 +7315,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       DD_KEYS.forEach(function(d){ if(_dup[d.k])_dupes.push(d.k); _dup[d.k]=1; });
       if(_dupes.length) fails.push('DD_KEYS has duplicate entries: '+_dupes.join(','));
       // Every key any module persists must be in DD_KEYS or it misses backups.
-      n++; var _known=['dd_state','dd_layouts','dd_titer','dd_lysates','dd_hosts','dd_notebook','dd_reagent_custom',
+      n++; var _known=['dd_state','dd_layouts','dd_titer','dd_lysates','dd_hosts','dd_notebook','dd_seq','dd_reagent_custom',
         'dd_gel','dd_gel_ladders','dd_phg','dd_mic_panel','dd_mic_dyes','dd_sci','dd_welcomed',
         'mbc_last','pr_last','mic_last'];
       var _missing=_known.filter(function(k){ return !DD_KEYS.some(function(d){return d.k===k;}); });
@@ -7972,7 +8084,55 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
         var _rvE={name:'z',gramsPerLiter:20,_added:true};
         rpApplyEdit(_rvE,'25');
         n++; if(_rvE._was||_rvE.gramsPerLiter!==25) fails.push('_added components must not mint _was');
-        // A stale working copy (selection moved on) and an emptied recipe must both refuse to save.
+        // ── Audit-pass regressions, each reproduced before being fixed. ──
+      // The shipped Mowiol mountant uses 120 % v/v (dissolution is not volume-
+      // additive). An absolute 100 cap made that value unrestorable: edit away,
+      // and editing BACK was rejected — the sheet stuck wrong forever.
+      n++; var _mw={name:'Tris-HCl',percent:{value:120,type:'v/v'}};
+      var _mwR=rpApplyEdit(_mw,'60');
+      if(!_mwR.ok||_mw._was.v!==120) fails.push('120→60 %v/v must apply and record was=120');
+      _mwR=rpApplyEdit(_mw,'120');
+      if(!_mwR.ok||_mw._was||_mw.percent.value!==120)
+        fails.push('editing BACK to the library 120 %v/v must be accepted and clear the marker, got '+JSON.stringify(_mwR));
+      n++; if(rpApplyEdit({name:'x',percent:{value:50,type:'v/v'}},'120').ok)
+        fails.push('a 50 %v/v component must still refuse 120%');
+      // Add-then-remove is a net nothing: logging it wrote "X removed (was 20
+      // g/L)" into provenance, asserting the library had a component it never did.
+      n++; var _arW={id:'ar',_baseName:'LB',_removed:[],components:[{name:'T',gramsPerLiter:10}]};
+      var _svW=rpWork; rpWork=_arW;
+      rpWorkAdd({name:'D-Glucose',gramsPerLiter:20});
+      rpWorkRemove(1);
+      if(rpWorkDirty()||(_arW._removed||[]).length)
+        fails.push('add-then-remove must leave the copy clean, got removed='+JSON.stringify(_arW._removed));
+      rpWork=_svW;
+      // Same-unit fromStock lines (U/µL enzymes, "mM each" dNTPs) are plain
+      // ratios: 2 from 40 in 20 µL = 1 µL by hand. They must compute AND edit.
+      n++; var _uu={name:'RNase inhibitor',fromStock:{stockConc:40,stockUnit:'U/uL',finalConc:2,finalUnit:'U/uL'}};
+      var _uuA=rpComponentAmount(_uu,0.02);
+      if(_uuA.kind!=='vol'||!_near(_uuA.mL,0.001,1e-12))
+        fails.push('40→2 U/µL in 20 µL must compute 0.001 mL (1 µL), got '+JSON.stringify(_uuA));
+      n++; if(!rpApplyEdit(_uu,'4').ok||_uu.fromStock.finalConc!==4)
+        fails.push('a same-unit fromStock line must accept an edit');
+      n++; if(rpApplyEdit(_uu,'80').ok) fails.push('4→80 exceeds the 40 U/µL stock and must refuse');
+      // A typed unit suffix must REFUSE, not silently misparse: "50 mM" in an
+      // M-labelled field would commit 50 M — a thousand-fold error.
+      n++; var _sfx={name:'Tris',molarity_M:0.025,mw_gmol:121.14};
+      if(rpApplyEdit(_sfx,'50 mM').ok||_sfx.molarity_M!==0.025)
+        fails.push('"50 mM" in an M field must be refused, not committed as 50 M');
+      n++; if(!rpApplyEdit(_sfx,'2e-3').ok) fails.push('e-notation must still be accepted');
+      n++; if(!rpApplyEdit({name:'y',gramsPerLiter:5},'1,5').ok) fails.push('decimal-comma must still be accepted');
+      // Hostile storage must not brick boot: a non-array store reads as empty.
+      n++; var _hsSaved=lsGet('dd_reagent_custom');
+      try{
+        lsSet('dd_reagent_custom','"pwned"');
+        if(!Array.isArray(rpCustom())||rpCustom().length!==0) fails.push('a string store must read as []');
+        lsSet('dd_reagent_custom','null');
+        if(rpCustom().length!==0) fails.push('a null store must read as []');
+        lsSet('dd_reagent_custom','[{"id":"k","name":"K","components":"ten"}]');
+        var _hsK=rpCustom()[0];
+        if(!_hsK||!Array.isArray(_hsK.components)) fails.push('a non-array components field must be coerced to []');
+      } finally { if(_hsSaved==null) lsDel('dd_reagent_custom'); else lsSet('dd_reagent_custom',_hsSaved); }
+      // A stale working copy (selection moved on) and an emptied recipe must both refuse to save.
         var _rvW=rpWork,_rvS=rpSelectedId,_rvLs=lsGet('dd_reagent_custom');
         try{
           rpWork={id:'aaa',_baseName:'A',_removed:[],components:[{name:'k',gramsPerLiter:1,_was:{v:2,label:'g/L'}}]};
