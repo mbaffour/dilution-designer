@@ -729,6 +729,14 @@ body.print-plate-mode .excl-bar{display:none!important;}
   </div>
 </div>
 
+<!-- ══════════ CFU COUNTS ══════════ -->
+<div id="cfuView" style="display:none;padding:16px 20px 60px;max-width:1180px;margin:0 auto;">
+  <div class="mbc-grid">
+    <aside class="mbc-nav" id="cfuSide"></aside>
+    <section class="mbc-main" id="cfuMain"></section>
+  </div>
+</div>
+
 <!-- ══════════ LYSATE EDITOR ══════════ -->
 <div class="modal-overlay" id="phgEdit" style="display:none;" onclick="if(event.target===this)PHG.closeEdit()">
   <div class="modal-box">
@@ -1225,6 +1233,7 @@ const DD_KEYS=[
   {k:'dd_state',          label:'Plate layout (current)',     json:true},
   {k:'dd_layouts',        label:'Saved plate layouts',        json:true},
   {k:'dd_titer',          label:'Titering experiments',       json:true},
+  {k:'dd_cfu',            label:'CFU count experiments',      json:true},
   {k:'dd_lysates',        label:'Lysate library',             json:true},
   {k:'dd_hosts',          label:'Host / strain registry',     json:true},
   {k:'dd_notebook',       label:'Lab notebook entries',       json:true},
@@ -1518,6 +1527,7 @@ const MODE_GROUPS=[
     {m:'phg',    label:'🦠 Phage Planner'}]},
   {key:'record',label:'Record', modes:[
     {m:'titer',  label:'⭕ Titering & EOP'},
+    {m:'cfu',    label:'🧫 CFU Counts'},
     {m:'results',label:'📈 Results'},
     {m:'notebook',label:'📓 Lab Notebook'}]},
   {key:'tools', label:'Tools',  modes:[
@@ -1573,8 +1583,8 @@ function setMode(m) {
       gv=document.getElementById('gelView'), nv=document.getElementById('notebookView'),
       lv=document.getElementById('phgView'), mv=document.getElementById('micView'),
       tv=document.getElementById('titView'), sq=document.getElementById('seqView'),
-      rz=document.getElementById('resView');
-  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto'||m==='gel'||m==='notebook'||m==='phg'||m==='mic'||m==='titer'||m==='seq'||m==='results');
+      rz=document.getElementById('resView'), cf=document.getElementById('cfuView');
+  var special=(m==='reagent'||m==='dilcalc'||m==='home'||m==='calc'||m==='proto'||m==='gel'||m==='notebook'||m==='phg'||m==='mic'||m==='titer'||m==='seq'||m==='results'||m==='cfu');
   if(rv) rv.style.display = m==='reagent'?'':'none';
   if(dv) dv.style.display = m==='dilcalc'?'':'none';
   if(hv) hv.style.display = m==='home'?'':'none';
@@ -1587,6 +1597,7 @@ function setMode(m) {
   if(tv) tv.style.display = m==='titer'?'':'none';
   if(sq) sq.style.display = m==='seq'?'':'none';
   if(rz) rz.style.display = m==='results'?'':'none';
+  if(cf) cf.style.display = m==='cfu'?'':'none';
   if(appEl) appEl.style.display = special?'none':'';
   if(m==='reagent'){ rpInit(); return; }
   if(m==='dilcalc'){ dcInit(); return; }
@@ -1598,6 +1609,7 @@ function setMode(m) {
   if(m==='phg'){ if(window.PHG) PHG.init(); if(window.HOSTUI) HOSTUI.render(); return; }
   if(m==='mic'){ if(window.MIC) MIC.init(); return; }
   if(m==='titer'){ if(window.TIT) TIT.init(); return; }
+  if(m==='cfu'){ if(window.CFU) CFU.init(); return; }
   if(m==='seq'){ if(window.SEQ) SEQ.init(); return; }
   if(m==='results'){ if(window.RES) RES.init(); return; }
   // The plate planner's two experiment types. One tab, switch inside.
@@ -8317,6 +8329,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       {m:'proto',icon:'📋',title:'Protocols',desc:(window.PROTO?PROTO.list.length:21)+' step-by-step protocols — miniprep, CTAB gDNA, gels, transformation, plaque assay — that rescale as you change the numbers.'},
       {m:'phg',icon:'🦠',title:'Phage Planner',desc:'Keep your lysates and their titers, then work out the volume for an infection — by MOI, total PFU or final PFU/mL — and the dilution to make when that volume is too small to pipette.'},
       {m:'titer',icon:'⭕',title:'Titering & EOP',desc:'Log plaque counts with replicates, get PFU/mL with SD and CV, group lysates under host conditions, EOP against a switchable reference with Welch-t significance — then export tidy CSVs and publication-ready SVG/PNG bar charts.'},
+      {m:'cfu',icon:'🧫',title:'CFU Counts',desc:'Colony counts → CFU/mL. Name your samples, log replicates at any dilution and plating volume, get mean ± SD and CV with 30–300 window flags, and export the raw counts and summary to Excel or CSV.'},
       {m:'results',icon:'📈',title:'Results',desc:'Every titer you have ever recorded, across all experiments and the lysate library, in one filterable table — with a log-scale trend chart per phage and CSV / Excel / SVG / PDF export.'},
       {m:'mic',icon:'🔬',title:'Microscopy & Dyes',desc:nDye+' dyes and stains — what to use for what, at what concentration, in which channel. Spectra, filter/laser matching, panel bleed-through checks, and the working dilution worked out for your sample count.'},
       {m:'gel',icon:'🧪',title:'Gel Simulator',desc:'Predict an agarose or SDS-PAGE run before you pour it — '+nLad+' vendor ladders, band-resolution warnings and a best-% suggestion.'},
@@ -11862,6 +11875,272 @@ function dyeWorking(o){
   };
 })();
 
+/* ══════════════════════════ CFU COUNTS ══════════════════════════ */
+// Bacterial colony counts → CFU/mL. The bacterial sibling of Titering:
+// same count × dilution ÷ mL formula (titerFromPlaques), same stats
+// (titerStats), same countable-window flags (countFlag) — one math,
+// two assays. Kept deliberately flat: samples with replicate rows,
+// no conditions/EOP/chart machinery.
+(function(){
+  var css=`
+  .cfu-samp{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
+  .cfu-samp-hd{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;}
+  .cfu-samp-hd input[type=text]{flex:1;min-width:140px;max-width:320px;font-weight:600;}
+  .cfu-tbl input[type=text]{width:64px;}
+  .cfu-tbl input[type=checkbox]{width:auto;}
+  .cfu-mean{font:11px var(--mono);color:var(--text2);}
+  `;
+  var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
+
+  // ── state ─────────────────────────────────────────────────────────
+  var S=null;
+  function _id(){ S.seq=(S.seq||1)+1; return 'cf'+S.seq.toString(36); }
+  function defRep(k,volUl){ return {id:_id(),colonies:null,k:(k==null?5:k),volUl:volUl>0?volUl:100,tntc:false,excl:false}; }
+  function defSample(exp,n){ return {id:_id(),name:'Sample '+n,reps:[]}; }
+  function defExp(n){
+    // Inherit the shared experiment name/date rather than making you type
+    // the same thing a second time (same convention as Titering).
+    var shared=(typeof curExp==='function')?curExp():{name:'',date:''};
+    return {id:'cx'+Date.now().toString(36),name:n||shared.name||'Experiment 1',date:shared.date||ddToday(),notes:'',
+      mode:'plate',factor:10,volUl:100,samples:[]};
+  }
+  function defState(){ return {v:1,active:0,seq:1,experiments:[defExp()]}; }
+  function load(){
+    try{ var j=JSON.parse(lsGet('dd_cfu')||'null');
+      if(j&&j.v===1&&Array.isArray(j.experiments)&&j.experiments.length) return j;
+    }catch(e){}
+    return defState();
+  }
+  function save(){ if(ddShared())return; if(!lsSet('dd_cfu',JSON.stringify(S))) lsWarnOnce(); }
+  function E(){ S.active=Math.max(0,Math.min(S.active||0,S.experiments.length-1)); return S.experiments[S.active]; }
+  function sampleById(exp,id){ return exp.samples.filter(function(s){return s.id===id;})[0]||null; }
+  function repById(s,id){ return s.reps.filter(function(r){return r.id===id;})[0]||null; }
+
+  // ── math — the plaque formula, fed colonies ───────────────────────
+  function repCfu(exp,r){
+    if(r.tntc||r.excl||r.colonies==null||!isFinite(r.colonies))return NaN;
+    return titerFromPlaques(r.colonies,Math.pow(exp.factor,r.k),(r.volUl||0)/1000);
+  }
+  // {st:{n,mean,sd,cv}, plated, counted, limit, allZero, nTntc}. Zeros never
+  // enter titerStats (it would drop them silently) — they become the
+  // detection limit: < 1 colony at the least-diluted zero plate.
+  function sampleCalc(exp,s){
+    var usable=s.reps.filter(function(r){return !r.tntc&&!r.excl&&r.colonies!=null&&isFinite(r.colonies);});
+    var stt=titerStats(usable.filter(function(r){return r.colonies>0;}).map(function(r){return repCfu(exp,r);}));
+    var zeros=usable.filter(function(r){return r.colonies===0;});
+    var limit=NaN;
+    if(!stt.n&&zeros.length)
+      limit=Math.min.apply(null,zeros.map(function(r){return titerFromPlaques(1,Math.pow(exp.factor,r.k),(r.volUl||0)/1000);}));
+    return {st:stt,plated:s.reps.length,counted:stt.n,limit:limit,
+            allZero:!stt.n&&zeros.length>0,nTntc:s.reps.filter(function(r){return r.tntc;}).length};
+  }
+  function repFlagTxt(exp,r){
+    if(r.excl)return 'excluded';
+    if(r.tntc)return 'TNTC';
+    if(r.colonies==null||!isFinite(r.colonies))return '';
+    return countFlag(r.colonies,exp.mode)||'ok';
+  }
+  function flagBadge(exp,r){
+    if(r.excl)return '<span class="badge bd">excluded</span>';
+    if(r.tntc)return '<span class="badge bd">TNTC</span>';
+    if(r.colonies==null||!isFinite(r.colonies))return '';
+    var f=countFlag(r.colonies,exp.mode);
+    if(f==='zero')return '<span class="badge bn">0 → limit</span>';
+    if(f==='low')return '<span class="badge bw">below window</span>';
+    if(f==='high')return '<span class="badge bw">above window</span>';
+    return '<span class="badge bg">countable</span>';
+  }
+  function fmtC(n){ return (isFinite(n)&&n>0)?SCI.fmt(n,3):'—'; }
+
+  // ── rendering ─────────────────────────────────────────────────────
+  function renderSide(){
+    var exp=E();
+    var h='<div class="sl">Experiments</div><div class="mbc-list" role="listbox" aria-label="CFU experiments">';
+    S.experiments.forEach(function(x,i){
+      var nr=x.samples.reduce(function(a,s){return a+s.reps.length;},0);
+      h+='<button class="mbc-item'+(i===S.active?' active':'')+'" role="option" aria-selected="'+(i===S.active)+'" onclick="CFU.sel('+i+')">'+escapeHtml(x.name||('Experiment '+(i+1)))+'<span class="tit-mini" style="display:block;">'+escapeHtml(x.date||'')+' · '+x.samples.length+' samples · '+nr+' reps</span></button>';
+    });
+    h+='</div><div class="tit-row"><button class="btn ac" style="flex:1;justify-content:center;" onclick="CFU.addExp()">＋ New</button>'
+      +'<button class="btn" onclick="CFU.dupExp()" title="Duplicate this experiment">⧉</button>'
+      +'<button class="btn" onclick="CFU.delExp()" title="Delete this experiment"'+(S.experiments.length<2?' disabled':'')+'>✕</button></div>';
+    h+='<div class="tit-sec">Experiment</div>'
+      +'<div class="mbc-f"><label for="cfuExpName">Name</label><input type="text" id="cfuExpName" value="'+escapeHtml(exp.name)+'" onchange="CFU.setF(\'name\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="cfuExpDate">Date</label><input type="date" id="cfuExpDate" value="'+escapeHtml(exp.date||'')+'" onchange="CFU.setF(\'date\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="cfuExpNotes">Notes</label><input type="text" id="cfuExpNotes" value="'+escapeHtml(exp.notes||'')+'" onchange="CFU.setF(\'notes\',this.value)"></div>';
+    h+='<div class="tit-sec">Assay defaults</div>'
+      +'<div class="mbc-f"><label for="cfuMode">Assay format</label><select id="cfuMode" onchange="CFU.setF(\'mode\',this.value)">'
+      +'<option value="plate"'+(exp.mode==='plate'?' selected':'')+'>Full plate (30–300 countable)</option>'
+      +'<option value="spot"'+(exp.mode==='spot'?' selected':'')+'>Spot assay (3–30 countable)</option></select></div>'
+      +'<div class="mbc-f"><label for="cfuVolDef">Default volume plated (µL)</label><input type="text" inputmode="decimal" id="cfuVolDef" value="'+escapeHtml(String(exp.volUl))+'" onchange="CFU.setF(\'volUl\',this.value)"></div>'
+      +'<div class="mbc-f"><label for="cfuFactor">Dilution factor</label><input type="text" inputmode="decimal" id="cfuFactor" value="'+escapeHtml(String(exp.factor))+'" onchange="CFU.setF(\'factor\',this.value)"></div>'
+      +'<div class="tit-mini" style="margin-top:4px;">CFU/mL = colonies × factor<sup>k</sup> ÷ mL plated — the same formula Titering uses for plaques.</div>';
+    document.getElementById('cfuSide').innerHTML=h;
+  }
+
+  function renderMain(){
+    var exp=E();
+    var w=countWindow(exp.mode);
+    var h='<div class="mbc-head"><h2>'+escapeHtml(exp.name||'CFU Counts')+'</h2>'
+      +'<p>Count colonies → CFU/mL with replicates per sample. Countable window: '+w[0]+'–'+w[1]+' colonies. New replicates inherit the previous row’s dilution and volume.</p></div>';
+    exp.samples.forEach(function(s){
+      var c=sampleCalc(exp,s);
+      var mean=c.st.n?('mean <b>'+fmtC(c.st.mean)+'</b> CFU/mL'+(c.st.sd>0?' ± '+fmtC(c.st.sd):''))
+        :(c.allZero?'<b>&lt; '+fmtC(c.limit)+'</b> CFU/mL (detection limit)':'no countable replicates yet');
+      h+='<div class="cfu-samp"><div class="cfu-samp-hd">'
+        +'<input type="text" value="'+escapeHtml(s.name)+'" aria-label="Sample name" onchange="CFU.sampleName(\''+jsAttr(s.id)+'\',this.value)">'
+        +'<span class="cfu-mean">'+mean+'</span>'
+        +'<span style="flex:1;"></span>'
+        +'<button class="btn" onclick="CFU.addRep(\''+jsAttr(s.id)+'\')">＋ Replicate</button>'
+        +'<button class="tit-del" onclick="CFU.delSample(\''+jsAttr(s.id)+'\')" aria-label="Delete sample '+escapeHtml(s.name)+'">✕</button></div>';
+      if(s.reps.length){
+        h+='<div class="mbc-tblwrap"><table class="mbc-tbl cfu-tbl"><thead><tr><th>Rep</th><th>Colonies</th><th>Dilution</th><th>Vol (µL)</th><th>TNTC</th><th>Excl</th><th>CFU/mL</th><th>Flag</th><th></th></tr></thead><tbody>';
+        s.reps.forEach(function(r,i){
+          var t=repCfu(exp,r);
+          h+='<tr'+((r.tntc||r.excl)?' style="opacity:.55;"':'')+'><td>R'+(i+1)+'</td>'
+            +'<td><input type="text" inputmode="numeric" value="'+(r.colonies==null?'':escapeHtml(String(r.colonies)))+'" placeholder="—" aria-label="Colony count"'+(r.tntc?' disabled':'')+' onchange="CFU.rep(\''+jsAttr(s.id)+'\',\''+jsAttr(r.id)+'\',\'colonies\',this.value)"></td>'
+            +'<td><input type="text" inputmode="numeric" value="'+r.k+'" style="width:40px;" aria-label="Dilution exponent" onchange="CFU.rep(\''+jsAttr(s.id)+'\',\''+jsAttr(r.id)+'\',\'k\',this.value)"> <span class="tit-mini">'+escapeHtml(dilLabel(r.k,exp.factor))+'</span></td>'
+            +'<td><input type="text" inputmode="decimal" value="'+escapeHtml(String(r.volUl))+'" aria-label="Volume plated (µL)" onchange="CFU.rep(\''+jsAttr(s.id)+'\',\''+jsAttr(r.id)+'\',\'volUl\',this.value)"></td>'
+            +'<td style="text-align:center;"><input type="checkbox"'+(r.tntc?' checked':'')+' aria-label="Too numerous to count" onchange="CFU.rep(\''+jsAttr(s.id)+'\',\''+jsAttr(r.id)+'\',\'tntc\',this.checked)"></td>'
+            +'<td style="text-align:center;"><input type="checkbox"'+(r.excl?' checked':'')+' aria-label="Exclude from stats" onchange="CFU.rep(\''+jsAttr(s.id)+'\',\''+jsAttr(r.id)+'\',\'excl\',this.checked)"></td>'
+            +'<td>'+((isFinite(t)&&t>0)?fmtC(t):(r.colonies===0&&!r.tntc&&!r.excl?'0':'—'))+'</td>'
+            +'<td>'+flagBadge(exp,r)+'</td>'
+            +'<td><button class="tit-del" onclick="CFU.delRep(\''+jsAttr(s.id)+'\',\''+jsAttr(r.id)+'\')" aria-label="Delete replicate">✕</button></td></tr>';
+        });
+        h+='</tbody></table></div>';
+      } else {
+        h+='<div class="tit-mini">No replicates — add one above.</div>';
+      }
+      h+='</div>';
+    });
+    h+='<div class="tit-row"><button class="btn ac" onclick="CFU.addSample()">＋ Add sample</button></div>';
+    if(exp.samples.length){
+      h+='<div class="tit-sec">Summary</div>'
+        +'<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Sample</th><th>n</th><th>Mean CFU/mL</th><th>SD</th><th>CV%</th><th>Note</th></tr></thead><tbody>';
+      exp.samples.forEach(function(s){
+        var c=sampleCalc(exp,s);
+        var notes=[];
+        if(c.allZero)notes.push('all counts zero — below detection');
+        if(c.nTntc)notes.push(c.nTntc+' TNTC');
+        if(c.counted&&c.counted<c.plated)notes.push('counted '+c.counted+' of '+c.plated);
+        h+='<tr><td>'+escapeHtml(s.name)+'</td><td>'+c.counted+' / '+c.plated+'</td>'
+          +'<td>'+(c.st.n?fmtC(c.st.mean):(c.allZero?'&lt; '+fmtC(c.limit):'—'))+'</td>'
+          +'<td>'+(c.st.sd>0?fmtC(c.st.sd):'—')+'</td>'
+          +'<td>'+(isFinite(c.st.cv)?c.st.cv.toFixed(1):'—')+'</td>'
+          +'<td class="tit-mini">'+escapeHtml(notes.join('; '))+'</td></tr>';
+      });
+      h+='</tbody></table></div>';
+      h+='<div class="mbc-actions" style="margin-top:12px;">'
+        +'<button class="btn" onclick="CFU.xlsx()">Excel (.xlsx)</button>'
+        +'<button class="btn" onclick="CFU.rawCsv()">Raw CSV</button>'
+        +'<button class="btn" onclick="CFU.sumCsv()">Summary CSV</button>'
+        +'<button class="btn ac" onclick="NB.capture(\'cfu\')">＋ Notebook</button>'
+        +'</div>';
+    }
+    document.getElementById('cfuMain').innerHTML=h;
+  }
+  function render(){
+    var exp=E();
+    if(!exp.samples.length){ var s0=defSample(exp,1); s0.reps.push(defRep(5,exp.volUl)); exp.samples.push(s0); }
+    renderSide(); renderMain(); save();
+  }
+
+  // ── exports (tidy long + summary; xlsx mirrors the CSVs, numbers numeric) ──
+  function rawRows(){
+    var exp=E(), rows=[['experiment','date','sample','replicate','mode','dilution_exponent','dilution_factor','volume_uL','colonies','flag','cfu_per_ml']];
+    exp.samples.forEach(function(s){ s.reps.forEach(function(r,i){
+      var t=repCfu(exp,r);
+      rows.push([exp.name,exp.date,s.name,i+1,exp.mode,r.k,exp.factor,r.volUl,
+        r.colonies==null?'':r.colonies,repFlagTxt(exp,r),(isFinite(t)&&t>0)?t:'']);
+    });});
+    return rows;
+  }
+  function sumRows(){
+    var exp=E(), rows=[['experiment','date','sample','n_counted','n_plated','mean_cfu_per_ml','sd','cv_pct','detection_limit']];
+    exp.samples.forEach(function(s){
+      var c=sampleCalc(exp,s);
+      rows.push([exp.name,exp.date,s.name,c.counted,c.plated,
+        c.st.n?c.st.mean:'',c.st.sd>0?c.st.sd:'',isFinite(c.st.cv)?c.st.cv:'',
+        isFinite(c.limit)?c.limit:'']);
+    });
+    return rows;
+  }
+  function toCsv(rows){ return rows.map(function(r){return r.map(csvCell).join(',');}).join('\r\n')+'\r\n'; }
+  function baseName(){ var exp=E(); return 'cfu-'+(exp.name||'experiment').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,''); }
+
+  // ── notebook blocks, built from state (never scraped off the DOM) ──
+  function blocks(sel){
+    if(!S)S=load();
+    var exp=E(), out=[];
+    if(sel.header){
+      out.push({type:'kv',title:'CFU counts — '+(exp.name||'experiment'),pairs:[
+        ['Date',exp.date||'—'],['Notes',exp.notes||'—'],
+        ['Assay',exp.mode==='spot'?'Spot assay (3–30 countable)':'Full plate (30–300 countable)'],
+        ['Dilution factor',String(exp.factor)],
+        ['Samples',String(exp.samples.length)]]});
+    }
+    if(sel.counts&&exp.samples.length){
+      var rows=[];
+      exp.samples.forEach(function(s){ s.reps.forEach(function(r,i){
+        var t=repCfu(exp,r);
+        rows.push([s.name,'R'+(i+1),dilLabel(r.k,exp.factor),String(r.volUl),
+          r.colonies==null?'—':String(r.colonies),repFlagTxt(exp,r)||'—',
+          (isFinite(t)&&t>0)?t.toExponential(3):'—']);
+      });});
+      out.push({type:'table',title:'Raw colony counts',cols:['Sample','Rep','Dilution','Vol (µL)','Colonies','Flag','CFU/mL'],rows:rows});
+    }
+    if(sel.summary&&exp.samples.length){
+      var rows2=exp.samples.map(function(s){
+        var c=sampleCalc(exp,s);
+        return [s.name,c.counted+' / '+c.plated,
+          c.st.n?c.st.mean.toExponential(3):(c.allZero?'< '+c.limit.toExponential(2):'—'),
+          c.st.sd>0?c.st.sd.toExponential(3):'—',
+          isFinite(c.st.cv)?c.st.cv.toFixed(1):'—'];
+      });
+      out.push({type:'table',title:'CFU summary',cols:['Sample','n','Mean CFU/mL','SD','CV%'],rows:rows2});
+      out.push({type:'text',title:'Methods note',md:'CFU/mL per replicate = colonies × dilution factor^k ÷ mL plated. Mean ± sample SD across countable replicates. Counts outside the countable window are flagged but included unless excluded; all-zero samples are reported as below the detection limit (< 1 colony at the least-diluted plate).'});
+    }
+    return out;
+  }
+
+  // ── public surface — one global, everything inline handlers need ──
+  window.CFU={
+    init:function(){ if(!S)S=load(); render(); },
+    render:render,
+    sel:function(i){ S.active=i; render(); },
+    addExp:function(){ S.experiments.push(defExp('Experiment '+(S.experiments.length+1))); S.active=S.experiments.length-1; render(); },
+    dupExp:function(){ var exp=E(); var c=JSON.parse(JSON.stringify(exp)); c.id='cx'+Date.now().toString(36); c.name=(exp.name||'Experiment')+' (copy)'; S.experiments.splice(S.active+1,0,c); S.active++; render(); },
+    delExp:function(){ if(S.experiments.length<2)return; if(!confirm('Delete this experiment and all its counts?'))return; S.experiments.splice(S.active,1); S.active=Math.max(0,S.active-1); render(); },
+    setF:function(k,v){ var exp=E();
+      if(k==='volUl'){ var n=parseFloat(v); if(n>0)exp.volUl=n; }
+      else if(k==='factor'){ var f=parseFloat(v); if(f>1)exp.factor=f; }
+      else exp[k]=v;
+      render(); },
+    addSample:function(){ var exp=E(); var s=defSample(exp,exp.samples.length+1); s.reps.push(defRep(5,exp.volUl)); exp.samples.push(s); render(); },
+    delSample:function(id){ var exp=E(); exp.samples=exp.samples.filter(function(s){return s.id!==id;}); render(); },
+    sampleName:function(id,v){ var s=sampleById(E(),id); if(s&&v)s.name=v; render(); },
+    addRep:function(sid){ var exp=E(),s=sampleById(exp,sid); if(!s)return;
+      var last=s.reps[s.reps.length-1];
+      s.reps.push(defRep(last?last.k:5,last?last.volUl:exp.volUl)); render(); },
+    delRep:function(sid,rid){ var s=sampleById(E(),sid); if(s){ s.reps=s.reps.filter(function(r){return r.id!==rid;}); render(); } },
+    rep:function(sid,rid,k,v){ var s=sampleById(E(),sid); if(!s)return; var r=repById(s,rid); if(!r)return;
+      if(k==='colonies'){ var n=Math.round(parseFloat(v)); r.colonies=isFinite(n)?Math.max(0,n):null; }
+      else if(k==='k'){ var kk=Math.round(parseFloat(v)); if(kk>=0)r.k=kk; }
+      else if(k==='volUl'){ var vv=parseFloat(v); if(vv>0)r.volUl=vv; }
+      else if(k==='tntc'||k==='excl'){ r[k]=!!v; }
+      render(); },
+    rawCsv:function(){ _dl(toCsv(rawRows()),baseName()+'-raw.csv','text/csv'); },
+    sumCsv:function(){ _dl(toCsv(sumRows()),baseName()+'-summary.csv','text/csv'); },
+    xlsx:function(){
+      if(!window.FIG||!FIG.xlsx){ showToast('Excel writer unavailable — use CSV','warn'); return; }
+      try{ _dl(FIG.xlsx([{name:'Raw counts',rows:rawRows()},{name:'Summary',rows:sumRows()}]),baseName()+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        showToast('✓ Excel workbook downloaded','green'); }
+      catch(e){ showToast('Excel export failed: '+e.message,'warn'); } },
+    // Null-safe entity accessor for notebook provenance (cf. TIT._exp).
+    _exp:function(){ return S?E():null; },
+    blocks:blocks
+  };
+})();
+
 /* ══════════════════════════ LAB NOTEBOOK ══════════════════════════ */
 (function(){
   var css=`
@@ -11963,6 +12242,7 @@ function dyeWorking(o){
     phg:     {label:'Phage Planner', mod:'PHGBLK',   items:[['plan','Infection plan'],['ladder','Dilution ladder'],['recipe','Dilution recipe']]},
     mic:     {label:'Microscopy',    mod:'MICBLK',   items:[['dye','Dye sheet + directions'],['dilution','Working dilution recipe'],['panel','Panel & channel check']]},
     tit:     {label:'Titering & EOP',mod:'TITBLK',   items:[['header','Experiment info'],['counts','Raw plaque counts'],['summary','Titer & EOP summary + methods note'],['chart','Chart (image)']]},
+    cfu:     {label:'CFU Counts',   mod:'CFUBLK',   items:[['header','Experiment info'],['counts','Raw colony counts'],['summary','CFU summary + methods note']]},
     res:     {label:'Results',      mod:'RESBLK',   items:[['summary','Overview + active filters'],['table','Measurements table'],['chart','Trend chart (image)']]},
     seq:     {label:'Sequences',    mod:'SEQBLK',   items:[['info','Sequence info'],['map','Map (image)'],['orfs','ORF table'],['digest','Digest fragments'],['primers','Primer pairs + conditions'],['align','Alignment summary']]}
   };
@@ -11970,6 +12250,7 @@ function dyeWorking(o){
     if(src==='gel'&&window.GEL&&GEL.blocks) return GEL.blocks;
     if(src==='mic'&&window.MIC&&MIC.blocks) return MIC.blocks;
     if(src==='tit'&&window.TIT&&TIT.blocks) return TIT.blocks;
+    if(src==='cfu'&&window.CFU&&CFU.blocks) return CFU.blocks;
     if(src==='seq'&&window.SEQ&&SEQ.blocks) return SEQ.blocks;
     if(src==='res'&&window.RES&&RES.blocks) return RES.blocks;
     var m=window[PROVIDERS[src]&&PROVIDERS[src].mod];
@@ -11986,6 +12267,8 @@ function dyeWorking(o){
   var ORIGIN={
     tit:    function(){ var e=window.TIT&&TIT._exp&&TIT._exp();
                         return {id:(e&&e.id)||'',label:(e&&e.name)||'Titering'}; },
+    cfu:    function(){ var e=window.CFU&&CFU._exp&&CFU._exp();
+                        return {id:(e&&e.id)||'',label:(e&&e.name)||'CFU Counts'}; },
     phg:    function(){ var s=PHG._state&&PHG._state(); var id=(s&&s.lysId)||'';
                         var l=id&&typeof lysGet==='function'?lysGet(id):null;
                         return {id:id,label:l?l.name:'Phage Planner'}; },
@@ -14121,6 +14404,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
     [['home','🏠','Home'],['plasmid','🧫','Plate Planner'],['phage','🧫','Plate Planner — phage mode'],
      ['dilcalc','💧','Dilution & Molarity'],['reagent','⚗️','Reagent Prep'],['calc','🧮','Calculators'],
      ['proto','📋','Protocols'],['phg','🦠','Phage Planner'],['titer','⭕','Titering & EOP'],
+     ['cfu','🧫','CFU Counts — colonies to CFU/mL'],
      ['mic','🔬','Microscopy & Dyes'],['gel','🧪','Gel Simulator'],['seq','🧬','Sequences & Cloning'],
      ['results','📈','Results — every titer over time'],['notebook','📓','Lab Notebook']]
       .forEach(function(m){ out.push({kind:'module',icon:m[1],name:m[2],hay:m[2],go:function(){setMode(m[0]);}}); });
