@@ -238,6 +238,11 @@ header .btn:focus-visible{outline:2px solid #fff;outline-offset:2px;}
 .psub{font-family:var(--mono);font-size:10px;color:var(--text3);margin-left:auto;}
 table{width:100%;border-collapse:collapse;}
 thead th{font-family:var(--mono);font-size:10px;letter-spacing:0.08em;color:var(--text3);text-transform:uppercase;padding:8px 13px;text-align:left;background:var(--bg);border-bottom:1px solid var(--border);}
+/* Units must NEVER be uppercased. text-transform maps the micro sign µ to Greek
+   capital Mu, which renders identically to M — so "Vol (µL)" displays as
+   "VOL (ML)" and a 100 µL plating volume reads as 100 mL, a 1000× error in a
+   tool people dose from. Wrap every unit in a header with <span class="u">. */
+th .u{text-transform:none;}
 tbody td{padding:8px 13px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:13px;color:var(--text);vertical-align:middle;}
 tbody tr:last-child td{border-bottom:none;}
 tbody tr:hover{background:var(--bg);}
@@ -1012,7 +1017,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
         <th id="thCult">Culture (µL)</th>
         <th id="thInd">Compound (µL)</th>
         <th id="thPip" style="display:none;">Pipette from dilution</th>
-        <th>Final vol (µL)</th><th>Pipettable?</th>
+        <th>Final vol <span class="u">(µL)</span></th><th>Pipettable?</th>
       </tr></thead>
       <tbody id="wbody"></tbody></table>
     </div>
@@ -1029,7 +1034,7 @@ body.print-plate-mode .excl-bar{display:none!important;}
         <th id="mmThConc">Target</th>
         <th id="mmThCult">Culture total (µL)</th>
         <th id="mmThInd">Compound total (µL)</th>
-        <th>Grand total (µL)</th>
+        <th>Grand total <span class="u">(µL)</span></th>
       </tr></thead>
       <tbody id="mmbody"></tbody></table>
     </div>
@@ -10794,7 +10799,7 @@ function dyeWorking(o){
 
     if(r.plan&&r.plan.steps.length){
       html+='<div class="phg-sec" style="margin-top:16px;">Every rung of the ladder</div>'+
-        '<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Dilution</th><th>Titer (PFU/mL)</th><th>Volume needed</th><th>Verdict</th></tr></thead><tbody>'+
+        '<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Dilution</th><th>Titer <span class="u">(PFU/mL)</span></th><th>Volume needed</th><th>Verdict</th></tr></thead><tbody>'+
         r.plan.steps.map(function(s){
           var picked=r.pick&&s.k===r.pick.k;
           var verdict=picked?'✓ use this':(s.ok?'pipettable':s.why);
@@ -11517,7 +11522,7 @@ function dyeWorking(o){
       h+='<div class="mbc-empty">No counts yet — pick a lysate, a condition and a dilution above, then type the plaque counts and hit Enter. Type several numbers ("100 120 80") to log a replicate set in one go.</div>';
     } else {
       var reps=repIndexMap(exp);
-      h+='<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Rep</th><th>Dilution</th><th>Vol (µL)</th><th>Plaques</th><th>Flag</th><th>Titer (PFU/mL)</th><th></th></tr></thead><tbody>';
+      h+='<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Rep</th><th>Dilution</th><th>Vol <span class="u">(µL)</span></th><th>Plaques</th><th>Flag</th><th>Titer <span class="u">(PFU/mL)</span></th><th></th></tr></thead><tbody>';
       exp.lys.forEach(function(l){ exp.conds.forEach(function(c){
         var rows=exp.counts.filter(function(r){return r.lysId===l.id&&r.condId===c.id;});
         if(!rows.length)return;
@@ -11934,6 +11939,13 @@ function dyeWorking(o){
     return {st:stt,plated:s.reps.length,counted:stt.n,limit:limit,
             allZero:!stt.n&&zeros.length>0,nTntc:s.reps.filter(function(r){return r.tntc;}).length};
   }
+  // Which entry UI an experiment shows. Saved experiments predating the
+  // quick view have no `view`: single-rep data reads naturally as a quick
+  // table, multi-rep data belongs in the replicates view.
+  function viewOf(exp){
+    if(exp.view==='quick'||exp.view==='full')return exp.view;
+    return exp.samples.some(function(s){return s.reps.length>1;})?'full':'quick';
+  }
   function repFlagTxt(exp,r){
     if(r.excl)return 'excluded';
     if(r.tntc)return 'TNTC';
@@ -11977,11 +11989,68 @@ function dyeWorking(o){
     document.getElementById('cfuSide').innerHTML=h;
   }
 
+  // Quick view: one row per sample editing its FIRST replicate — for the
+  // common single-plate-per-sample session where speed beats stats. A
+  // sample carrying more replicates shows its mean and is edited in the
+  // full view. Enter in a colonies box adds the next row.
+  function renderQuick(exp){
+    var h='<div class="mbc-tblwrap"><table class="mbc-tbl cfu-tbl"><thead><tr><th>Sample</th><th>Colonies</th><th>Dilution</th><th>Vol <span class="u">(µL)</span></th><th><span class="u">CFU/mL</span></th><th>Flag</th><th></th></tr></thead><tbody>';
+    exp.samples.forEach(function(s){
+      var r=s.reps[0]||null;
+      var multi=s.reps.length>1;
+      var cfuTxt='—', badge=r?flagBadge(exp,r):'';
+      if(multi){
+        var c=sampleCalc(exp,s);
+        cfuTxt=c.st.n?fmtC(c.st.mean)+' <span class="tit-mini">(mean of '+c.st.n+')</span>'
+              :(c.allZero?'&lt; '+fmtC(c.limit):'—');
+        badge='';
+      }else if(r){
+        var t=repCfu(exp,r);
+        if(isFinite(t)&&t>0)cfuTxt=fmtC(t);
+        else if(r.colonies===0&&!r.tntc&&!r.excl)cfuTxt='&lt; '+fmtC(titerFromPlaques(1,Math.pow(exp.factor,r.k),(r.volUl||0)/1000));
+      }
+      var dis=multi?' disabled title="This sample has replicates — edit them in the Replicates view"':'';
+      h+='<tr><td><input type="text" value="'+escapeHtml(s.name)+'" aria-label="Sample name" style="width:130px;" onchange="CFU.sampleName(\''+jsAttr(s.id)+'\',this.value)">'
+        +(multi?' <button class="tit-chip" onclick="CFU.setView(\'full\')" title="Edit the '+s.reps.length+' replicates">+'+(s.reps.length-1)+' reps</button>':'')+'</td>'
+        +'<td><input type="text" inputmode="numeric" id="cfuQC-'+jsAttr(s.id)+'" value="'+(r&&r.colonies!=null?escapeHtml(String(r.colonies)):'')+'" placeholder="—" aria-label="Colony count"'+dis
+        +' onchange="CFU.q(\''+jsAttr(s.id)+'\',\'colonies\',this.value)"'
+        +' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();CFU.qAdd();}"></td>'
+        +'<td><input type="text" inputmode="numeric" value="'+(r?r.k:5)+'" style="width:40px;" aria-label="Dilution exponent"'+dis+' onchange="CFU.q(\''+jsAttr(s.id)+'\',\'k\',this.value)"> <span class="tit-mini">'+escapeHtml(dilLabel(r?r.k:5,exp.factor))+'</span></td>'
+        +'<td><input type="text" inputmode="decimal" value="'+escapeHtml(String(r?r.volUl:exp.volUl))+'" aria-label="Volume plated (µL)"'+dis+' onchange="CFU.q(\''+jsAttr(s.id)+'\',\'volUl\',this.value)"></td>'
+        +'<td>'+cfuTxt+'</td>'
+        +'<td>'+badge+'</td>'
+        +'<td><button class="tit-del" onclick="CFU.delSample(\''+jsAttr(s.id)+'\')" aria-label="Delete sample '+escapeHtml(s.name)+'">✕</button></td></tr>';
+    });
+    h+='</tbody></table></div>'
+      +'<div class="tit-row" style="margin-top:8px;"><button class="btn ac" onclick="CFU.qAdd()">＋ Add row (Enter)</button></div>'
+      +'<div class="tit-mini" style="margin-top:4px;">Enter in a colonies box adds the next row. Zero colonies reports the detection limit. Switch to Replicates &amp; stats for multiple plates per sample, TNTC/exclude, and mean ± SD.</div>';
+    return h;
+  }
+
+  function actionsRow(){
+    return '<div class="mbc-actions" style="margin-top:12px;">'
+      +'<button class="btn" onclick="CFU.xlsx()">Excel (.xlsx)</button>'
+      +'<button class="btn" onclick="CFU.rawCsv()">Raw CSV</button>'
+      +'<button class="btn" onclick="CFU.sumCsv()">Summary CSV</button>'
+      +'<button class="btn ac" onclick="NB.capture(\'cfu\')">＋ Notebook</button>'
+      +'</div>';
+  }
+
   function renderMain(){
     var exp=E();
     var w=countWindow(exp.mode);
+    var v=viewOf(exp);
     var h='<div class="mbc-head"><h2>'+escapeHtml(exp.name||'CFU Counts')+'</h2>'
-      +'<p>Count colonies → CFU/mL with replicates per sample. Countable window: '+w[0]+'–'+w[1]+' colonies. New replicates inherit the previous row’s dilution and volume.</p></div>';
+      +'<p>Count colonies → CFU/mL'+(v==='quick'?' — one row per sample':' with replicates per sample')+'. Countable window: '+w[0]+'–'+w[1]+' colonies.</p></div>'
+      +'<div class="tit-chips" role="group" aria-label="Entry mode" style="margin-bottom:12px;">'
+      +'<button class="tit-chip'+(v==='quick'?' on':'')+'" aria-pressed="'+(v==='quick')+'" onclick="CFU.setView(\'quick\')">⚡ Quick table</button>'
+      +'<button class="tit-chip'+(v!=='quick'?' on':'')+'" aria-pressed="'+(v!=='quick')+'" onclick="CFU.setView(\'full\')">Replicates &amp; stats</button></div>';
+    if(v==='quick'){
+      h+=renderQuick(exp);
+      if(exp.samples.length)h+=actionsRow();
+      document.getElementById('cfuMain').innerHTML=h;
+      return;
+    }
     exp.samples.forEach(function(s){
       var c=sampleCalc(exp,s);
       var mean=c.st.n?('mean <b>'+fmtC(c.st.mean)+'</b> CFU/mL'+(c.st.sd>0?' ± '+fmtC(c.st.sd):''))
@@ -11993,7 +12062,7 @@ function dyeWorking(o){
         +'<button class="btn" onclick="CFU.addRep(\''+jsAttr(s.id)+'\')">＋ Replicate</button>'
         +'<button class="tit-del" onclick="CFU.delSample(\''+jsAttr(s.id)+'\')" aria-label="Delete sample '+escapeHtml(s.name)+'">✕</button></div>';
       if(s.reps.length){
-        h+='<div class="mbc-tblwrap"><table class="mbc-tbl cfu-tbl"><thead><tr><th>Rep</th><th>Colonies</th><th>Dilution</th><th>Vol (µL)</th><th>TNTC</th><th>Excl</th><th>CFU/mL</th><th>Flag</th><th></th></tr></thead><tbody>';
+        h+='<div class="mbc-tblwrap"><table class="mbc-tbl cfu-tbl"><thead><tr><th>Rep</th><th>Colonies</th><th>Dilution</th><th>Vol <span class="u">(µL)</span></th><th>TNTC</th><th>Excl</th><th><span class="u">CFU/mL</span></th><th>Flag</th><th></th></tr></thead><tbody>';
         s.reps.forEach(function(r,i){
           var t=repCfu(exp,r);
           h+='<tr'+((r.tntc||r.excl)?' style="opacity:.55;"':'')+'><td>R'+(i+1)+'</td>'
@@ -12015,7 +12084,7 @@ function dyeWorking(o){
     h+='<div class="tit-row"><button class="btn ac" onclick="CFU.addSample()">＋ Add sample</button></div>';
     if(exp.samples.length){
       h+='<div class="tit-sec">Summary</div>'
-        +'<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Sample</th><th>n</th><th>Mean CFU/mL</th><th>SD</th><th>CV%</th><th>Note</th></tr></thead><tbody>';
+        +'<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Sample</th><th>n</th><th>Mean <span class="u">CFU/mL</span></th><th>SD</th><th>CV%</th><th>Note</th></tr></thead><tbody>';
       exp.samples.forEach(function(s){
         var c=sampleCalc(exp,s);
         var notes=[];
@@ -12029,12 +12098,7 @@ function dyeWorking(o){
           +'<td class="tit-mini">'+escapeHtml(notes.join('; '))+'</td></tr>';
       });
       h+='</tbody></table></div>';
-      h+='<div class="mbc-actions" style="margin-top:12px;">'
-        +'<button class="btn" onclick="CFU.xlsx()">Excel (.xlsx)</button>'
-        +'<button class="btn" onclick="CFU.rawCsv()">Raw CSV</button>'
-        +'<button class="btn" onclick="CFU.sumCsv()">Summary CSV</button>'
-        +'<button class="btn ac" onclick="NB.capture(\'cfu\')">＋ Notebook</button>'
-        +'</div>';
+      h+=actionsRow();
     }
     document.getElementById('cfuMain').innerHTML=h;
   }
@@ -12115,7 +12179,21 @@ function dyeWorking(o){
       else if(k==='factor'){ var f=parseFloat(v); if(f>1)exp.factor=f; }
       else exp[k]=v;
       render(); },
-    addSample:function(){ var exp=E(); var s=defSample(exp,exp.samples.length+1); s.reps.push(defRep(5,exp.volUl)); exp.samples.push(s); render(); },
+    addSample:function(){ var exp=E(); var s=defSample(exp,exp.samples.length+1);
+      // Inherit the previous sample's dilution and volume — in a plating
+      // session those rarely change row to row.
+      var prev=exp.samples[exp.samples.length-1];
+      var pr=prev&&prev.reps[prev.reps.length-1];
+      s.reps.push(defRep(pr?pr.k:5,pr?pr.volUl:exp.volUl)); exp.samples.push(s); render(); return s; },
+    setView:function(v){ E().view=(v==='quick'?'quick':'full'); render(); },
+    // Quick-table edits target the sample's first replicate (created if missing).
+    q:function(sid,key,v){ var exp=E(),s=sampleById(exp,sid); if(!s)return;
+      if(!s.reps.length)s.reps.push(defRep(5,exp.volUl));
+      CFU.rep(sid,s.reps[0].id,key,v); },
+    // Enter in a quick colonies box: add the next row, cursor in its colonies
+    // input, so a plate series types straight down the column.
+    qAdd:function(){ var s=CFU.addSample();
+      var inp=document.getElementById('cfuQC-'+s.id); if(inp)inp.focus(); },
     delSample:function(id){ var exp=E(); exp.samples=exp.samples.filter(function(s){return s.id!==id;}); render(); },
     sampleName:function(id,v){ var s=sampleById(E(),id); if(s&&v)s.name=v; render(); },
     addRep:function(sid){ var exp=E(),s=sampleById(exp,sid); if(!s)return;
@@ -12965,7 +13043,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
        :'<div class="ibox" style="margin-bottom:10px;">Nothing matches these filters'+(undated?' with a date':'')+'. The table below shows what does exist.</div>'
         +'<div class="mbc-actions"><button class="btn" onclick="RES.csv()">⬇ CSV</button><button class="btn" onclick="RES.xlsx()">⬇ Excel</button></div>')
       +'<div class="sl" style="margin-top:16px;">Measurements</div>'
-      +'<div class="mbc-tblwrap"><table class="res-tbl"><thead><tr><th>Date</th><th>Phage</th><th>Host</th><th>Condition</th><th>Experiment</th><th>Titer (PFU/mL)</th><th>SD</th><th>CV %</th><th>n</th><th>Source</th></tr></thead><tbody>'
+      +'<div class="mbc-tblwrap"><table class="res-tbl"><thead><tr><th>Date</th><th>Phage</th><th>Host</th><th>Condition</th><th>Experiment</th><th>Titer <span class="u">(PFU/mL)</span></th><th>SD</th><th>CV %</th><th>n</th><th>Source</th></tr></thead><tbody>'
       +rs.map(function(r){
         return '<tr><td>'+escapeHtml(r.date||'—')+'</td><td>'+escapeHtml(r.lysName)+'</td><td>'+escapeHtml(hostOf(r)||'—')+'</td>'
           +'<td>'+escapeHtml(r.condName||'—')+(r.isRef?' <span class="res-src" title="the reference condition of its experiment">ref</span>':'')+'</td>'
