@@ -1,0 +1,7 @@
+# Local dev server used to preview index.html over http:// instead of
+# file://, which the service worker and the lazy-fetched JSON libraries
+# both require. Machine-specific, not part of the app.
+serve.js
+
+# Claude Code per-project settings and local session state.
+.claude/
