@@ -2831,6 +2831,135 @@ function resultsRows(titerState,lysates){
     .map(function(r){ delete r._i; return r; });
 }
 
+// ── Home dashboard data spine ──────────────────────────────────────────
+// Pure: takes ALREADY-PARSED blobs so the self-tests inject fixtures and the
+// render decides what to read. Every count is derived, nothing is stored.
+function ddDashStats(o){
+  o=o||{};
+  var s={experiments:0,expsWithCounts:0,plaqueRows:0,plaquesTotal:0,lysates:0,hosts:0,
+         seqs:0,seqBp:0,nbEntries:0,customs:0,cfuExps:0,cfuReps:0,measurements:0,
+         firstDate:'',lastDate:''};
+  // Dates come ONLY from work stamped in this app (experiments, notebook) —
+  // a lysate's "titered on" date is legitimately backdated for an inherited
+  // freezer stock, and one of those claimed years of bench history.
+  var dates=[];
+  var exps=(o.titer&&Array.isArray(o.titer.experiments))?o.titer.experiments:[];
+  s.experiments=exps.length;
+  exps.forEach(function(e){
+    var rows=(e&&Array.isArray(e.counts))?e.counts:[];
+    if(rows.length){ s.expsWithCounts++; if(e&&e.date)dates.push(String(e.date).slice(0,10)); }
+    rows.forEach(function(c){
+      s.plaqueRows++;
+      // TNTC plates keep their pre-∞ number in storage; every other code path
+      // disowns them, so a "plaques counted" trophy must too. And a restored
+      // backup can carry counts as STRINGS — += would concatenate.
+      var p=+(c&&c.plaques);
+      if(c&&!c.tntc&&isFinite(p)&&p>0)s.plaquesTotal+=p;
+    });
+  });
+  s.lysates=Array.isArray(o.lysates)?o.lysates.length:0;
+  s.hosts=Array.isArray(o.hosts)?o.hosts.length:0;
+  var seqs=(o.seq&&Array.isArray(o.seq.seqs))?o.seq.seqs:[];
+  s.seqs=seqs.length;
+  seqs.forEach(function(r){ if(r&&typeof r.seq==='string')s.seqBp+=r.seq.length; });
+  var nb=Array.isArray(o.notebook)?o.notebook:(o.notebook&&Array.isArray(o.notebook.entries)?o.notebook.entries:[]);
+  s.nbEntries=nb.length;
+  nb.forEach(function(e){ if(e&&e.date)dates.push(String(e.date).slice(0,10)); });
+  s.customs=Array.isArray(o.customs)?o.customs.length:0;
+  // A CFU experiment only counts as WORK when a colony count was actually
+  // TYPED — opening the tab once auto-saves a default experiment complete
+  // with one blank rep (colonies:null), which is furniture, not data.
+  // Zero colonies IS data (it sets a detection limit); so is a TNTC flag.
+  ((o.cfu&&Array.isArray(o.cfu.experiments))?o.cfu.experiments:[]).forEach(function(e){
+    s.cfuExps++;
+    var reps=0;
+    ((e&&Array.isArray(e.samples))?e.samples:[]).forEach(function(sm){
+      ((sm&&Array.isArray(sm.reps))?sm.reps:[]).forEach(function(rp){
+        if(rp&&(rp.tntc||(rp.colonies!=null&&rp.colonies!==''&&isFinite(+rp.colonies))))reps++;
+      });
+    });
+    s.cfuReps+=reps;
+    if(reps&&e&&e.date)dates.push(String(e.date).slice(0,10));
+  });
+  if(Array.isArray(o.rows))s.measurements=o.rows.length;
+  dates=dates.filter(function(d){return /^\d{4}-\d{2}-\d{2}$/.test(d);}).sort();
+  if(dates.length){ s.firstDate=dates[0]; s.lastDate=dates[dates.length-1]; }
+  return s;
+}
+// Mini log-scale sparkline geometry for the dashboard: pure, so the log
+// placement is testable the same way resTrendModel's is. Returns pixel
+// points, never draws.
+function ddSparkModel(pts,w,h){
+  var P=(pts||[]).filter(function(p){return p&&isFinite(p.t)&&p.v>0;})
+                 .sort(function(a,b){return a.t-b.t;});
+  if(P.length<2)return null;
+  var pad=4;
+  var lo=Math.floor(Math.log10(Math.min.apply(null,P.map(function(p){return p.v;}))));
+  var hi=Math.ceil (Math.log10(Math.max.apply(null,P.map(function(p){return p.v;}))));
+  if(hi<=lo)hi=lo+1;
+  var t0=P[0].t, t1=P[P.length-1].t; if(t1<=t0)t1=t0+1;
+  var out=P.map(function(p){
+    return [pad+(p.t-t0)/(t1-t0)*(w-2*pad),
+            (h-pad)-(Math.log10(p.v)-lo)/(hi-lo)*(h-2*pad)];
+  });
+  return {w:w,h:h,points:out,lo:lo,hi:hi,n:P.length};
+}
+// Pick the sparkline's series: most dated titers, ties broken by most recent.
+// Object.create(null) because a phage named "constructor" or "__proto__" (a
+// user CAN name a lysate that) resolved to Object.prototype members on a
+// plain {} and threw — which blanked the entire Home page.
+function ddSparkSeries(rows){
+  var by=Object.create(null), best=null;
+  (rows||[]).forEach(function(r){
+    if(!r||!(r.titer>0)||!r.date)return;
+    var t=Date.parse(r.date+'T00:00:00'); if(!isFinite(t))return;
+    var k=String(r.lysName||'').toLowerCase();
+    (by[k]=by[k]||{name:r.lysName,pts:[]}).pts.push({t:t,v:r.titer});
+  });
+  Object.keys(by).forEach(function(k){
+    var srs=by[k];
+    if(!best){ best=srs; return; }
+    var a=srs.pts.length, b=best.pts.length;
+    var la=Math.max.apply(null,srs.pts.map(function(p){return p.t;}));
+    var lb=Math.max.apply(null,best.pts.map(function(p){return p.t;}));
+    if(a>b||(a===b&&la>lb))best=srs;             // most measured, then most recent
+  });
+  return (best&&best.pts.length>=2)?best:null;
+}
+// Local calendar day index, DST-immune: a wall-clock ms subtraction loses an
+// hour after the spring shift and rolled the daily fact over at 01:00.
+function ddDayOfYear(n){
+  return Math.floor((Date.UTC(n.getFullYear(),n.getMonth(),n.getDate())-Date.UTC(n.getFullYear(),0,0))/864e5);
+}
+// One original phage/molbio fact a day — deterministic by day number, so the
+// hub never flickers between renders and needs no stored state.
+var DD_FACTS=[
+  'There are roughly 10³¹ phages on Earth — more than every other biological entity combined.',
+  'A single millilitre of seawater typically carries about ten million phage particles.',
+  'Phages are estimated to kill 20–40 % of ocean surface bacteria every single day.',
+  'T4 injects its genome through the cell wall in well under a minute — its tail sheath contracts like a spring-loaded syringe.',
+  'The term "plaque" predates knowing what phages were: d’Hérelle counted clear spots on lawns in 1917.',
+  'Lambda’s decision between lysis and lysogeny is one of the founding models of gene regulation.',
+  'A phage capsid packs DNA to near-crystalline density — internal pressures reach tens of atmospheres.',
+  'CRISPR is a bacterial immune memory of past phage infections — spacers are trophies of survived attacks.',
+  'Restriction enzymes, the tools behind all cloning, evolved as anti-phage defence systems.',
+  'Some jumbo phages build a protein "nucleus" inside the bacterium to shield their DNA from defences.',
+  'Phage T7 polymerase is so fast and specific it powers most in-vitro transcription kits.',
+  'The first genome ever sequenced was a phage: ΦX174, by Sanger’s group in 1977.',
+  'One infection cycle can release 100–300 new virions — exponential enough to clear a turbid culture before lunch.',
+  'Phage display — evolving peptides on capsid surfaces — earned a Nobel Prize in 2018.',
+  'An EOP far below 1 often means the host’s defences are winning, not that your titer is off.',
+  'M13 never lyses its host — infected cells just grow slower and keep secreting phage.',
+  'Soft agar overlays work because a 0.5–0.7 % gel is loose enough for diffusion but firm enough to keep plaques local.',
+  'A phage genome can be read in an afternoon; some encode anti-CRISPR proteins barely 50 amino acids long.',
+  'Twort saw "glassy transformation" of cultures in 1915 — two years before phages had a name.',
+  'Counting 30–300 plaques per plate is not tradition — it is where Poisson error and crowding error cross.'
+];
+function ddDailyFact(dayIndex){
+  var i=((dayIndex%DD_FACTS.length)+DD_FACTS.length)%DD_FACTS.length;
+  return DD_FACTS[i];
+}
+
 // ── Trend layout: log titer over time, one colour per phage ────────────
 // Same primitive vocabulary as titChartModel, so the FIG backends draw and
 // export it with zero new export code. data: {title, series:[{name, ci,
@@ -6236,7 +6365,6 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   var css = `
   #homeView,#calcView{color:var(--text);}
   .home-hero{text-align:center;padding:20px 12px 24px;}
-  .home-hero h1{font-family:var(--serif,Georgia,serif);font-size:clamp(1.55rem,4vw,2.25rem);margin:0 0 8px;color:var(--text);}
   .home-hero p{color:var(--text3);max-width:62ch;margin:0 auto;font-size:14px;line-height:1.5;}
   .home-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:14px;margin-bottom:26px;}
   .home-card{display:flex;gap:14px;align-items:flex-start;text-align:left;padding:18px;border:1px solid var(--border);border-radius:14px;background:var(--surface);cursor:pointer;transition:transform .1s,box-shadow .1s,border-color .1s;}
@@ -6245,6 +6373,36 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   .home-ctitle{font-weight:700;font-size:15px;color:var(--text);margin-bottom:3px;}
   .home-cdesc{font-size:12.5px;color:var(--text3);line-height:1.45;}
   .home-sub{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin:0 0 10px;}
+  .dash{max-width:1060px;margin:0 auto 10px;}
+  .dash-hello{display:flex;align-items:center;gap:14px;justify-content:center;margin:14px 0 4px;}
+  .dash-hello h1{font-family:var(--serif,Georgia,serif);font-size:clamp(1.35rem,3.4vw,1.9rem);margin:0;color:var(--text);}
+  .dash-hello .dash-sub{color:var(--text3);font-size:12.5px;margin-top:2px;}
+  .dash-phage{width:44px;height:60px;flex-shrink:0;animation:dashBob 6s ease-in-out infinite;}
+  .dash-phage .cap{fill:var(--accent-bg,#e8f3ec);stroke:var(--accent2,#2f7d5b);stroke-width:2;}
+  .dash-phage .tl{stroke:var(--accent2,#2f7d5b);stroke-width:2;fill:none;stroke-linecap:round;}
+  @keyframes dashBob{0%,100%{transform:translateY(0) rotate(-3deg);}50%{transform:translateY(-6px) rotate(3deg);}}
+  .dash-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:10px;margin:16px 0 6px;}
+  .dash-tile{border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:12px 10px 10px;text-align:center;cursor:pointer;transition:transform .1s,border-color .1s;animation:dashUp .4s ease both;}
+  .dash-tile:hover{transform:translateY(-2px);border-color:var(--accent2);}
+  .dash-tile:focus-visible{outline:2px solid var(--accent2);outline-offset:2px;}
+  .dash-tile .dv{font:700 1.35rem var(--serif,Georgia,serif);color:var(--text);line-height:1.1;}
+  .dash-tile .dl{font:10px var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:.09em;margin-top:4px;}
+  .dash-tile .di{font-size:1.05rem;margin-bottom:2px;}
+  @keyframes dashUp{from{opacity:0;transform:translateY(7px);}to{opacity:1;transform:none;}}
+  .dash-tile:nth-child(2){animation-delay:.05s}.dash-tile:nth-child(3){animation-delay:.1s}
+  .dash-tile:nth-child(4){animation-delay:.15s}.dash-tile:nth-child(5){animation-delay:.2s}
+  .dash-tile:nth-child(6){animation-delay:.25s}.dash-tile:nth-child(7){animation-delay:.3s}
+  .dash-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0;}
+  @media(max-width:760px){.dash-row{grid-template-columns:1fr;}}
+  .dash-card{border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:12px 14px;}
+  .dash-card .dt{font:10px var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:7px;}
+  .dash-spark{display:block;width:100%;height:64px;}
+  .dash-spark .ln{fill:none;stroke:var(--accent2,#2f7d5b);stroke-width:2;stroke-linejoin:round;}
+  .dash-spark .dote{stroke:var(--accent2,#2f7d5b);stroke-width:7;stroke-linecap:round;fill:none;}
+  .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;}
+  .dash-fact{text-align:center;font-size:12.5px;color:var(--text2);max-width:66ch;margin:14px auto 2px;line-height:1.55;}
+  .dash-fact b{color:var(--text3);font:10px var(--mono);text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:3px;}
+  @media(prefers-reduced-motion:reduce){.dash-phage,.dash-tile{animation:none;}}
   .home-chips{display:flex;flex-wrap:wrap;gap:7px;}
   .home-chip{font-size:12px;padding:6px 11px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--text2);cursor:pointer;}
   .home-chip:hover{background:var(--btn-primary);color:#fff;border-color:var(--btn-primary);}
@@ -8084,6 +8242,82 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
           fails.push('the self-test leaked an empty My-recipes category into rpLib');
       }
 
+      // ── Home dashboard spine. Fixture-only; anchors are hand arithmetic.
+      if(typeof ddDashStats==='function'){
+        // Hand arithmetic: countable plaques are 100 + '120'(a STRING, as a
+        // restored backup delivers them — += must coerce, not concatenate)
+        // = 220; the zero row and the TNTC plate (420 stays in storage but
+        // every code path disowns it) are excluded. 4 rows logged; 1 of the
+        // 2 experiments has counts. The date span uses only WORKED
+        // experiments (02-01; the countless 03-01 exp is out), the notebook
+        // (02-10, 02-11) and logged CFU (02-05) → 2026-02-01 → 2026-02-11.
+        n++; var _dsF=ddDashStats({
+          titer:{experiments:[
+            {date:'2026-02-01',counts:[{plaques:100},{plaques:'120'},{plaques:0},{plaques:420,tntc:true}]},
+            {date:'2026-03-01',counts:[]}]},
+          lysates:[{titerHistory:[{d:'2019-01-05',v:1e8}]}],   // an inherited stock: must NOT enter the date span
+          hosts:[{},{}],
+          seq:{seqs:[{seq:'ACGT'},{seq:'ACGTACGT'}]},
+          notebook:[{date:'2026-02-10',title:'a'},{date:'2026-02-11',title:'b'}],
+          customs:[{}],
+          // logged: colonies 12, colonies 0 (detection limit), TNTC = 3.
+          // NOT logged: the blank colonies:null rep CFU auto-seeds on open.
+          cfu:{experiments:[
+            {date:'2026-02-05',samples:[{reps:[{colonies:12},{colonies:0},{colonies:null},{tntc:true}]}]},
+            {samples:[{reps:[{colonies:null}]}]}]},
+          rows:[1,2,3]});
+        if(_dsF.experiments!==2||_dsF.expsWithCounts!==1||_dsF.plaqueRows!==4||_dsF.plaquesTotal!==220)
+          fails.push('dash: exp/withCounts/rows/plaques = '+_dsF.experiments+'/'+_dsF.expsWithCounts+'/'+_dsF.plaqueRows+'/'+_dsF.plaquesTotal+', want 2/1/4/220');
+        if(_dsF.lysates!==1||_dsF.hosts!==2||_dsF.seqs!==2||_dsF.seqBp!==12||_dsF.nbEntries!==2||_dsF.customs!==1||_dsF.cfuExps!==2||_dsF.cfuReps!==3||_dsF.measurements!==3)
+          fails.push('dash counts drifted: '+JSON.stringify(_dsF));
+        if(_dsF.firstDate!=='2026-02-01'||_dsF.lastDate!=='2026-02-11')
+          fails.push('dash date span '+_dsF.firstDate+'→'+_dsF.lastDate+', want 2026-02-01→2026-02-11 (freezer-stock 2019 date excluded, countless-experiment 03-01 excluded)');
+        n++; var _dsE=ddDashStats({});
+        if(_dsE.experiments!==0||_dsE.plaquesTotal!==0||_dsE.firstDate!=='')
+          fails.push('dash stats must be all-zero on an empty workspace');
+        n++; var _dsJ=ddDashStats({titer:'garbage',lysates:7,notebook:{entries:'x'},seq:{seqs:'y'},cfu:{experiments:[{samples:'z'}]}});
+        if(_dsJ.experiments!==0||_dsJ.lysates!==0||_dsJ.nbEntries!==0||_dsJ.seqs!==0||_dsJ.cfuReps!==0)
+          fails.push('dash stats must shrug off malformed blobs, got '+JSON.stringify(_dsJ));
+        // A phage named "constructor" met Object.prototype on a plain {} and
+        // the resulting throw blanked the ENTIRE Home page.
+        n++; var _pp=ddSparkSeries([
+          {lysName:'constructor',titer:1e8,date:'2026-01-01'},
+          {lysName:'constructor',titer:1e9,date:'2026-01-02'},
+          {lysName:'__proto__',titer:1e7,date:'2026-01-03'}]);
+        if(!_pp||_pp.pts.length!==2||_pp.name!=='constructor')
+          fails.push('a lysate named "constructor" must chart, not throw — got '+JSON.stringify(_pp&&_pp.name));
+        // Tiebreak: equal point counts → the more RECENT series wins, never
+        // JS key enumeration order (an all-digits name used to jump the queue).
+        n++; var _tb=ddSparkSeries([
+          {lysName:'7',titer:1e8,date:'2026-01-01'},{lysName:'7',titer:1e8,date:'2026-01-02'},
+          {lysName:'Alpha',titer:1e8,date:'2026-01-03'},{lysName:'Alpha',titer:1e8,date:'2026-01-04'}]);
+        if(!_tb||_tb.name!=='Alpha')
+          fails.push('spark tiebreak must pick the most recent series, got '+(_tb&&_tb.name));
+        // Sparkline geometry: 1e6 and 1e8 a day apart on a 10⁶–10⁸ axis land
+        // at the corners (pad 4): x 4→256, y bottom(60)→top(4). Later+higher
+        // = right + up.
+        n++; var _sk=ddSparkModel([{t:864e5,v:1e8},{t:0,v:1e6}],260,64);
+        if(!_sk||_sk.n!==2||_sk.lo!==6||_sk.hi!==8)
+          fails.push('spark: lo/hi = '+(_sk&&_sk.lo)+'/'+(_sk&&_sk.hi)+', want 6/8');
+        else{
+          var _p0=_sk.points[0],_p1=_sk.points[1];
+          if(!_near(_p0[0],4,0.01)||!_near(_p0[1],60,0.01)||!_near(_p1[0],256,0.01)||!_near(_p1[1],4,0.01))
+            fails.push('spark corners at ('+_p0+')→('+_p1+'), want (4,60)→(256,4)');
+        }
+        n++; if(ddSparkModel([{t:0,v:1e6}],260,64)!==null||ddSparkModel([],260,64)!==null)
+          fails.push('a one-point sparkline is a dot, not a trend — must return null');
+        // The daily fact must be deterministic and always in bounds.
+        n++; if(ddDailyFact(0)!==DD_FACTS[0]||ddDailyFact(DD_FACTS.length)!==DD_FACTS[0]
+             ||typeof ddDailyFact(-1)!=='string'||typeof ddDailyFact(99999)!=='string')
+          fails.push('ddDailyFact must wrap deterministically for any day index');
+        // One calendar day = one fact, at ANY hour: the wall-clock ms division
+        // lost an hour across DST and rolled the fact over at 01:00.
+        n++; if(ddDayOfYear(new Date(2026,6,10,0,30))!==ddDayOfYear(new Date(2026,6,10,23,30))
+             ||ddDayOfYear(new Date(2026,0,1))!==1
+             ||ddDayOfYear(new Date(2026,11,31))!==365)
+          fails.push('ddDayOfYear must be hour-independent and 1-based: Jan1='+ddDayOfYear(new Date(2026,0,1))+' Dec31='+ddDayOfYear(new Date(2026,11,31)));
+      }
+
       // ── Supervisor regressions: the verifiers' surviving objections, pinned.
       if(typeof rpEditValue==='function'&&typeof rpSaveWorkAsCustom==='function'){
         // Editing back to the library value is NOT a change: 5→9 marks, 9→5 unmarks.
@@ -8342,7 +8576,99 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       {m:'notebook',icon:'📓',title:'Lab Notebook',desc:'Pull results from any module into a dated entry, add your own notes, and export to Markdown, HTML, PDF, Word, CSV or JSON.'}
     ];
     var featured=['namass','a260','pctmolar','tm','od600','titer','moivol','lysate','ligation','doubling','rcf'];
-    el.innerHTML='<div class="home-hero"><h1>Molecular Biology Bench Toolkit</h1><p>One place for dilutions, reagents, plate layouts, protocols and the everyday molecular-biology math. Everything is computed on your own machine — visit once and it keeps working with no network, so it is usable in a cold room or a BSL suite.</p></div>'+
+
+    // ── the dashboard: the user's OWN bench, at a glance ──
+    // Every number is derived live from storage through the pure ddDashStats;
+    // nothing here is persisted and a fresh profile gets a warm empty state
+    // instead of a wall of zeros.
+    function _blob(k){ try{ return JSON.parse(lsGet(k)||'null'); }catch(e){ return null; } }
+    var _tit=_blob('dd_titer');
+    var _lys=[]; try{ if(typeof lysAll==='function')_lys=lysAll(); }catch(e){}
+    var _nb=_blob('dd_notebook');
+    var _rowsAll=[]; try{ _rowsAll=resultsRows(_tit,_lys); }catch(e){}
+    var st;
+    try{
+      st=ddDashStats({titer:_tit, lysates:_lys,
+        hosts:(typeof hostAll==='function'?hostAll():[]),
+        seq:_blob('dd_seq'), notebook:_nb,
+        customs:_blob('dd_reagent_custom'), cfu:_blob('dd_cfu'),
+        // "titers on record" must mean titers: resultsRows also emits
+        // detection-limit-only rows, which are bounds, not measurements.
+        rows:_rowsAll.filter(function(r){return r.titer>0;})});
+    }catch(e){ st=ddDashStats({}); }
+    var hr=new Date().getHours();
+    var greet=hr<5?'Working late':hr<12?'Good morning':hr<18?'Good afternoon':'Good evening';
+    var quip=hr<5?'the incubator never sleeps, and apparently neither do you.'
+           :hr<12?'the plates you poured yesterday are ready when you are.'
+           :hr<18?'prime plaque-counting light.'
+           :'a fine hour to push a titer to the library.';
+    var phageSvg='<svg class="dash-phage" viewBox="0 0 44 60" aria-hidden="true"><polygon class="cap" points="22,3 36,11 36,25 22,33 8,25 8,11"/><line class="tl" x1="22" y1="33" x2="22" y2="46"/><line class="tl" x1="22" y1="46" x2="12" y2="56"/><line class="tl" x1="22" y1="46" x2="22" y2="57"/><line class="tl" x1="22" y1="46" x2="32" y2="56"/><line class="tl" x1="15" y1="15" x2="29" y2="21"/><line class="tl" x1="29" y1="15" x2="15" y2="21"/></svg>';
+    // Real WORK, not containers: opening Titering or CFU once auto-saves an
+    // empty default experiment, which used to kill the empty state forever.
+    var hasData=(st.plaqueRows+st.measurements+st.lysates+st.hosts+st.seqs+st.nbEntries+st.customs+st.cfuReps)>0;
+    // The page must still NAME itself for a screen reader walking headings —
+    // the greeting alone made the only h1 read "Good afternoon".
+    var dash='<div class="dash">'
+      +'<div class="dash-hello">'+phageSvg+'<div><h1><span class="sr-only">Dilution Designer — </span>'+greet+'</h1><div class="dash-sub">'+escapeHtml(quip)+'</div></div></div>';
+    // The dashboard is decoration on top of the hub; if any of it throws on a
+    // hostile blob, degrade to greeting+fact rather than a blank Home.
+    try{
+    if(hasData){
+      var tiles=[];
+      function tile(mode,icon,v,label){ tiles.push('<button class="dash-tile" onclick="setMode(\''+mode+'\')" aria-label="'+escapeHtml(label+': '+v)+'"><div class="di" aria-hidden="true">'+icon+'</div><div class="dv">'+escapeHtml(String(v))+'</div><div class="dl">'+escapeHtml(label)+'</div></button>'); }
+      if(st.plaquesTotal>0)   tile('titer','⭕',st.plaquesTotal.toLocaleString('en-US'),'plaques counted');
+      if(st.expsWithCounts)   tile('titer','🧪',st.expsWithCounts,'titer experiment'+(st.expsWithCounts===1?'':'s'));
+      if(st.measurements)     tile('results','📈',st.measurements,'titer'+(st.measurements===1?'':'s')+' on record');
+      if(st.lysates)          tile('phg','🦠',st.lysates,'lysate'+(st.lysates===1?'':'s')+' in the library');
+      if(st.hosts)            tile('phg','🧫',st.hosts,'host strain'+(st.hosts===1?'':'s'));
+      if(st.seqs)             tile('seq','🧬',st.seqs+(st.seqBp>0?' · '+(st.seqBp>=1e6?(st.seqBp/1e6).toFixed(1)+' Mb':st.seqBp>=1000?Math.round(st.seqBp/1000)+' kb':st.seqBp+' bp'):''),'sequence'+(st.seqs===1?'':'s'));
+      if(st.nbEntries)        tile('notebook','📓',st.nbEntries,'notebook entr'+(st.nbEntries===1?'y':'ies'));
+      if(st.customs)          tile('reagent','⚗️',st.customs,'recipe'+(st.customs===1?'':'s')+' of your own');
+      if(st.cfuReps)          tile('cfu','🧫',st.cfuReps,'CFU count'+(st.cfuReps===1?'':'s')+' logged');
+      dash+='<div class="dash-grid">'+tiles.join('')+'</div>';
+      var cards='';
+      var best=ddSparkSeries(_rowsAll);
+      if(best){
+        var sp=ddSparkModel(best.pts.slice(-12),260,64);
+        if(sp){
+          var d='M'+sp.points.map(function(p){return p[0].toFixed(1)+','+p[1].toFixed(1);}).join(' L');
+          var lastP=sp.points[sp.points.length-1];
+          // non-scaling strokes because the SVG stretches to the card width;
+          // the end marker is a zero-length round-capped stroke for the same
+          // reason — an <circle> squashed into an ellipse.
+          cards+='<div class="dash-card"><div class="dt">'+escapeHtml(best.name)+' · last '+sp.n+' titers · 10<sup>'+sp.lo+'</sup>–10<sup>'+sp.hi+'</sup> PFU/mL</div>'
+            +'<svg class="dash-spark" viewBox="0 0 260 64" preserveAspectRatio="none" role="img" aria-label="Titer trend for '+escapeHtml(best.name)+'">'
+            +'<path class="ln" vector-effect="non-scaling-stroke" d="'+d+'"/>'
+            +'<path class="dote" vector-effect="non-scaling-stroke" d="M'+lastP[0].toFixed(1)+','+lastP[1].toFixed(1)+' l0.01,0"/></svg>'
+            +'<button class="home-chip" onclick="setMode(\'results\')" style="margin-top:6px;">Open Results →</button></div>';
+        }
+      }
+      // jump back in
+      var jumps=[];
+      try{ var ce=(typeof curExp==='function')?curExp():null;
+        if(ce&&ce.name) jumps.push(['titer','🧪 '+ce.name]); }catch(e){}
+      try{ var nbe=Array.isArray(_nb)?_nb:[];
+        if(nbe.length){ var latest=nbe[0]; nbe.forEach(function(x){ if(x&&x.date>(latest&&latest.date||''))latest=x; });
+          if(latest&&latest.title) jumps.push(['notebook','📓 '+latest.title]); } }catch(e){}
+      try{ var lc=lsGet('mbc_last'); var cc=lc&&byId[lc]; if(cc) jumps.push(['calc','🧮 '+cc.name]); }catch(e){}
+      try{ var lp=lsGet('pr_last'); var pp=lp&&window.PROTO&&(PROTO.list||[]).filter(function(x){return x.id===lp;})[0]; if(pp) jumps.push(['proto','📋 '+pp.name]); }catch(e){}
+      if(jumps.length){
+        cards+='<div class="dash-card"><div class="dt">Jump back in</div><div class="home-chips">'
+          +jumps.slice(0,5).map(function(j){ return '<button class="home-chip" onclick="setMode(\''+j[0]+'\')">'+escapeHtml(j[1].slice(0,44))+'</button>'; }).join('')
+          +'</div></div>';
+      }
+      if(cards) dash+='<div class="dash-row">'+cards+'</div>';
+      // "since" is honest now: only experiment + notebook + logged-CFU dates
+      // feed it, so an inherited freezer stock cannot claim years of history.
+      if(st.firstDate) dash+='<div style="text-align:center;font:10.5px var(--mono);color:var(--text3);margin-top:4px;">first dated work '+escapeHtml(st.firstDate)+(st.lastDate&&st.lastDate!==st.firstDate?' · latest '+escapeHtml(st.lastDate):'')+'</div>';
+    } else {
+      dash+='<div class="dash-fact" style="margin-top:6px;">Your dashboard wakes up as you work — log a plaque count in <button class="home-chip" onclick="setMode(\'titer\')">Titering</button>, save a lysate in the <button class="home-chip" onclick="setMode(\'phg\')">Phage Planner</button>, or open a genome in <button class="home-chip" onclick="setMode(\'seq\')">Sequences</button>, and this page starts keeping score.</div>';
+    }
+    }catch(e){}
+    dash+='<div class="dash-fact"><b>🧫 phage fact of the day</b>'+escapeHtml(ddDailyFact(ddDayOfYear(new Date())))+'</div></div>';
+
+    el.innerHTML=dash
+      +'<div class="home-hero" style="padding-top:8px;"><p>One place for dilutions, reagents, plate layouts, protocols and the everyday molecular-biology math. Everything is computed on your own machine — visit once and it keeps working with no network, so it is usable in a cold room or a BSL suite.</p></div>'+
       '<div class="home-cards">'+mods.map(function(x){return '<button class="home-card" onclick="setMode(\''+x.m+'\')"><div class="home-ico" aria-hidden="true">'+x.icon+'</div><div class="home-ct"><div class="home-ctitle">'+escapeHtml(x.title)+'</div><div class="home-cdesc">'+escapeHtml(x.desc)+'</div></div></button>';}).join('')+'</div>'+
       '<div class="home-sub">Jump to a calculator</div><div class="home-chips">'+featured.filter(function(id){return byId[id];}).map(function(id){return '<button class="home-chip" onclick="MBC._cur=\''+id+'\';setMode(\'calc\')">'+escapeHtml(byId[id].name)+'</button>';}).join('')+'</div>'+
       '<div class="home-sub">Your data</div><div id="homeWs"></div>'+
