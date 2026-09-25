@@ -21,7 +21,7 @@ A free, single-file, browser-based toolkit for everyday molecular-biology bench 
 | **Calculators** | 16 bench calculators: ng ⇄ pmol, A260 quant, ligation ratios, primer Tm and resuspension, OD₆₀₀ → cells, phage titer, MOI, lysate → infection volume, % ⇄ molarity, RCF ⇄ RPM, doubling time, dye working dilution, PCR/qPCR master mix |
 | **Protocols** | 31 protocols — miniprep, CTAB gDNA, transformation, plaque assay, gels, MIC, Gibson, immunofluorescence, H&E, live/dead and more — that **rescale as you change the numbers** |
 | **Microscopy & Dyes** | 79 dyes and stains — what to use for what, at what concentration, and in which channel. Ex/Em maxima, filter-cube and laser matching, a panel builder that flags channel collisions and bleed-through, working-dilution volumes for your sample count, and step-by-step staining directions |
-| **Gel Simulator** | Predict an agarose or SDS-PAGE run before you pour it: 16 vendor ladders plus your own, band-resolution warnings, and a best-percentage suggestion |
+| **Gels & Blots** | Simulate a DNA gel, a protein gel or a Western blot before you run it: 18 vendor ladders plus your own, load-aware band width and brightness per stain, uncut plasmid (supercoiled / nicked / linear), transfer efficiency by protein size, exposure and saturation, a Ponceau view, where to cut the membrane and how much antibody each strip needs |
 | **Lab Notebook** | Pull results from any module into a dated entry, add your own notes, export to Markdown, HTML, PDF, Word (.docx), CSV or JSON |
 
 ---
@@ -30,7 +30,7 @@ A free, single-file, browser-based toolkit for everyday molecular-biology bench 
 
 - **Everything is local.** Every calculation runs in your browser. Nothing is uploaded, so it is fine for unpublished work.
 - **It works offline.** Visit once and it keeps working with no network — usable in a cold room, a BSL suite, or on a plane. It is a PWA, so you can install it like an app.
-- **The maths is checked.** A self-test harness (`?selftest=1`) asserts every formula — 126 assertions, anchored to published references rather than to the code's own output.
+- **The maths is checked.** A self-test harness (`?selftest=1`) asserts every formula — 360 assertions, anchored to published references rather than to the code's own output.
 - **It is one file.** `index.html` plus a recipe library and a dye library. No build step, no dependencies, no CDN.
 
 ---
@@ -92,11 +92,24 @@ The working-dilution solver is also available on its own as *Calculators → Flu
 
 > The panel checks are modelled from published excitation and emission **maxima** and their band widths — the app does not ship full spectral curves. They catch the obvious clashes; they are not a substitute for real overlap integrals or for linear unmixing on your own instrument. Working concentrations are starting points from published protocols and must be titrated on your own sample.
 
-### Gel Simulator
+### Gels & Blots
 
-Choose DNA (agarose) or protein (SDS-PAGE), set the percentage, pick a ladder, and enter your expected fragment sizes per lane. It tells you which bands will not resolve, which run off or stick in the well, and which gel percentage would separate everything.
+Three tabs share one engine.
 
-> The migration model is a planning aid, not a prediction: it approximates mobility as linear in log₁₀(size) over the gel's resolving range. Real migration also depends on buffer, voltage and conformation — supercoiled, nicked and linear plasmid of the same length run differently. Ladder band sizes are the manufacturers' published values; the image is drawn from those numbers.
+**DNA gel** — pick an agarose %, a stain and a ladder, and type band sizes per lane. Add an amount after `@` to make it load-aware (`3000@150` is 150 ng of 3 kb): bands below the stain's detection limit disappear, overloaded ones broaden and smear, and fat bands stop resolving. Add `sc` or `oc` for supercoiled or nicked plasmid (`4000sc@300`), or use **＋ Uncut** to draw a typical miniprep. A restriction digest sent from *Sequences* arrives with equimolar masses, so short fragments are faint, as on a real gel.
+
+**Protein gel** — Tris-glycine gels from 7.5% to 15%, a 4–20% gradient, and a 16% Tris-Tricine gel for peptides, with Coomassie, colloidal Coomassie, silver or SYPRO Ruby. Give a lane a lysate amount to see what a whole-cell lysate looks like behind your protein. The separation ranges are the same table the SDS-PAGE protocol quotes, so the two can no longer disagree.
+
+**Western blot** — lanes are total protein loaded; targets are antibodies with an apparent MW, an abundance, a relative level per lane and a host species. Add loading controls from a preset list. Then set the transfer (method, time, membrane, methanol, SDS) and the detection (ECL on an imager or film, exposure, or two-colour near-IR). It shows:
+1. The blot as it would image — saturated bands in red, as imagers show them — or a **Ponceau S** view of total protein, dimmed by how well each size transferred
+2. Transfer efficiency against protein size for your settings, with each target marked and specific fixes when one will not transfer
+3. Saturation and detection per lane, the longest exposure before a band saturates, and the classic trap — a loading control that saturates long before your target is visible
+4. Targets that co-migrate, and whether two-colour detection rescues them (it needs primaries from different species)
+5. Where to cut the membrane, named by the ladder bands either side, and the primary and secondary antibody volume each strip needs
+
+Any ORF in *Sequences* can be sent to the protein gel or the Western at its computed mass.
+
+> These are planning aids, not predictions. Mobility is a smooth sigmoid in log₁₀(size) — steepest mid-gel and compressing toward the well and dye front — and real mobility also depends on buffer, voltage and temperature; glycosylated, very basic and membrane proteins often run away from their true mass. Plasmid conformations use rules of thumb for a ~1% gel. Western transfer and signal are heuristic curves that encode published rules of thumb, and abundances are order-of-magnitude. Ladder band sizes are the manufacturers' published values; the image is drawn from those numbers.
 
 ### Notebook
 

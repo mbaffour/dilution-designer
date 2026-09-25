@@ -1541,7 +1541,7 @@ const MODE_GROUPS=[
     {m:'calc',   label:'🧮 Calculators'},
     {m:'proto',  label:'📋 Protocols'},
     {m:'mic',    label:'🔬 Microscopy'},
-    {m:'gel',    label:'🧪 Gel Sim'},
+    {m:'gel',    label:'🧪 Gels & Blots'},
     {m:'seq',    label:'🧬 Sequences'}]}
 ];
 // 'phage' is the plate planner's other mode, not its own destination.
@@ -6927,6 +6927,115 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       if(!kp||kp.b.length!==19||kp.ref.indexOf(500)<0) fails.push('gel: NEB 1 kb Plus bands/reference wrong');
       n++; var tl=M.ladders().filter(function(L){return L.id==='neb-2log';})[0];
       if(!tl||tl.b.length!==19||[600,700,800,900].some(function(x){return tl.b.indexOf(x)<0;})) fails.push('gel: NEB 2-Log/N0550 is missing its 600–900 bp bands');
+
+      // ── the gel engine: mobility, load, conformation ──
+      // Regression: the old model CLAMPED every band above the range to one Rf, so 20 kb
+      // and 50 kb on a 1% gel were drawn on the identical pixel. They must now be ordered.
+      n++; var r20=M.rfOf(20000,rng).rf, r50=M.rfOf(50000,rng).rf, r10=M.rfOf(10000,rng).rf;
+      if(!(r10>r20&&r20>r50&&r50>0)) fails.push('gel: 10/20/50 kb must run in order above the range, got '+r10+' / '+r20+' / '+r50);
+      // By construction the resolving range spans Rf 0.12 (top) to 0.88 (bottom).
+      n++; if(!_near(M.rfOf(10000,rng).rf,0.12,1e-9)||!_near(M.rfOf(500,rng).rf,0.88,1e-9))
+        fails.push('gel: the 1% range [500, 10000] must map to Rf 0.88 / 0.12');
+      // Strictly monotone and bounded across four decades — nothing clamps, nothing ties.
+      n++; var prev=-1, mono=true; for(var lg=1;lg<=5;lg+=0.05){ var rv=M.rfOf(Math.pow(10,lg),rng).rf; if(!(rv>0&&rv<1)) mono=false; if(prev>=0&&!(rv<prev)) mono=false; prev=rv; }
+      if(!mono) fails.push('gel: Rf must fall strictly with size and stay inside (0, 1)');
+      // Load. Width is nominal at the reference load and 1 + 0.6·log10(10) = 1.6× at ten times it;
+      // brightness is 1 − e^(−1/0.4) = 0.9179 at the reference and zero below the detection limit.
+      var etbr=M.STAINS.dna.etbr;
+      n++; if(!_near(M.bandW(etbr.ref,etbr),1,1e-12)||!_near(M.bandW(etbr.ref*10,etbr),1.6,1e-9))
+        fails.push('gel: band width must be 1× at the reference load and 1.6× at 10× it');
+      n++; if(!_near(M.bandI(etbr.ref,etbr),0.91792,1e-4)||M.bandI(etbr.lod*0.9,etbr)!==0)
+        fails.push('gel: brightness must be 0.918 at the reference load and 0 below the detection limit');
+      // Resolution follows width: ΔRf 0.04 beats RESOLVE (0.035) at nominal width,
+      // but not when both bands are 1.6× wide (threshold 0.035 × 1.6 = 0.056).
+      n++; if(!M.resolves({rf:0.50,wf:1},{rf:0.54,wf:1})||M.resolves({rf:0.50,wf:1.6},{rf:0.54,wf:1.6}))
+        fails.push('gel: overloaded bands must stop resolving at a gap nominal bands resolve at');
+      // Conformation: supercoiled runs AHEAD of linear, nicked BEHIND it, from one plasmid.
+      n++; try{ var cl=M.withState({v:2,tab:'dna',dna:{pct:'1',ladder:'neb-1kb',stain:'etbr',look:'dark',
+            lanes:[{name:'P',sizes:'4000sc@300, 4000oc@60, 4000lin@20'}]}},function(){ return M.lanes(); });
+        var cb=cl[1].bands, bySc=cb.filter(function(b){return b.conf==='sc';})[0], byOc=cb.filter(function(b){return b.conf==='oc';})[0], byLin=cb.filter(function(b){return b.conf==='lin';})[0];
+        if(!(bySc&&byOc&&byLin&&bySc.rf>byLin.rf&&byLin.rf>byOc.rf)) fails.push('gel: uncut plasmid must run supercoiled > linear > nicked');
+      }catch(e){ fails.push('gel conformation threw '+e.message); }
+      // A digest is equimolar: 3000 + 1000 bp of a 4000 bp plasmid at 500 ng → 375 + 125 ng.
+      n++; var eq=M.equimolar([3000,1000],4000,500);
+      if(!_near(eq[0],375,1e-9)||!_near(eq[1],125,1e-9)) fails.push('gel: equimolar split of 3 + 1 kb at 500 ng = '+eq.join('/')+', want 375/125');
+      // A clean gel must not be told to switch percentage: suggestions need a problem first.
+      n++; try{ var cw=M.withState({v:2,tab:'dna',dna:{pct:'1',ladder:'neb-1kb',stain:'etbr',look:'dark',lanes:[{name:'A',sizes:'2000'}]}},function(){ return M.warnings(); });
+        if(cw.some(function(w){return /gel would/.test(w.t);})) fails.push('gel: suggested a different % for a gel with nothing wrong');
+      }catch(e){ fails.push('gel suggestion threw '+e.message); }
+      // One protein table, read by both the simulator and the SDS-PAGE protocol. They used to
+      // disagree: the simulator said 12% resolves 10–70 kDa, the protocol said 10–100.
+      n++; var pr12=M.PROT['12']&&M.PROT['12'].r;
+      if(!pr12||pr12[0]!==10||pr12[1]!==100) fails.push('gel: 12% SDS-PAGE range must be 10–100 kDa');
+      n++; try{ var sdsP=(window.PROTO&&PROTO.list||[]).filter(function(x){return x.id==='sds-page';})[0];
+        var hint=sdsP&&sdsP.params.filter(function(x){return x.k==='pct';})[0].hint;
+        if(!hint||hint.indexOf('12% ≈ 10–100')<0||hint.indexOf('15% ≈ 5–70')<0) fails.push('gel: the SDS-PAGE protocol hint no longer matches the simulator’s table: '+hint);
+      }catch(e){ fails.push('gel/protocol consistency threw '+e.message); }
+      // Old single-gel saves migrate; hostile saves are coerced.
+      n++; var mg=M.sane({type:'protein',pct:'10',ladder:'biorad-precision',lanes:[{name:'A',sizes:'70'}]});
+      if(mg.tab!=='protein'||mg.protein.pct!=='10'||mg.protein.lanes[0].sizes!=='70') fails.push('gel: a legacy protein save did not migrate');
+      n++; var hs=M.sane({v:2,tab:'nope',western:{targets:[{name:'x',mw:'70',abund:'zzz',dil:-5}],xfer:{method:'teleport',min:1e9,mem:'foil',meoh:99,sds:5}}});
+      if(hs.tab!=='dna'||hs.western.targets[0].abund!=='med'||!(hs.western.targets[0].dil>=1)||hs.western.xfer.method!=='wet'||hs.western.xfer.meoh!==20||hs.western.xfer.sds!==0.1)
+        fails.push('gel: a hostile save was not coerced');
+
+      // ── Western transfer: the rules of thumb the app's own Western protocol states ──
+      var WET={method:'wet',min:60,mem:'nc45',meoh:20,sds:0};
+      n++; if(M.transferEff(50,WET,12).grade!=='good') fails.push('western: 50 kDa must transfer well in a standard wet transfer');
+      // ">100 kDa transfers badly in 20% methanol: drop to 10%, add 0.05–0.1% SDS, extend the time"
+      n++; var big=M.transferEff(150,WET,12), fixd=M.transferEff(150,{method:'wet',min:90,mem:'nc45',meoh:10,sds:0.05},12);
+      if(big.grade==='good'||!(fixd.eff>big.eff+0.2)) fails.push('western: 150 kDa must be poor in 20% MeOH and recover with 10% MeOH + SDS + time ('+big.eff+' → '+fixd.eff+')');
+      // "Semi-dry is not suited to very large proteins"
+      n++; if(!(M.transferEff(250,{method:'semidry',min:30,mem:'nc45',meoh:20,sds:0},12).eff<M.transferEff(250,WET,12).eff))
+        fails.push('western: semi-dry must transfer 250 kDa worse than wet');
+      // "<20 kDa blows through 0.45 µm — use 0.2 µm"
+      n++; if(M.transferEff(10,WET,12).grade==='good'||M.transferEff(10,{method:'wet',min:60,mem:'pvdf20',meoh:20,sds:0},12).grade!=='good')
+        fails.push('western: 10 kDa must blow through NC 0.45 µm and hold on PVDF 0.2 µm');
+      // Over-transfer and SDS both push small proteins through.
+      n++; if(!(M.transferEff(15,{method:'wet',min:120,mem:'nc45',meoh:20,sds:0},12).eff<M.transferEff(15,WET,12).eff)||
+              !(M.transferEff(10,{method:'wet',min:60,mem:'nc45',meoh:20,sds:0.1},12).eff<M.transferEff(10,WET,12).eff))
+        fails.push('western: longer transfers and SDS must both lose small proteins');
+
+      // ── Western detection, hand-derived. 200 ng at a 10 pg (0.01 ng) limit for 60 s:
+      //    S = 200/0.01 × 60/60 = 20 000×; an imager saturates at 10^3.5 = 3162.3×,
+      //    so the longest safe exposure is 60 × 3162.28 / 20 000 = 9.487 s.
+      n++; var dd=M.detect(200,1,{mode:'imager',sub:'std',ab:'avg',exp:60});
+      if(!_near(dd.S,20000,1e-6)||!dd.saturated||!_near(dd.tSat,9.4868,1e-3)) fails.push('western: detect(200 ng) got S='+dd.S+' tSat='+dd.tSat+', want 20000 / 9.487 s');
+      // 20 pg for 20 s: S = 0.02/0.01 × 20/60 = 0.667 — below detection.
+      n++; var dl=M.detect(0.02,1,{mode:'imager',sub:'std',ab:'avg',exp:20});
+      if(!_near(dl.S,0.66667,1e-4)||dl.seen) fails.push('western: 20 pg at 20 s must be below detection, S='+dl.S);
+      // Film's ~1.6-log range: 200 ng saturates even at 1 s (S = 333 > 10^1.6 = 39.8).
+      n++; if(!M.detect(200,1,{mode:'film',sub:'std',ab:'avg',exp:1}).saturated) fails.push('western: film must saturate on 200 ng at 1 s');
+
+      // ── cut plan, hand-derived on a 10% gel [20, 150] with PageRuler Plus on a mini membrane.
+      // 65 and 42 kDa: cut at √(65×42) = 52.25 kDa, which sits between the 55 and 35 kDa markers.
+      // Rf(52.25): k = ln(0.88/0.12)/0.43753 = 4.5538, z = k·(1.71807 − 1.73856) = −0.0933,
+      // Rf = 1/(1+e^z) = 0.5233, so strip 1 is 0.5233 × 8.6 × 6.7 = 30.15 cm².
+      var wbBase=function(tg){ return {v:2,tab:'western',western:{pct:'10',ladder:'thermo-pagerulerplus',lanes:[{name:'A',load:20}],targets:tg,
+        xfer:{method:'wet',min:60,mem:'nc45',meoh:20,sds:0},det:{mode:'imager',sub:'std',exp:60,overlay:true,satRed:true},mem:{size:'mini',mlcm2:0.1,sec:10000}}}; };
+      n++; try{ var cp=M.withState(wbBase([{name:'T',mw:'65',abund:'med',expr:'',host:'rabbit',ch:'800',ab:'avg',dil:1000},
+                                           {name:'A',mw:'42',abund:'vhigh',expr:'',host:'mouse',ch:'700',ab:'good',dil:5000,lc:true}]),function(){ return M.cutPlan(); });
+        var c0=cp.cuts[0];
+        if(cp.cuts.length!==1||!_near(c0.mw,52.249,0.01)||!c0.between||c0.between.up!==55||c0.between.dn!==35||!_near(cp.strips[0].area,30.15,0.05))
+          fails.push('western: cut plan for 65 + 42 kDa got '+cp.cuts.length+' cut(s) at '+(c0&&c0.mw)+' kDa, strip 1 '+(cp.strips[0]&&cp.strips[0].area)+' cm²; want one cut at 52.25 kDa between 55/35, 30.15 cm²');
+      }catch(e){ fails.push('western cut plan threw '+e.message); }
+      // β-actin (42) and GAPDH (37) resolve on 10% but sit too close to cut between — one strip, no co-migration.
+      n++; try{ var ag=M.withState(wbBase([{name:'actin',mw:'42',abund:'vhigh',expr:'',host:'mouse',ch:'700',ab:'good',dil:5000},
+                                           {name:'gapdh',mw:'37',abund:'vhigh',expr:'',host:'mouse',ch:'700',ab:'good',dil:5000}]),function(){ return {p:M.cutPlan(), w:M.wbWarnings()}; });
+        if(ag.p.cuts.length!==0||ag.w.some(function(w){return /co-migrate/.test(w.t);})) fails.push('western: actin + GAPDH must share one strip without a co-migration error');
+      }catch(e){ fails.push('western actin/GAPDH threw '+e.message); }
+      // 42 and 43 kDa co-migrate: an error in chemi; fine in two-colour NIR with different hosts;
+      // an error again in NIR when both primaries come from the same species.
+      n++; try{ var mk=function(mode,h2){ var st=wbBase([{name:'X',mw:'42',abund:'med',expr:'',host:'rabbit',ch:'800',ab:'avg',dil:1000},
+                                                       {name:'Y',mw:'43',abund:'med',expr:'',host:h2,ch:'700',ab:'avg',dil:1000}]); st.western.det.mode=mode;
+                     return M.withState(st,function(){ return M.wbWarnings(); }); };
+        var bad=function(ws){ return ws.some(function(w){return w.k==='bad'&&/co-migrate/.test(w.t);}); };
+        if(!bad(mk('imager','mouse'))||bad(mk('nir','mouse'))||!bad(mk('nir','rabbit')))
+          fails.push('western: co-migration must be an error in chemi, fine in NIR with different hosts, an error in NIR with the same host');
+      }catch(e){ fails.push('western co-migration threw '+e.message); }
+      // The shipped example must teach the classic mistake: β-actin at 20 µg saturates at 60 s.
+      n++; try{ var dw=M.withState(M.defState(),function(){ return M.wbWarnings(); });
+        if(!dw.some(function(w){return w.k==='bad'&&/β-actin is saturated/.test(w.t);})) fails.push('western: the default blot must flag the saturated β-actin loading control');
+      }catch(e){ fails.push('western default threw '+e.message); }
     }
     // ── notebook markdown + serialisers
     if(window.NB&&NB._md2html){
@@ -8337,7 +8446,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
       {m:'cfu',icon:'🧫',title:'CFU Counts',desc:'Colony counts → CFU/mL. Name your samples, log replicates at any dilution and plating volume, get mean ± SD and CV with 30–300 window flags, and export the raw counts and summary to Excel or CSV.'},
       {m:'results',icon:'📈',title:'Results',desc:'Every titer you have ever recorded, across all experiments and the lysate library, in one filterable table — with a log-scale trend chart per phage and CSV / Excel / SVG / PDF export.'},
       {m:'mic',icon:'🔬',title:'Microscopy & Dyes',desc:nDye+' dyes and stains — what to use for what, at what concentration, in which channel. Spectra, filter/laser matching, panel bleed-through checks, and the working dilution worked out for your sample count.'},
-      {m:'gel',icon:'🧪',title:'Gel Simulator',desc:'Predict an agarose or SDS-PAGE run before you pour it — '+nLad+' vendor ladders, band-resolution warnings and a best-% suggestion.'},
+      {m:'gel',icon:'🧪',title:'Gels & Western Blots',desc:'Simulate a DNA gel, a protein gel or a Western blot before you run it — '+nLad+' vendor ladders, load-aware bands, uncut plasmid, transfer efficiency by protein size, exposure and saturation, and where to cut the membrane.'},
       {m:'seq',icon:'🧬',title:'Sequences & Cloning',desc:'Open a FASTA, GenBank or GFF3 and get a linear or circular map, six-frame ORFs and translation, a restriction digest that runs straight onto a simulated gel, nearest-neighbour primer design with off-target checking, and alignments from two genes to two whole genomes.'},
       {m:'notebook',icon:'📓',title:'Lab Notebook',desc:'Pull results from any module into a dated entry, add your own notes, and export to Markdown, HTML, PDF, Word, CSV or JSON.'}
     ];
@@ -8366,6 +8475,30 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
   // left the app with no navigation at all.
   if(window._ddFresh && !ddShared()){ try{ setMode('home'); }catch(e){} }
 })();
+
+// ══════════════════════════════════════════════════════════════════
+// SDS-PAGE SEPARATION RANGES — one table, read by BOTH the Gel Simulator and
+// the SDS-PAGE protocol. They used to be two tables that disagreed: the
+// simulator said a 12% gel resolves 10–70 kDa and 15% 5–40, while the
+// protocol's hint said 10–100 and 5–70 for the same gels. These are the
+// protocol's (vendor-chart) numbers; 8% sits between its 7.5% and 10% rows.
+// Ranges are where bands spread usefully across the gel — the model still
+// draws bands outside them, compressed toward the well or the dye front.
+// Vendor charts differ by ±30% with buffer chemistry and run length.
+// ══════════════════════════════════════════════════════════════════
+var GEL_PROT_GELS={
+  '7.5':      {r:[40,200], n:'7.5% Tris-glycine',                 T:7.5, sh:'7.5%'},
+  '8':        {r:[35,190], n:'8% Tris-glycine',                   T:8,   sh:'8%'},
+  '10':       {r:[20,150], n:'10% Tris-glycine',                  T:10,  sh:'10%'},
+  '12':       {r:[10,100], n:'12% Tris-glycine',                  T:12,  sh:'12%'},
+  '15':       {r:[5,70],   n:'15% Tris-glycine',                  T:15,  sh:'15%'},
+  '4-20':     {r:[5,250],  n:'4–20% gradient Tris-glycine',       T:10,  sh:'4–20% gradient'},
+  'tricine16':{r:[1,70],   n:'16% Tris-Tricine (peptides, Schägger)', T:16, sh:'16% Tricine'}
+};
+function gelProtHint(){
+  return ['7.5','10','12','15'].map(function(p,i){
+    var r=GEL_PROT_GELS[p].r; return p+'% ≈ '+r[0]+'–'+r[1]+(i?'':' kDa'); }).join(' · ');
+}
 
 /* ══════════════════════════ PROTOCOLS MODULE ══════════════════════════ */
 (function(){
@@ -8931,7 +9064,7 @@ function dcCopyText(txt){ if(!txt){ showToast('Nothing to copy yet','warn'); ret
      time:'~4 h (+ destain)',
      safety:'Unpolymerised acrylamide (C3H5NO, MW 71.08, PubChem CID 6579) is a neurotoxin and probable human carcinogen — use the premixed 30% solution rather than the powder, wear nitrile gloves, and treat anything that touched liquid acrylamide as contaminated. Ammonium persulfate is a strong oxidiser and a respiratory sensitiser. Stain and destain contain methanol (MW 32.04, CID 887; toxic by skin and inhalation) and acetic acid — mix and use them in a fume hood or a lidded tray and collect the waste as organic solvent.',
      params:[{k:'gels',label:'Number of mini-gels',def:2,min:1},
-        {k:'pct',label:'Resolving gel (% acrylamide)',def:12,min:4,hint:'7.5% ≈ 40–200 kDa · 10% ≈ 20–150 · 12% ≈ 10–100 · 15% ≈ 5–70'},
+        {k:'pct',label:'Resolving gel (% acrylamide)',def:12,min:4,hint:gelProtHint()},
         {k:'res',label:'Resolving gel volume per gel (mL)',def:5,min:2,hint:'≈5 mL for a 1.0 mm mini-gel'},
         {k:'stack',label:'Stacking gel volume per gel (mL)',def:2,min:0.5},
         {k:'lanes',label:'Samples per gel',def:10,min:1},
@@ -10289,14 +10422,35 @@ function dyeWorking(o){
 })();
 
 /* ══════════════════════════ GEL SIMULATOR ══════════════════════════ */
+/* Three benches, one engine: a DNA agarose gel, a protein SDS-PAGE gel, and the
+   Western blot that starts from that protein gel.
+
+   What the engine models, and how far to trust it:
+   • Mobility — a smooth sigmoid in log10(size). Steepest mid-gel, compressing
+     toward the well and the dye front. The old model was linear inside the
+     resolving range and CLAMPED outside it, so every band above the range was
+     drawn at one fixed Rf: a 20 kb and a 50 kb fragment on a 1% gel landed on
+     the identical pixel and one silently disappeared.
+   • Load — band width and brightness follow the amount loaded against the
+     stain's detection limit and overload point, so a faint band can fall below
+     detection and an overloaded one broadens, smears, and stops resolving.
+   • Conformation — uncut plasmid runs as supercoiled / nicked / linear species.
+   • Western transfer and detection — heuristic curves that encode the
+     published rules of thumb (see transferEff and detect). They are for
+     spotting risk before you run the blot, not for predicting percentages. */
 (function(){
   var css=`
   .gel-sec{font:600 10.5px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--text3);margin:14px 0 6px;}
+  .gel-tabs{display:flex;gap:3px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:3px;margin-bottom:10px;}
+  .gel-tab{flex:1;font:600 11px var(--mono);padding:7px 4px;border:0;border-radius:6px;background:transparent;color:var(--text2);cursor:pointer;min-height:30px;}
+  .gel-tab:hover{background:var(--surface);}
+  .gel-tab[aria-selected="true"]{background:var(--btn-primary,#2f7d5b);color:#fff;}
   .gel-lane{display:flex;gap:5px;align-items:center;margin-bottom:5px;}
-  .gel-lane input{font-family:var(--mono);font-size:12px;padding:6px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);box-sizing:border-box;}
-  .gel-lane input:focus-visible{outline:2px solid var(--accent2);outline-offset:1px;}
-  .gel-lname{flex:0 0 92px;}
-  .gel-lsizes{flex:1;min-width:120px;}
+  .gel-lane input{font-family:var(--mono);font-size:12px;padding:6px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);box-sizing:border-box;min-width:0;}
+  .gel-lane input:focus-visible,.wb-row input:focus-visible,.wb-row select:focus-visible{outline:2px solid var(--accent2);outline-offset:1px;}
+  .gel-lname{flex:0 0 84px;}
+  .gel-lsizes{flex:1;min-width:90px;}
+  .gel-lnum{flex:0 0 58px;}
   .gel-del{border:0;background:transparent;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 6px;min-width:26px;min-height:26px;}
   .gel-del:hover{color:#c0392b;}
   .gel-wrap{overflow-x:auto;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;}
@@ -10306,11 +10460,33 @@ function dyeWorking(o){
   .gel-warn.bad{background:rgba(192,57,43,.10);border-color:rgba(192,57,43,.45);color:var(--text2);}
   .gel-warn.warn{background:rgba(191,140,0,.10);border-color:rgba(191,140,0,.42);color:var(--text2);}
   .gel-warn.ok{background:rgba(47,125,91,.10);border-color:rgba(47,125,91,.42);color:var(--text2);}
+  .gel-warn.info{background:rgba(70,110,170,.09);border-color:rgba(70,110,170,.38);color:var(--text2);}
+  .gel-plas{display:flex;gap:5px;align-items:center;flex-wrap:wrap;}
+  .gel-plas input{width:84px;font-family:var(--mono);font-size:12px;padding:6px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);}
+  .wb-card{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--surface);}
+  .wb-card h3{margin:0 0 8px;font:700 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text3);}
+  .wb-row{display:grid;grid-template-columns:minmax(84px,1.2fr) 52px minmax(120px,1.3fr) minmax(80px,1fr) 80px 86px 60px 26px;gap:5px;align-items:center;margin-bottom:5px;}
+  .wb-row.nir{grid-template-columns:minmax(84px,1.2fr) 52px minmax(120px,1.3fr) minmax(80px,1fr) 80px 86px 60px 62px 26px;}
+  .wb-row input,.wb-row select{font-family:var(--mono);font-size:11.5px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);min-width:0;width:100%;box-sizing:border-box;}
+  .wb-hd{font:600 9.5px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--text3);}
+  .wb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;}
+  .wb-grid .mbc-f{margin:0;}
+  .wb-add{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}
+  .wb-add select{font-family:var(--mono);font-size:11.5px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);}
+  .wb-view{display:flex;gap:6px;justify-content:center;margin:8px 0 0;flex-wrap:wrap;}
+  .wb-pill{display:inline-block;padding:1px 7px;border-radius:10px;font:600 10px var(--mono);}
+  .wb-pill.good{background:rgba(47,125,91,.16);color:#2f7d5b;}
+  .wb-pill.reduced{background:rgba(191,140,0,.18);color:#8a6500;}
+  .wb-pill.poor{background:rgba(192,57,43,.16);color:#b03a2e;}
+  @media (max-width:760px){ .wb-row,.wb-row.nir{grid-template-columns:1fr 1fr;} .wb-row .wb-hd{display:none;} }
   `;
   var st=document.createElement('style'); st.textContent=css; document.head.appendChild(st);
 
   // ── Ladders. Band sizes are published facts; visuals below are drawn from the numbers,
   //    no vendor artwork is reproduced. "ref" marks the vendor's reference/bright bands.
+  //    pre   — prestained: visible on the membrane by eye, but NOT in a chemiluminescence
+  //            image unless the imager overlays a white-light marker picture.
+  //    chemi — carries a tag the detection reagents light up, so it appears in the blot image.
   var LADDERS=[
    {id:'neb-1kb', v:'NEB', t:'dna', n:'1 kb DNA Ladder (N3232)', b:[10000,8000,6000,5000,4000,3000,2000,1500,1000,500], ref:[3000]},
    // NEB's spec for N3200: "the 0.5, 1.0 and 3.0 kb bands have increased intensity to serve as
@@ -10328,275 +10504,1015 @@ function dyeWorking(o){
    {id:'thermo-gr50bp', v:'Thermo', t:'dna', n:'GeneRuler 50 bp (SM0371)', b:[1000,900,800,700,600,500,400,300,250,200,150,100,50], ref:[500,250]},
    {id:'promega-1kb', v:'Promega', t:'dna', n:'1 kb DNA Ladder (G5711)', b:[10000,8000,6000,5000,4000,3000,2500,2000,1500,1000,750,500,250], ref:[3000,1000]},
    {id:'promega-100bp', v:'Promega', t:'dna', n:'100 bp DNA Ladder (G2101)', b:[1500,1000,900,800,700,600,500,400,300,200,100], ref:[500]},
-   {id:'neb-color-p7712', v:'NEB', t:'protein', n:'Color Prestained, Broad Range (P7712)', b:[245,180,135,100,75,63,48,35,25,20,17,11], ref:[75,25]},
+   {id:'neb-color-p7712', v:'NEB', t:'protein', n:'Color Prestained, Broad Range (P7712)', b:[245,180,135,100,75,63,48,35,25,20,17,11], ref:[75,25], pre:true},
    // These 8 bands are P7708's (MBP-β-gal 175, MBP-paramyosin 80, MBP-CBD 58, CBD-Mxe
    // Intein-2CBD 46, CBD-Mxe Intein 30, CBD-BmFKBP13 25, lysozyme 17, aprotinin 7), not
    // P7706's — P7706 is an 11-band 11-190 kDa standard. The 25 kDa band was mistyped as 23.
-   {id:'neb-blue-p7706', v:'NEB', t:'protein', n:'Prestained Protein Marker, Broad Range (P7708)', b:[175,80,58,46,30,25,17,7], ref:[46]},
-   {id:'thermo-pageruler', v:'Thermo', t:'protein', n:'PageRuler Prestained (26616)', b:[180,130,100,70,55,40,35,25,15,10], ref:[70]},
-   {id:'thermo-pagerulerplus', v:'Thermo', t:'protein', n:'PageRuler Plus Prestained (26619)', b:[250,130,100,70,55,35,25,15,10], ref:[70,25]},
-   {id:'biorad-precision', v:'Bio-Rad', t:'protein', n:'Precision Plus Dual Color (1610374)', b:[250,150,100,75,50,37,25,20,15,10], ref:[75,25]},
-   {id:'biorad-kaleido', v:'Bio-Rad', t:'protein', n:'Precision Plus Kaleidoscope (1610375)', b:[250,150,100,75,50,37,25,20,15,10], ref:[75,25]}
+   {id:'neb-blue-p7706', v:'NEB', t:'protein', n:'Prestained Protein Marker, Broad Range (P7708)', b:[175,80,58,46,30,25,17,7], ref:[46], pre:true},
+   {id:'thermo-pageruler', v:'Thermo', t:'protein', n:'PageRuler Prestained (26616)', b:[180,130,100,70,55,40,35,25,15,10], ref:[70], pre:true},
+   {id:'thermo-pagerulerplus', v:'Thermo', t:'protein', n:'PageRuler Plus Prestained (26619)', b:[250,130,100,70,55,35,25,15,10], ref:[70,25], pre:true},
+   {id:'biorad-precision', v:'Bio-Rad', t:'protein', n:'Precision Plus Dual Color (1610374)', b:[250,150,100,75,50,37,25,20,15,10], ref:[75,25], pre:true},
+   {id:'biorad-kaleido', v:'Bio-Rad', t:'protein', n:'Precision Plus Kaleidoscope (1610375)', b:[250,150,100,75,50,37,25,20,15,10], ref:[75,25], pre:true},
+   // Western-specific standards. WesternC carries the same ten Precision Plus bands, prestained,
+   // plus a Strep-tag that StrepTactin-HRP lights up in the chemi image. MagicMark XP is not
+   // prestained — its bands bind any IgG secondary, so it appears only in the detected image.
+   {id:'biorad-westernc', v:'Bio-Rad', t:'protein', n:'Precision Plus WesternC (1610376)', b:[250,150,100,75,50,37,25,20,15,10], ref:[75,25], pre:true, chemi:true, chemiNote:'add StrepTactin-HRP to the secondary'},
+   {id:'thermo-magicmark', v:'Thermo', t:'protein', n:'MagicMark XP Western (LC5602)', b:[220,120,100,80,60,50,40,30,20], ref:[], chemi:true, igg:true, chemiNote:'detected by any IgG secondary'}
   ];
-  function customLadders(){ try{ return JSON.parse(lsGet('dd_gel_ladders')||'[]'); }catch(e){ return []; } }
+  function customLadders(){ try{ var a=JSON.parse(lsGet('dd_gel_ladders')||'[]'); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
   function allLadders(){ return LADDERS.concat(customLadders()); }
+  function ladderById(id){ return allLadders().filter(function(l){return l.id===id;})[0]||null; }
 
-  // ── Resolving ranges. Rf is linear in log10(size) across the range: this is a planning
-  //    approximation, not a physical prediction (buffer/voltage/conformation all matter).
+  // ── Resolving ranges. DNA here; protein lives in GEL_PROT_GELS (shared with the SDS-PAGE protocol).
   var DNA_RANGE={ '0.5':[1000,30000], '0.7':[800,15000], '0.8':[800,12000], '1':[500,10000],
                   '1.2':[400,6000], '1.5':[200,3000], '2':[50,2000], '3':[20,1000] };
-  var PROT_RANGE={ '8':[25,200], '10':[15,100], '12':[10,70], '15':[5,40], '4-20':[5,250] };
-  var RF_TOP=0.08, RF_BOT=0.92, RESOLVE=0.035;
+  var PROT=window.GEL_PROT_GELS||{'12':{r:[10,100],n:'12% Tris-glycine',T:12}};
+  // Old saves used PROT_RANGE — keep the name as a read-through for anything that looked it up.
+  var PROT_RANGE={}; Object.keys(PROT).forEach(function(k){ PROT_RANGE[k]=PROT[k].r; });
+  var RESOLVE=0.035;          // minimum ΔRf for two nominally-loaded bands to read as two
+  var RF_EDGE=0.12;           // the resolving range spans Rf 0.12 → 0.88
 
   function rangeFor(s){ return (s.type==='dna'?DNA_RANGE[s.pct]:PROT_RANGE[s.pct])||[10,1000]; }
+
+  // Sigmoid in log10(size): Rf(hi)=RF_EDGE, Rf(lo)=1−RF_EDGE, steepest mid-range. It never
+  // reaches 0 or 1, so nothing is clamped and no two different sizes share a position.
   function rfOf(size,rng){
     if(!(size>0)) return null;
-    var lo=rng[0], hi=rng[1];
-    var rf=RF_TOP+(RF_BOT-RF_TOP)*(Math.log10(hi)-Math.log10(size))/(Math.log10(hi)-Math.log10(lo));
-    var status='ok';
-    if(size>hi){ status='high'; rf=Math.max(0.028, rf); }
-    if(size<lo){ status='low';  rf=Math.min(0.975, rf); }
-    return {rf:Math.max(0.02,Math.min(0.985,rf)), status:status};
+    var ul=Math.log10(rng[0]), uh=Math.log10(rng[1]), m=(ul+uh)/2, h=(uh-ul)/2;
+    var k=Math.log((1-RF_EDGE)/RF_EDGE)/h;
+    var rf=1/(1+Math.exp(k*(Math.log10(size)-m)));
+    var status=size>rng[1]?'high':(size<rng[0]?'low':'ok');
+    var edge=rf<0.03?'well':(rf>0.97?'front':'');
+    return {rf:rf, status:status, edge:edge};
   }
 
+  // ── Stains: detection limit (lod), the load that gives a nominal band (ref), and the
+  //    load above which a band overloads and smears (over). Per band, in ng (DNA) or µg (protein).
+  //    EtBr ~1–5 ng; SYBR Gold ~25× more sensitive; Coomassie R-250 ~50–100 ng; colloidal
+  //    Coomassie ~10 ng; silver ~1 ng; SYPRO Ruby ~1 ng with a wide linear range.
+  var STAINS={
+    dna:{
+      etbr:     {n:'EtBr / SYBR Safe',        lod:2,     ref:100, over:500, u:'ng'},
+      sybrgold: {n:'SYBR Gold',               lod:0.1,   ref:50,  over:300, u:'ng'}
+    },
+    protein:{
+      coomassie:{n:'Coomassie R-250',         lod:0.05,  ref:1,    over:10,  u:'µg', look:'coomassie'},
+      colloidal:{n:'Colloidal Coomassie G-250',lod:0.01, ref:0.5,  over:10,  u:'µg', look:'coomassie'},
+      silver:   {n:'Silver stain',            lod:0.001, ref:0.05, over:0.5, u:'µg', look:'silver'},
+      sypro:    {n:'SYPRO Ruby (fluorescent)',lod:0.001, ref:0.2,  over:20,  u:'µg', look:'sypro'}
+    }
+  };
+  function stainOf(kind,id){ var t=STAINS[kind]; return t[id]||t[Object.keys(t)[0]]; }
+  // Brightness: nothing below the detection limit; ~92% at the nominal load; saturating above.
+  function bandI(a,sn){ if(!(a>0)||a<sn.lod) return 0; return 1-Math.exp(-a/(0.4*sn.ref)); }
+  // Width factor: nominal at or below ref, broadening with log(load) above it.
+  function bandW(a,sn){ return 1+0.6*Math.max(0,Math.log10(Math.max(a,1e-12)/sn.ref)); }
+  // Two bands resolve when their Rf gap beats RESOLVE scaled by how fat they are.
+  function resolves(a,b){ return Math.abs(a.rf-b.rf) >= RESOLVE*(a.wf+b.wf)/2; }
+
+  // ── Plasmid conformations. Rules of thumb for a ~1% gel run without stain cast in:
+  //    supercoiled (CCC) runs AHEAD of linear, at roughly 0.7× its size; nicked / open-circular
+  //    runs BEHIND it, at roughly 1.7×. Both shift with agarose %, voltage and intercalating dye.
+  var CONF={ sc:{n:'supercoiled', f:0.7, soft:1.35}, oc:{n:'nicked / open circular', f:1.7, soft:1.45}, lin:{n:'linear', f:1, soft:1} };
+  var CONF_ALIAS={sc:'sc',ccc:'sc',oc:'oc',nc:'oc',nicked:'oc',lin:'lin',linear:'lin'};
+
+  // "4000", "4000@200", "4000sc@320", "45@2" → {size, amt, conf}
+  var TOKEN=/^(.+?)(sc|ccc|oc|nc|nicked|lin|linear)?(?:@(.+))?$/i;
+  function parseBands(str,kind){
+    var out=[];
+    String(str||'').split(/[,;\s]+/).forEach(function(tok){
+      if(!tok) return;
+      var m=TOKEN.exec(tok); if(!m) return;
+      var size=SCI.parse(m[1]); if(!(isFinite(size)&&size>0)) return;
+      var conf=kind==='dna'&&m[2]?CONF_ALIAS[m[2].toLowerCase()]:'lin';
+      var amt=m[3]!=null?SCI.parse(m[3]):NaN;
+      out.push({size:size, amt:(isFinite(amt)&&amt>0)?amt:null, conf:conf});
+    });
+    return out;
+  }
+  function parseSizes(str){ return parseBands(str,'protein').map(function(b){return b.size;}); }
+  // A digest is equimolar: every fragment comes from the same molecules, so each carries
+  // mass in proportion to its length. `total` is the whole molecule, not just the lanes kept.
+  function equimolar(lens,total,ng){ total=total>0?total:lens.reduce(function(s,l){return s+l;},0);
+    return lens.map(function(l){ return total>0?Math.round(ng*l/total*100)/100:0; }); }
+
+  // ── A deterministic "proteome" for lysate lanes: the same cell lysate looks the same in
+  //    every lane, as it does on a real gel. Illustrative only — never listed as bands.
+  function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; var t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+  var PROTEOME=(function(){
+    // Masses are STRATIFIED across 10–263 kDa (one per slice, jittered inside it) rather than
+    // drawn independently: independent draws left whole regions bare — one seed had nothing
+    // between 35 and 55 kDa, exactly where actin, tubulin and GAPDH dominate a real lysate.
+    var r=mulberry32(20260925), a=[], tot=0, N=110;
+    for(var i=0;i<N;i++){
+      var u1=Math.max(r(),1e-9), u2=r(), g=Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);
+      var p={mw:Math.pow(10,1.0+1.42*(i+r())/N), ab:Math.exp(1.1*g)}; a.push(p); tot+=p.ab;
+    }
+    a.forEach(function(p){ p.frac=0.6*p.ab/tot; });   // ~60% of the mass in discrete bands, the rest smear
+    return a;
+  })();
+
+  // ═════════════════════════════ WESTERN MODEL ═════════════════════════════
+  // Transfer efficiency = elution from the gel × retention on the membrane.
+  //  elution   — large proteins leave the gel slowly. Slower with methanol (it shrinks gel
+  //              pores) and with a denser gel; faster with SDS in the transfer buffer.
+  //  retention — small proteins blow through. Pore size sets the size that half-passes;
+  //              longer transfers and SDS push it up; methanol helps protein stick to
+  //              nitrocellulose. PVDF binds small proteins better than nitrocellulose.
+  // Shaped to reproduce the rules the Western protocol states: >100 kDa transfers badly in
+  // 20% methanol (fix: 10% MeOH, 0.05–0.1% SDS, longer); <20 kDa blows through 0.45 µm
+  // (fix: 0.2 µm, shorter); semi-dry is poor for very large proteins.
+  var XFER={
+    wet:    {n:'Wet / tank transfer',         tau0:12,  a:1.5, tstd:60, def:60},
+    semidry:{n:'Semi-dry',                    tau0:6,   a:2.0, tstd:30, def:30},
+    rapid:  {n:'Rapid (Turbo / iBlot-type)',  tau0:1.5, a:1.6, tstd:7,  def:7}
+  };
+  var MEMS={
+    nc45:  {n:'Nitrocellulose 0.45 µm', m50:10, nc:true},
+    nc20:  {n:'Nitrocellulose 0.2 µm',  m50:4,  nc:true},
+    pvdf45:{n:'PVDF 0.45 µm',           m50:6,  nc:false},
+    pvdf20:{n:'PVDF 0.2 µm',            m50:3,  nc:false}
+  };
+  function clamp(v,a,b){ v=+v; return isFinite(v)?Math.max(a,Math.min(b,v)):a; }
+  function transferEff(mw,x,T){
+    var X=XFER[x.method]||XFER.wet, M=MEMS[x.mem]||MEMS.nc45;
+    var meoh=clamp(x.meoh,0,20), sds=clamp(x.sds,0,0.1), t=clamp(x.min,1,1440), gT=clamp(T||10,4,20);
+    var tau=X.tau0*Math.pow(mw/50,X.a)*(0.6+0.02*meoh)*(gT/10)/(1+6*sds);
+    var elution=1-Math.exp(-t/tau);
+    var m50=M.m50*Math.pow(Math.max(1,t/X.tstd),0.5)*(1+4*sds)*(M.nc?(1.5-0.025*meoh):1);
+    var retention=1/(1+Math.exp(-(Math.log10(mw)-Math.log10(m50))/0.12));
+    var eff=elution*retention;
+    return {eff:eff, elution:elution, retention:retention, grade:eff>=0.8?'good':(eff>=0.5?'reduced':'poor')};
+  }
+
+  // Detection. S is the band's signal in multiples of the detection limit: ≥1 is visible,
+  // ≥10^dr is saturated. Chemiluminescence scales with exposure; the limit (lod, ng of
+  // target at a 60 s exposure) depends on the substrate and the primary antibody.
+  // Dynamic range: film ~1.5 logs, a cooled CCD imager ~3.5, near-IR fluorescence ~4.
+  var SUBS={ std:{n:'ECL — standard (pico-class)', lod:0.01}, hs:{n:'ECL — high sensitivity (femto-class)', lod:0.0005} };
+  var ABQ={ good:{n:'strong',f:0.3}, avg:{n:'typical',f:1}, weak:{n:'weak',f:5} };
+  var DETS={
+    imager:{n:'Chemiluminescence — digital imager', dr:3.5, chemi:true},
+    film:  {n:'Chemiluminescence — X-ray film',    dr:1.6, chemi:true},
+    nir:   {n:'Near-IR fluorescence (two-colour)', dr:4.0, chemi:false, lod:0.01}
+  };
+  function detect(ng,eff,o){
+    var D=DETS[o.mode]||DETS.imager, f=(ABQ[o.ab]||ABQ.avg).f, lod, S;
+    if(D.chemi){ lod=(SUBS[o.sub]||SUBS.std).lod*f; S=ng*eff/lod*(clamp(o.exp,0.1,36000)/60); }
+    else { lod=D.lod*f; S=ng*eff/lod; }
+    var sat=Math.pow(10,D.dr);
+    return {S:S, sat:sat, seen:S>=1, saturated:S>=sat,
+            tSat:(D.chemi&&S>0)?o.exp*sat/S:null, tLod:(D.chemi&&S>0)?o.exp/S:null};
+  }
+
+  // Abundance as a fraction of total protein — order-of-magnitude only.
+  var ABUND={
+    vhigh:{n:'very high (~1%)',   f:1e-2},
+    high: {n:'high (~0.1%)',      f:1e-3},
+    med:  {n:'moderate (~0.01%)', f:1e-4},
+    low:  {n:'low (~0.001%)',     f:1e-5},
+    vlow: {n:'very low (~0.0001%)',f:1e-6}
+  };
+  // Loading controls: typical APPARENT MW on SDS-PAGE (several run above their predicted mass).
+  var LCTRL=[
+    {n:'β-actin',   mw:'42',  abund:'vhigh', host:'mouse',  note:'cytoplasmic; saturates easily'},
+    {n:'GAPDH',     mw:'37',  abund:'vhigh', host:'mouse',  note:'shifts with metabolic state and hypoxia'},
+    {n:'α-tubulin', mw:'50',  abund:'vhigh', host:'mouse',  note:'cytoskeletal'},
+    {n:'HSP90',     mw:'90',  abund:'vhigh', host:'rabbit', note:'abundant chaperone'},
+    {n:'Vinculin',  mw:'124', abund:'high',  host:'mouse',  note:'a good control for high-MW targets'},
+    {n:'Lamin B1',  mw:'66',  abund:'high',  host:'rabbit', note:'nuclear fraction'},
+    {n:'Histone H3',mw:'17',  abund:'vhigh', host:'rabbit', note:'chromatin fraction; small — use 0.2 µm'},
+    {n:'COX IV',    mw:'17',  abund:'high',  host:'rabbit', note:'mitochondrial fraction'},
+    {n:'VDAC1',     mw:'31',  abund:'high',  host:'rabbit', note:'mitochondrial fraction'},
+    {n:'TBP',       mw:'38',  abund:'low',   host:'mouse',  note:'nuclear; low abundance'}
+  ];
+  var MEMSIZE={ mini:{n:'Mini gel (8.6 × 6.7 cm)', w:8.6, h:6.7}, midi:{n:'Midi / Criterion (13.3 × 8.7 cm)', w:13.3, h:8.7} };
+  var MIN_CUT_GAP=0.08;       // Rf gap needed to fit scissors between two targets (~5 mm on a mini gel)
+  var MIN_AB_ML=2;            // smallest practical incubation volume for a strip
+
+  // ═════════════════════════════ STATE ═════════════════════════════
   var S=null;
-  function defState(){ return { type:'dna', pct:'1', ladder:'neb-1kb', look:'dark',
+  function defDna(){ return { pct:'1', ladder:'neb-1kb', stain:'etbr', look:'dark', plasBp:4000, plasNg:400,
     lanes:[ {name:'Sample 1', sizes:'5000, 3000, 1000'}, {name:'Sample 2', sizes:'4200, 4000'} ] }; }
-  function load(){ try{ var j=JSON.parse(lsGet('dd_gel')||'null'); if(j&&j.lanes) return j; }catch(e){} return defState(); }
+  function defProt(){ return { pct:'12', ladder:'thermo-pagerulerplus', stain:'coomassie',
+    lanes:[ {name:'Lysate', sizes:'', lys:20}, {name:'Purified', sizes:'45@2'}, {name:'Elution', sizes:'45@0.5, 28@0.2'} ] }; }
+  function defWb(){ return { pct:'10', ladder:'thermo-pagerulerplus', view:'blot',
+    lanes:[ {name:'Control',load:20}, {name:'siRNA-1',load:20}, {name:'siRNA-2',load:20}, {name:'Rescue',load:20} ],
+    targets:[ {name:'Target',mw:'65',abund:'med',expr:'1, 0.3, 0.25, 1.1',host:'rabbit',ch:'800',ab:'avg',dil:1000,lc:false},
+              {name:'β-actin',mw:'42',abund:'vhigh',expr:'',host:'mouse',ch:'700',ab:'good',dil:5000,lc:true} ],
+    xfer:{method:'wet', min:60, mem:'nc45', meoh:20, sds:0},
+    det:{mode:'imager', sub:'std', exp:60, overlay:true, satRed:true},
+    mem:{size:'mini', mlcm2:0.1, sec:10000} }; }
+  function defState(){ return {v:2, tab:'dna', dna:defDna(), protein:defProt(), western:defWb()}; }
+  function str(v,n){ return String(v==null?'':v).slice(0,n||200); }
+  function num(v,d){ var x=+v; return isFinite(x)?x:d; }
+  // Everything in dd_gel is untrusted: an old single-gel save, a hand edit, an imported backup.
+  function sane(j){
+    var d=defState(); if(!j||typeof j!=='object') return d;
+    if(j.v!==2){                                   // legacy {type,pct,ladder,look,lanes}
+      if(!Array.isArray(j.lanes)) return d;
+      var t=j.type==='protein'?'protein':'dna', g=d[t];
+      if(t==='dna'?DNA_RANGE[j.pct]:PROT_RANGE[j.pct]) g.pct=String(j.pct);
+      if(j.ladder) g.ladder=str(j.ladder,60); if(t==='dna'&&(j.look==='light'||j.look==='dark')) g.look=j.look;
+      g.lanes=j.lanes.slice(0,30).map(function(L){ return {name:str(L&&L.name,40), sizes:str(L&&L.sizes,400)}; });
+      d.tab=t; return d;
+    }
+    d.tab=(j.tab==='protein'||j.tab==='western')?j.tab:'dna';
+    ['dna','protein'].forEach(function(t){ var s=j[t]; if(!s||typeof s!=='object') return; var g=d[t];
+      if(t==='dna'?DNA_RANGE[s.pct]:PROT_RANGE[s.pct]) g.pct=String(s.pct);
+      if(s.ladder) g.ladder=str(s.ladder,60); if(STAINS[t][s.stain]) g.stain=s.stain;
+      if(t==='dna'&&(s.look==='light'||s.look==='dark')) g.look=s.look;
+      if(t==='dna'){ g.plasBp=clamp(s.plasBp,10,1e6)||4000; g.plasNg=clamp(s.plasNg,0.1,1e5)||400; }
+      if(Array.isArray(s.lanes)) g.lanes=s.lanes.slice(0,30).map(function(L){ L=L||{};
+        return {name:str(L.name,40), sizes:str(L.sizes,400), lys:t==='protein'?clamp(L.lys,0,200):0}; }); });
+    var w=j.western;
+    if(w&&typeof w==='object'){ var g=d.western;
+      if(PROT_RANGE[w.pct]) g.pct=String(w.pct); if(w.ladder) g.ladder=str(w.ladder,60);
+      g.view=w.view==='ponceau'?'ponceau':'blot';
+      if(Array.isArray(w.lanes)) g.lanes=w.lanes.slice(0,24).map(function(L){ L=L||{}; return {name:str(L.name,40), load:clamp(L.load,0,200)}; });
+      if(Array.isArray(w.targets)) g.targets=w.targets.slice(0,12).map(function(T){ T=T||{}; return {
+        name:str(T.name,40), mw:str(T.mw,40), abund:ABUND[T.abund]?T.abund:'med', expr:str(T.expr,200),
+        host:str(T.host,20)||'rabbit', ch:T.ch==='700'?'700':'800', ab:ABQ[T.ab]?T.ab:'avg',
+        dil:clamp(T.dil,1,1e6)||1000, lc:!!T.lc }; });
+      if(w.xfer){ g.xfer={method:XFER[w.xfer.method]?w.xfer.method:'wet', min:clamp(w.xfer.min,1,1440),
+        mem:MEMS[w.xfer.mem]?w.xfer.mem:'nc45', meoh:clamp(w.xfer.meoh,0,20), sds:clamp(w.xfer.sds,0,0.1)}; }
+      if(w.det){ g.det={mode:DETS[w.det.mode]?w.det.mode:'imager', sub:SUBS[w.det.sub]?w.det.sub:'std',
+        exp:clamp(w.det.exp,0.1,36000), overlay:w.det.overlay!==false, satRed:w.det.satRed!==false}; }
+      if(w.mem){ g.mem={size:MEMSIZE[w.mem.size]?w.mem.size:'mini', mlcm2:clamp(w.mem.mlcm2,0.02,1)||0.1, sec:clamp(w.mem.sec,100,1e6)||10000}; }
+    }
+    return d;
+  }
+  function load(){ var j=null; try{ j=JSON.parse(lsGet('dd_gel')||'null'); }catch(e){} return sane(j); }
   function save(){ try{ lsSetWarn('dd_gel',JSON.stringify(S)); }catch(e){} }
+  function G(){ return S[S.tab]; }
+  function kindOf(tab){ return tab==='dna'?'dna':'protein'; }
+  function unitOf(tab){ return tab==='dna'?'bp':'kDa'; }
+  function fmtSizeK(n,kind){ if(kind==='dna'&&n>=1000) return SCI.fmt(n/1000,3)+' kb'; return SCI.fmt(n,4)+' '+(kind==='dna'?'bp':'kDa'); }
+  function fmtSize(n){ return fmtSizeK(n,kindOf(S.tab)); }
+  function gelName(tab){ var g=S[tab]; return tab==='dna'?g.pct+'% agarose':((PROT[g.pct]||{}).n||g.pct+'% SDS-PAGE'); }
+  function gelT(pct){ return (PROT[pct]||{}).T||10; }
 
-  function parseSizes(str){ return String(str||'').split(/[,;\s]+/).map(function(x){return SCI.parse(x);}).filter(function(n){return isFinite(n)&&n>0;}); }
-  function unit(){ return S.type==='dna'?'bp':'kDa'; }
-  function fmtSize(n){ if(S.type==='dna'&&n>=1000) return SCI.fmt(n/1000,3)+' kb'; return SCI.fmt(n,4)+' '+unit(); }
-
-  // ── model → lanes with computed Rf
-  function computeLanes(){
-    var rng=rangeFor(S), out=[];
-    var lad=allLadders().filter(function(l){return l.id===S.ladder;})[0];
-    if(lad) out.push({name:lad.n, ladder:true, ref:lad.ref||[],
-      bands:lad.b.map(function(sz){ var r=rfOf(sz,rng); return {size:sz, rf:r.rf, status:r.status}; })});
-    S.lanes.forEach(function(L){
-      out.push({name:L.name||'Lane', ladder:false, ref:[],
-        bands:parseSizes(L.sizes).map(function(sz){ var r=rfOf(sz,rng); return {size:sz, rf:r.rf, status:r.status}; })});
+  // ═════════════════════════ GEL MODEL (DNA / protein) ═════════════════════════
+  function computeLanes(tab){
+    tab=tab||S.tab; var g=S[tab], kind=kindOf(tab), rng=rangeFor({type:kind,pct:g.pct});
+    var sn=stainOf(kind,g.stain), out=[];
+    var lad=ladderById(g.ladder);
+    if(lad&&lad.t===kind) out.push({name:lad.n, ladder:true, ref:lad.ref||[], lys:0,
+      bands:lad.b.map(function(sz){ var isRef=(lad.ref||[]).indexOf(sz)>=0, a=sn.ref*(isRef?1.8:0.9);
+        var r=rfOf(sz,rng); return {size:sz, app:sz, amt:a, conf:'lin', rf:r.rf, status:r.status, edge:r.edge,
+          wf:bandW(a,sn), I:bandI(a,sn), isRef:isRef}; })});
+    g.lanes.forEach(function(L){
+      out.push({name:L.name||'Lane', ladder:false, ref:[], lys:kind==='protein'?(+L.lys||0):0,
+        bands:parseBands(L.sizes,kind).map(function(b){
+          var a=b.amt!=null?b.amt:sn.ref, cf=CONF[b.conf]||CONF.lin, app=b.size*cf.f, r=rfOf(app,rng);
+          return {size:b.size, app:app, amt:a, given:b.amt!=null, conf:b.conf, rf:r.rf, status:r.status, edge:r.edge,
+                  wf:bandW(a,sn)*cf.soft, I:bandI(a,sn), over:a>sn.over, below:a<sn.lod}; })});
     });
     return out;
   }
 
-  // ── the useful part: will it actually resolve?
-  function bestPct(){
-    var ranges=S.type==='dna'?DNA_RANGE:PROT_RANGE, best=null;
-    Object.keys(ranges).forEach(function(p){
-      var rng=ranges[p], worst=1, anyOut=false;
-      S.lanes.forEach(function(L){
-        var sz=parseSizes(L.sizes);
+  // Best gel for everything currently loaded: prefer a gel with every band in range, then
+  // the widest worst-case gap. Walked in numeric order so ties resolve predictably — the
+  // old version iterated Object.keys, which lists '1','2','3' before '0.5'.
+  function bestPct(tab){
+    tab=tab||S.tab; var kind=kindOf(tab), g=S[tab];
+    var keys=kind==='dna'?Object.keys(DNA_RANGE):Object.keys(PROT_RANGE);
+    keys.sort(function(a,b){ var x=parseFloat(a), y=parseFloat(b);
+      if(isNaN(x)&&isNaN(y)) return 0; if(isNaN(x)) return 1; if(isNaN(y)) return -1; return x-y; });
+    var sizes=[], cur=null;
+    g.lanes.forEach(function(L){ sizes.push(parseBands(L.sizes,kind).map(function(b){ return b.size*(CONF[b.conf]||CONF.lin).f; })); });
+    var best=null;
+    keys.forEach(function(p){
+      var rng=kind==='dna'?DNA_RANGE[p]:PROT_RANGE[p], worst=Infinity, pairs=0, anyOut=false;
+      sizes.forEach(function(sz){
         sz.forEach(function(x){ if(x>rng[1]||x<rng[0]) anyOut=true; });
         for(var i=0;i<sz.length;i++) for(var j=i+1;j<sz.length;j++){
-          var a=rfOf(sz[i],rng), b=rfOf(sz[j],rng);
-          worst=Math.min(worst, Math.abs(a.rf-b.rf));
-        }
-      });
-      var score=(anyOut?0:1)*1000+worst;
-      if(!best||score>best.score) best={pct:p,score:score,worst:worst,anyOut:anyOut};
+          pairs++; worst=Math.min(worst, Math.abs(rfOf(sz[i],rng).rf-rfOf(sz[j],rng).rf)); } });
+      var score=(anyOut?0:1)*10+(pairs?Math.min(worst,1):1);
+      var rec={pct:p, score:score, worst:worst, pairs:pairs, anyOut:anyOut};
+      if(String(p)===String(g.pct)) cur=rec;
+      if(!best||score>best.score+1e-9) best=rec;
     });
+    if(best) best.cur=cur;
     return best;
   }
-  function warnings(lanes){
-    var w=[], rng=rangeFor(S);
+
+  function gelWarnings(lanes,tab){
+    tab=tab||S.tab; var w=[], kind=kindOf(tab), g=S[tab], sn=stainOf(kind,g.stain), hasConf=false;
     lanes.forEach(function(L){
       if(L.ladder) return;
       for(var i=0;i<L.bands.length;i++){
+        var b=L.bands[i]; if(b.conf!=='lin') hasConf=true;
         for(var j=i+1;j<L.bands.length;j++){
-          if(Math.abs(L.bands[i].rf-L.bands[j].rf)<RESOLVE)
-            w.push({k:'bad', t:L.name+': '+fmtSize(L.bands[i].size)+' and '+fmtSize(L.bands[j].size)+' will not separate here.'});
+          var c=L.bands[j];
+          if(!resolves(b,c)){
+            var atNominal=Math.abs(b.rf-c.rf)>=RESOLVE;
+            w.push({k:'bad', t:L.name+': '+fmtSize(b.size)+(b.conf!=='lin'?' ('+CONF[b.conf].n+')':'')+' and '+fmtSize(c.size)+(c.conf!=='lin'?' ('+CONF[c.conf].n+')':'')+' will not separate here'
+              +(atNominal?' — they would at a lighter load; these bands are broadened by overloading.':'.')});
+          }
         }
-        var b=L.bands[i];
-        if(b.status==='high') w.push({k:'warn', t:L.name+': '+fmtSize(b.size)+' is above the resolving range of this gel — it will sit as a tight band near the well.'});
-        if(b.status==='low')  w.push({k:'warn', t:L.name+': '+fmtSize(b.size)+' is below the resolving range — it may run off with the dye front.'});
+        if(b.edge==='well') w.push({k:'warn', t:L.name+': '+fmtSize(b.size)+' will barely leave the well on this gel.'});
+        else if(b.status==='high') w.push({k:'warn', t:L.name+': '+fmtSize(b.size)+' is above this gel’s resolving range — it runs compressed near the top, so sizing it against the ladder is unreliable.'});
+        if(b.edge==='front') w.push({k:'warn', t:L.name+': '+fmtSize(b.size)+' runs at the dye front and may run off the gel.'});
+        else if(b.status==='low') w.push({k:'warn', t:L.name+': '+fmtSize(b.size)+' is below the resolving range — it runs compressed toward the dye front.'});
+        if(b.given&&b.below) w.push({k:'warn', t:L.name+': '+SCI.fmt(b.amt,3)+' '+sn.u+' of '+fmtSize(b.size)+' is below the ~'+SCI.fmt(sn.lod,2)+' '+sn.u+' detection limit of '+sn.n+' — you probably will not see it.'});
+        if(b.over) w.push({k:'warn', t:L.name+': '+SCI.fmt(b.amt,3)+' '+sn.u+' in one band overloads — expect a broad, smeared band. Aim for ≤ '+SCI.fmt(sn.over,2)+' '+sn.u+' per band.'});
       }
     });
-    var bp=bestPct();
-    if(w.length && bp && String(bp.pct)!==String(S.pct) && !bp.anyOut && bp.worst>=RESOLVE)
-      w.push({k:'ok', t:'A '+bp.pct+(S.type==='dna'?'% agarose':'% acrylamide')+' gel would separate everything currently loaded.'});
+    if(hasConf) w.push({k:'info', t:'Uncut plasmid is drawn with supercoiled at ≈0.7× and nicked/open-circular at ≈1.7× its linear size — rules of thumb for a ~1% gel without stain cast in. Real positions move with agarose %, voltage and intercalating dye; size plasmids against a linearised control.'});
+    var bp=bestPct(tab), curOut=false;
+    lanes.forEach(function(L){ if(!L.ladder) L.bands.forEach(function(b){ if(b.status!=='ok') curOut=true; }); });
+    var problem=curOut||w.some(function(x){return x.k==='bad'||x.k==='warn';});
+    var better=bp&&(!bp.cur||bp.score>bp.cur.score+1e-9);
+    if(bp && problem && better && String(bp.pct)!==String(g.pct) && !bp.anyOut){
+      var label=kind==='dna'?bp.pct+'% agarose':((PROT[bp.pct]||{}).n||bp.pct+'%');
+      if(bp.pairs && bp.worst>=RESOLVE) w.push({k:'ok', t:'A '+label+' gel would keep every band in range and separate them all.'});
+      else if(!bp.pairs && curOut) w.push({k:'ok', t:'A '+label+' gel would keep every band inside its resolving range.'});
+    }
     if(!w.length) w.push({k:'ok', t:'All bands fall inside the resolving range of this gel and are far enough apart to read.'});
-    // ladder bracketing
     var lad=lanes.filter(function(L){return L.ladder;})[0];
     if(lad&&lad.bands.length){
       var lmin=Math.min.apply(null,lad.bands.map(function(b){return b.size;}));
       var lmax=Math.max.apply(null,lad.bands.map(function(b){return b.size;}));
-      var all=[]; S.lanes.forEach(function(L){ all=all.concat(parseSizes(L.sizes)); });
+      var all=[]; lanes.forEach(function(L){ if(!L.ladder) L.bands.forEach(function(b){ all.push(b.app); }); });
       if(all.length&&(Math.min.apply(null,all)<lmin||Math.max.apply(null,all)>lmax))
         w.push({k:'warn', t:'Some samples fall outside the ladder range ('+fmtSize(lmin)+'–'+fmtSize(lmax)+') — you will be extrapolating when you size them.'});
     }
     return w;
   }
 
-  // ── canvas. Gel colours are deliberately photo-realistic and theme-independent
-  //    (a gel image looks the same whatever UI theme you use).
-  function buildCanvas(scale){
-    var lanes=computeLanes(), dark=(S.look==='dark');
-    var LW=78, GAP=8, LEFT=64, PADX=16, TOP=34, GELH=430, BOT=26;
-    // Logical-unit drawing throughout, so a higher scale is a crisp re-render.
-    var W=PADX*2+LEFT+lanes.length*(LW+GAP), H=TOP+GELH+BOT, DPR=scale>0?scale:2;
-    var c=document.createElement('canvas'); c.width=W*DPR; c.height=H*DPR;
-    c.style.width=W+'px'; c.style.height=H+'px';
-    // Canvas pixels are opaque to screen readers, so name the image and point at the
-    // band table below, which carries the same information as real text.
+  // ═════════════════════════ WESTERN MODEL ═════════════════════════
+  function parseMw(s){ return parseSizes(s).slice(0,4); }
+  function exprList(s,n){ var v=String(s||'').split(/[,;\s]+/).filter(Boolean).map(function(x){return SCI.parse(x);}), out=[];
+    for(var i=0;i<n;i++) out.push(isFinite(v[i])&&v[i]>=0?v[i]:1); return out; }
+  function wbModel(){
+    var W=S.western, rng=PROT_RANGE[W.pct]||[10,100], T=gelT(W.pct), nL=W.lanes.length;
+    var targets=W.targets.map(function(t,ti){
+      var mws=parseMw(t.mw), ex=exprList(t.expr,nL), frac=(ABUND[t.abund]||ABUND.med).f;
+      var bands=mws.map(function(mw){
+        var r=rfOf(mw,rng), xf=transferEff(mw,W.xfer,T);
+        var lanes=W.lanes.map(function(L,li){
+          var ng=(+L.load||0)*1000*frac*ex[li]/mws.length;
+          var d=detect(ng,xf.eff,{mode:W.det.mode,sub:W.det.sub,ab:t.ab,exp:W.det.exp});
+          return {ng:ng, d:d};
+        });
+        return {mw:mw, rf:r.rf, status:r.status, edge:r.edge, xf:xf, lanes:lanes};
+      });
+      return {t:t, i:ti, bands:bands};
+    });
+    return {W:W, rng:rng, T:T, targets:targets};
+  }
+
+  // Where to cut the membrane so each strip can be probed on its own. Targets sort top to
+  // bottom; a cut goes between neighbours only when there is room for scissors, at the
+  // geometric-mean MW, and is named by the ladder bands either side of it.
+  function cutPlan(m){
+    var W=m.W, items=[];
+    m.targets.forEach(function(T){ T.bands.forEach(function(b){ items.push({name:T.t.name||'Target', mw:b.mw, rf:b.rf, t:T}); }); });
+    items.sort(function(a,b){ return a.rf-b.rf; });
+    var strips=[], cur=null, cuts=[];
+    items.forEach(function(it,i){
+      if(!cur){ cur={items:[it]}; strips.push(cur); return; }
+      var prev=cur.items[cur.items.length-1];
+      if(it.rf-prev.rf>=MIN_CUT_GAP){
+        var cmw=Math.sqrt(prev.mw*it.mw), crf=rfOf(cmw,m.rng).rf;
+        cuts.push({mw:cmw, rf:crf, above:prev, below:it, between:ladderBracket(cmw,W.ladder)});
+        cur={items:[it]}; strips.push(cur);
+      } else cur.items.push(it);
+    });
+    var bounds=[0].concat(cuts.map(function(c){return c.rf;})).concat([1]);
+    var ms=MEMSIZE[W.mem.size]||MEMSIZE.mini;
+    strips.forEach(function(s,i){
+      s.top=bounds[i]; s.bot=bounds[i+1]; s.frac=s.bot-s.top;
+      s.area=ms.w*ms.h*s.frac;
+      s.ml=Math.max(MIN_AB_ML, s.area*W.mem.mlcm2);
+      var seen={}; s.targets=[];
+      s.items.forEach(function(it){ if(!seen[it.t.i]){ seen[it.t.i]=1; s.targets.push(it.t); } });
+      s.primary=s.targets.map(function(T){ return {name:T.t.name||'Target', dil:T.t.dil, ul:s.ml*1000/T.t.dil}; });
+      s.secUl=s.ml*1000/W.mem.sec;
+    });
+    return {cuts:cuts, strips:strips, items:items};
+  }
+  function ladderBracket(mw,ladId){
+    var lad=ladderById(ladId); if(!lad||lad.t!=='protein') return null;
+    var up=null, dn=null;
+    lad.b.forEach(function(s){ if(s>=mw&&(up===null||s<up)) up=s; if(s<mw&&(dn===null||s>dn)) dn=s; });
+    return {up:up, dn:dn};
+  }
+
+  function wbWarnings(m){
+    var W=m.W, w=[], D=DETS[W.det.mode]||DETS.imager, lad=ladderById(W.ladder);
+    // 1) on the gel at all?
+    m.targets.forEach(function(T){ T.bands.forEach(function(b){
+      if(b.status!=='ok') w.push({k:'warn', t:(T.t.name||'Target')+' ('+SCI.fmt(b.mw,3)+' kDa) is '+(b.status==='high'?'above':'below')+' the resolving range of a '+((PROT[W.pct]||{}).n||W.pct)+' gel.'});
+    }); });
+    // 2) separation between targets
+    var flat=[]; m.targets.forEach(function(T){ T.bands.forEach(function(b){ flat.push({T:T, b:b}); }); });
+    for(var i=0;i<flat.length;i++) for(var j=i+1;j<flat.length;j++){
+      var A=flat[i], B=flat[j]; if(A.T===B.T) continue;
+      var gap=Math.abs(A.b.rf-B.b.rf), an=A.T.t.name||'Target', bn=B.T.t.name||'Target';
+      if(gap<RESOLVE){
+        if(!D.chemi&&A.T.t.ch!==B.T.t.ch){
+          if(A.T.t.host===B.T.t.host) w.push({k:'bad', t:an+' and '+bn+' co-migrate and are in different channels — but both primaries are '+A.T.t.host+'. A two-colour blot needs primaries from different host species, or each secondary lights up both.'});
+          else w.push({k:'ok', t:an+' and '+bn+' co-migrate, but they are in different fluorescence channels with different host species — two-colour detection keeps them apart.'});
+        } else {
+          var lcAlt='';
+          if(A.T.t.lc||B.T.t.lc){ var tgt=A.T.t.lc?B.b:A.b;
+            var alts=LCTRL.filter(function(c){ var r=rfOf(+c.mw,m.rng).rf; return Math.abs(r-tgt.rf)>=MIN_CUT_GAP; }).slice(0,3).map(function(c){return c.n+' ('+c.mw+' kDa)';});
+            if(alts.length) lcAlt=' Or pick a loading control that runs clear of it: '+alts.join(', ')+'.'; }
+          w.push({k:'bad', t:an+' ('+SCI.fmt(A.b.mw,3)+' kDa) and '+bn+' ('+SCI.fmt(B.b.mw,3)+' kDa) co-migrate on this gel — you cannot cut between them or tell them apart with one secondary. Use two-colour fluorescence with primaries from different species, or strip and reprobe.'+lcAlt});
+        }
+      }
+    }
+    // 3) transfer
+    m.targets.forEach(function(T){ T.bands.forEach(function(b){
+      if(b.xf.grade==='good') return;
+      var why=[], x=W.xfer;
+      if(b.xf.elution<0.8){
+        if(x.meoh>10) why.push('drop methanol to 10%');
+        if(x.sds<0.05) why.push('add 0.05% SDS to the transfer buffer');
+        if(x.method!=='wet') why.push('use a wet/tank transfer'); else why.push('extend the transfer');
+      }
+      if(b.xf.retention<0.8){
+        if(x.mem!=='pvdf20') why.push('switch to a 0.2 µm membrane (PVDF 0.2 µm retains small proteins best)');
+        if(x.sds>0) why.push('leave SDS out of the transfer buffer');
+        if(x.min>(XFER[x.method]||XFER.wet).tstd) why.push('shorten the transfer');
+      }
+      w.push({k:b.xf.grade==='poor'?'bad':'warn', t:(T.t.name||'Target')+' ('+SCI.fmt(b.mw,3)+' kDa): transfer '+b.xf.grade+' (≈'+Math.round(b.xf.eff*100)+'%) — '
+        +(b.xf.elution<0.8?'large proteins elute slowly from the gel':'small proteins blow through the membrane')+(why.length?'. Try: '+why.join('; ')+'.':'.')});
+    }); });
+    // 4) exposure: saturation and detection
+    m.targets.forEach(function(T){
+      var nm=T.t.name||'Target', satL=[], lowL=[], tSat=Infinity, tLod=0;
+      T.bands.forEach(function(b){ b.lanes.forEach(function(x,li){
+        var ln=W.lanes[li].name||('lane '+(li+1));
+        if(x.ng<=0) return;
+        if(x.d.saturated&&satL.indexOf(ln)<0) satL.push(ln);
+        if(!x.d.seen&&lowL.indexOf(ln)<0) lowL.push(ln);
+        if(x.d.tSat!=null) tSat=Math.min(tSat,x.d.tSat);
+        if(x.d.tLod!=null) tLod=Math.max(tLod,x.d.tLod); }); });
+      if(satL.length){
+        var fix=D.chemi?(' Shorten the exposure to ≤ '+SCI.fmt(tSat,2)+' s, or load less.'):' Load less, or lower the scan intensity.';
+        w.push({k:T.t.lc?'bad':'warn', t:nm+' is saturated in '+satL.join(', ')+' — band intensity no longer tracks the amount of protein, so it cannot be quantified.'+fix
+          +(T.t.lc?' A saturated loading control makes every normalised value meaningless; consider a total-protein stain instead (see the Ponceau view).':'')});
+      }
+      if(lowL.length) w.push({k:'warn', t:nm+' is below detection in '+lowL.join(', ')+'.'+(D.chemi?(' It needs ≥ '+SCI.fmt(tLod,2)+' s at this load, more protein, or a high-sensitivity substrate.'):' Load more protein or use a stronger primary.')});
+      if(D.chemi&&isFinite(tSat)&&tLod>tSat) w.push({k:'warn', t:nm+' spans more than the detector’s dynamic range across your lanes — no single exposure shows every lane without saturating one. Take two exposures, or load closer amounts.'});
+    });
+    var lcs=m.targets.filter(function(T){return T.t.lc;}), others=m.targets.filter(function(T){return !T.t.lc;});
+    if(D.chemi&&lcs.length&&others.length){
+      var lcSat=Math.min.apply(null,lcs.map(function(T){ var t=Infinity; T.bands.forEach(function(b){ b.lanes.forEach(function(x){ if(x.d.tSat!=null) t=Math.min(t,x.d.tSat); }); }); return t; }));
+      var tgLod=Math.max.apply(null,others.map(function(T){ var t=0; T.bands.forEach(function(b){ b.lanes.forEach(function(x){ if(x.d.tLod!=null&&x.ng>0) t=Math.max(t,x.d.tLod); }); }); return t; }));
+      if(isFinite(lcSat)&&tgLod>lcSat) w.push({k:'info', t:'Your targets need ≥ '+SCI.fmt(tgLod,2)+' s, but the loading control saturates after '+SCI.fmt(lcSat,2)+' s. Cut the membrane (see the cut plan) and image the strips at separate exposures.'});
+    }
+    // 5) the ladder in the image
+    if(lad&&lad.t==='protein'){
+      if(D.chemi&&!lad.chemi) w.push({k:W.det.overlay?'info':'warn', t:lad.n+' is prestained, not chemiluminescent — it will '+(W.det.overlay?'appear only through the imager’s white-light marker overlay':'NOT appear in the blot image')+'. Mark the bands on the membrane, or use a chemi-visible standard (Precision Plus WesternC, MagicMark XP).'});
+      if(lad.chemi&&lad.chemiNote&&D.chemi) w.push({k:'info', t:lad.n+': '+lad.chemiNote+' for the ladder to show in the chemi image.'});
+    }
+    // 6) the detector itself
+    if(W.det.mode==='film') w.push({k:'warn', t:'Film saturates within ~1.5 orders of magnitude — fine for yes/no, unreliable for quantification. Use a digital imager or fluorescence to quantify.'});
+    if(W.xfer.mem.indexOf('pvdf')===0) w.push({k:'info', t:'PVDF must be activated in 100% methanol for ~30 s before it meets transfer buffer, whatever the methanol % in the buffer itself.'});
+    if(!w.filter(function(x){return x.k==='bad'||x.k==='warn';}).length) w.push({k:'ok', t:'Every target sits on the gel, transfers well, and is detected without saturating at this exposure.'});
+    return w;
+  }
+
+  // ═════════════════════════ DRAWING ═════════════════════════
+  function band(x,lx,lw,by,bh,rgb,a,soft){
+    soft=soft||1; if(!(a>0.004)) return;
+    var g=x.createLinearGradient(0,by-bh*2*soft,0,by+bh*2*soft);
+    g.addColorStop(0,'rgba('+rgb+',0)'); g.addColorStop(0.5,'rgba('+rgb+','+a+')'); g.addColorStop(1,'rgba('+rgb+',0)');
+    x.fillStyle=g; x.fillRect(lx,by-bh*2*soft,lw,bh*4*soft);
+    x.fillStyle='rgba('+rgb+','+a+')'; x.fillRect(lx,by-bh/2,lw,bh);
+  }
+  function smear(x,lx,lw,by,len,rgb,a){
+    var g=x.createLinearGradient(0,by,0,by+len);
+    g.addColorStop(0,'rgba('+rgb+','+(a*0.5)+')'); g.addColorStop(1,'rgba('+rgb+',0)');
+    x.fillStyle=g; x.fillRect(lx+3,by,lw-6,len);
+  }
+  // Gel colours are photo-realistic and theme-independent — a gel looks the same whatever UI theme.
+  function paletteFor(tab){
+    var g=S[tab];
+    if(tab==='dna') return g.look==='dark'
+      ? {bg:'#0b0e12', gel:'#141a20', well:'#05070a', band:'196,255,214', lab:'#c8d2dc', dim:'#7d8994', front:'rgba(120,140,255,0.5)'}
+      : {bg:'#f2f0ea', gel:'#e9e6dd', well:'#cfcabc', band:'30,40,60',   lab:'#3a352c', dim:'#7c7362', front:'rgba(80,90,160,0.45)'};
+    var look=stainOf('protein',g.stain).look;
+    if(look==='silver') return {bg:'#f3eedd', gel:'#ece2c3', well:'#cdbf99', band:'74,48,22',  lab:'#3a352c', dim:'#7c7362', front:'rgba(120,90,40,0.35)'};
+    if(look==='sypro')  return {bg:'#0b0a09', gel:'#15110e', well:'#050404', band:'255,178,96', lab:'#e1d6c8', dim:'#9a8d7c', front:'rgba(255,150,80,0.35)'};
+    return                     {bg:'#f4f2ea', gel:'#eceadf', well:'#cfcabc', band:'28,48,150', lab:'#3a352c', dim:'#7c7362', front:'rgba(40,60,170,0.38)'};
+  }
+  var GEO={LW:78, GAP:8, LEFT:64, PADX:16, TOP:34, GELH:430, BOT:38};
+  // Left and right captions under the gel. A narrow gel (few lanes) cannot fit both on one
+  // line — they printed on top of each other — so the right one drops to a second line.
+  function captions(x,left,right,gx,gw,y){
+    x.font='9px monospace'; x.textBaseline='alphabetic';
+    var fits=x.measureText(left).width+x.measureText(right).width+16<=gw;
+    x.textAlign='left'; x.fillText(left,gx+2,y);
+    x.textAlign=fits?'right':'left'; x.fillText(right,fits?gx+gw:gx+2,fits?y:y+12);
+  }
+
+  function buildGelCanvas(scale,tab){
+    tab=tab||S.tab; var lanes=computeLanes(tab), P=paletteFor(tab), kind=kindOf(tab), sn=stainOf(kind,S[tab].stain);
+    var LW=GEO.LW, GAP=GEO.GAP, LEFT=GEO.LEFT, PADX=GEO.PADX, TOP=GEO.TOP, GELH=GEO.GELH, BOT=GEO.BOT;
+    var W=PADX*2+LEFT+Math.max(1,lanes.length)*(LW+GAP), H=TOP+GELH+BOT, DPR=scale>0?scale:2;
+    var c=document.createElement('canvas'); c.width=W*DPR; c.height=H*DPR; c.style.width=W+'px'; c.style.height=H+'px';
     c.setAttribute('role','img');
-    c.setAttribute('aria-label','Simulated '+(S.type==='dna'?S.pct+'% agarose DNA gel':S.pct+'% SDS-PAGE protein gel')
-      +' with '+lanes.length+' lane'+(lanes.length===1?'':'s')+'. The band table below lists every lane, size and Rf as text.');
+    c.setAttribute('aria-label','Simulated '+gelName(tab)+(kind==='dna'?' DNA gel':' protein gel, '+sn.n)+' with '+lanes.length+' lane'+(lanes.length===1?'':'s')+'. The band table below lists every lane, size and Rf as text.');
     var x=c.getContext('2d'); x.scale(DPR,DPR);
-    x.fillStyle=dark?'#0b0e12':'#f2f0ea'; x.fillRect(0,0,W,H);
-    var gx=PADX+LEFT, gy=TOP, gw=lanes.length*(LW+GAP)-GAP, gh=GELH;
-    x.fillStyle=dark?'#141a20':'#e9e6dd'; x.fillRect(gx,gy,gw,gh);
-    // ladder size labels down the left
+    x.fillStyle=P.bg; x.fillRect(0,0,W,H);
+    var gx=PADX+LEFT, gy=TOP, gw=Math.max(1,lanes.length)*(LW+GAP)-GAP, gh=GELH;
+    x.fillStyle=P.gel; x.fillRect(gx,gy,gw,gh);
     var lad=lanes[0];
-    x.font='10px monospace'; x.textAlign='right'; x.textBaseline='middle';
-    x.fillStyle=dark?'#7d8994':'#7c7362';
-    if(lad&&lad.ladder) lad.bands.forEach(function(b){ x.fillText(fmtSize(b.size), gx-6, gy+b.rf*gh); });
+    x.font='10px monospace'; x.textAlign='right'; x.textBaseline='middle'; x.fillStyle=P.dim;
+    if(lad&&lad.ladder) lad.bands.forEach(function(b){ x.fillText(fmtSizeK(b.size,kind), gx-6, gy+b.rf*gh); });
     lanes.forEach(function(L,i){
       var lx=gx+i*(LW+GAP);
-      // well
-      x.fillStyle=dark?'#05070a':'#cfcabc'; x.fillRect(lx+8, gy+4, LW-16, 9);
-      // lane label
-      x.save(); x.font='600 10px monospace'; x.textAlign='center'; x.textBaseline='bottom';
-      x.fillStyle=dark?'#c8d2dc':'#3a352c';
-      var nm=L.name.length>13?L.name.slice(0,12)+'…':L.name;
-      x.fillText(nm, lx+LW/2, gy-8); x.restore();
+      x.fillStyle=P.well; x.fillRect(lx+8,gy+4,LW-16,9);
+      x.save(); x.font='600 10px monospace'; x.textAlign='center'; x.textBaseline='bottom'; x.fillStyle=P.lab;
+      var nm=L.name.length>13?L.name.slice(0,12)+'…':L.name; x.fillText(nm,lx+LW/2,gy-8); x.restore();
+      // lysate: a faint continuous smear plus the deterministic proteome
+      if(L.lys>0){
+        var ls=Math.min(0.28,0.05+0.06*Math.log10(1+L.lys/Math.max(sn.lod*50,1e-6)));
+        var sg=x.createLinearGradient(0,gy+10,0,gy+gh);
+        sg.addColorStop(0,'rgba('+P.band+','+(ls*0.7)+')'); sg.addColorStop(0.6,'rgba('+P.band+','+(ls*0.45)+')'); sg.addColorStop(1,'rgba('+P.band+','+(ls*0.2)+')');
+        x.fillStyle=sg; x.fillRect(lx+9,gy+14,LW-18,gh-20);
+        var rng=rangeFor({type:'protein',pct:S[tab].pct});
+        PROTEOME.forEach(function(p){ var a=L.lys*p.frac, I=bandI(a,sn); if(I<=0) return;
+          band(x,lx+7,LW-14,gy+rfOf(p.mw,rng).rf*gh,2.6*bandW(a,sn),P.band,Math.min(0.85,I*0.8),1); });
+      }
       L.bands.forEach(function(b){
-        var by=gy+b.rf*gh, isRef=L.ladder&&(L.ref||[]).indexOf(b.size)>=0;
-        var bh=isRef?5.5:4, alpha=isRef?0.98:(L.ladder?0.75:0.9);
-        // soft halo then core, so it reads like a stained band rather than a bar chart
-        var g=x.createLinearGradient(0,by-bh*2,0,by+bh*2);
-        var core=dark?'rgba(196,255,214,'+alpha+')':'rgba(30,40,60,'+alpha+')';
-        var edge=dark?'rgba(196,255,214,0)':'rgba(30,40,60,0)';
-        g.addColorStop(0,edge); g.addColorStop(0.5,core); g.addColorStop(1,edge);
-        x.fillStyle=g; x.fillRect(lx+7, by-bh*2, LW-14, bh*4);
-        x.fillStyle=core; x.fillRect(lx+7, by-bh/2, LW-14, bh);
+        if(b.I<=0) return;
+        var by=gy+b.rf*gh, bh=(b.isRef?5.5:4)*Math.min(b.wf,3), soft=(CONF[b.conf]||CONF.lin).soft;
+        var a=(L.ladder?(b.isRef?0.98:0.75):0.95)*b.I;
+        band(x,lx+7,LW-14,by,bh,P.band,a,soft);
+        if(b.over) smear(x,lx+7,LW-14,by,Math.min(80,18*Math.log10(b.amt/sn.over*10)),P.band,a);
       });
     });
-    // dye front
-    x.strokeStyle=dark?'rgba(120,140,255,0.5)':'rgba(80,90,160,0.45)'; x.setLineDash([4,4]);
-    x.beginPath(); x.moveTo(gx,gy+gh-6); x.lineTo(gx+gw,gy+gh-6); x.stroke(); x.setLineDash([]);
-    x.font='9px monospace'; x.textAlign='left'; x.fillStyle=dark?'#6b7a8a':'#8a8172';
-    x.fillText('dye front', gx+2, gy+gh+12);
-    x.textAlign='right';
-    x.fillText((S.type==='dna'?S.pct+'% agarose':S.pct+'% SDS-PAGE')+' · simulated', gx+gw, gy+gh+12);
+    x.strokeStyle=P.front; x.setLineDash([4,4]); x.beginPath(); x.moveTo(gx,gy+gh-6); x.lineTo(gx+gw,gy+gh-6); x.stroke(); x.setLineDash([]);
+    x.fillStyle=P.dim; captions(x,'dye front',gelName(tab)+(kind==='protein'?' · '+sn.n:'')+' · simulated',gx,gw,gy+gh+12);
     return c;
   }
 
-  function bandTable(lanes){
-    var rows=[];
-    lanes.forEach(function(L){ L.bands.forEach(function(b){
-      rows.push([L.name+(L.ladder?' (ladder)':''), fmtSize(b.size), SCI.fmt(b.rf,2),
-                 b.status==='ok'?'in range':(b.status==='high'?'above range':'below range')]);
-    });});
-    return rows;
+  function buildBlotCanvas(scale,m){
+    m=m||wbModel(); var W=m.W, D=DETS[W.det.mode]||DETS.imager, pon=W.view==='ponceau', nir=!D.chemi&&!pon;
+    var lad=ladderById(W.ladder);
+    var LW=64, GAP=6, LEFT=64, RIGHT=112, PADX=14, TOP=34, H0=430, BOT=38;
+    var nL=Math.max(1,W.lanes.length+1);
+    var Wd=PADX*2+LEFT+nL*(LW+GAP)-GAP+RIGHT, Hd=TOP+H0+BOT, DPR=scale>0?scale:2;
+    var c=document.createElement('canvas'); c.width=Wd*DPR; c.height=Hd*DPR; c.style.width=Wd+'px'; c.style.height=Hd+'px';
+    c.setAttribute('role','img');
+    c.setAttribute('aria-label','Simulated Western blot, '+(pon?'Ponceau S total-protein stain':D.n)+', '+W.lanes.length+' lanes on a '+((PROT[W.pct]||{}).n||W.pct)+' gel. The tables below carry every band, signal and warning as text.');
+    var x=c.getContext('2d'); x.scale(DPR,DPR);
+    var bg=pon?'#f6f1ee':(nir?'#050608':(W.det.mode==='film'?'#e6edf2':'#fbfbfa'));
+    var ink=pon?'194,24,91':'18,20,26';
+    x.fillStyle=pon?'#efe9e4':(nir?'#020203':'#f2f2f0'); x.fillRect(0,0,Wd,Hd);
+    var gx=PADX+LEFT, gy=TOP, gw=nL*(LW+GAP)-GAP, gh=H0;
+    x.fillStyle=bg; x.fillRect(gx,gy,gw,gh);
+    // background haze and speckle, deterministic
+    if(!pon){ var rr=mulberry32(7+W.lanes.length);
+      var haze=nir?0.05:Math.min(0.10,0.015+0.012*Math.log10(1+(W.det.exp||1)));
+      x.fillStyle=nir?'rgba(90,110,120,'+haze+')':'rgba(40,44,52,'+haze+')'; x.fillRect(gx,gy,gw,gh);
+      for(var s=0;s<160;s++){ x.fillStyle=nir?'rgba(160,200,180,0.08)':'rgba(30,30,40,0.07)'; x.fillRect(gx+rr()*gw,gy+rr()*gh,1.3,1.3); } }
+    x.font='600 10px monospace'; x.textAlign='center'; x.textBaseline='bottom';
+    x.fillStyle=nir?'#c8d2dc':'#3a352c';
+    x.fillText('Ladder',gx+LW/2,gy-8);
+    W.lanes.forEach(function(L,i){ var nm=(L.name||'Lane').length>10?(L.name||'Lane').slice(0,9)+'…':(L.name||'Lane'); x.fillText(nm,gx+(i+1)*(LW+GAP)+LW/2,gy-8); });
+    // ladder
+    if(lad&&lad.t==='protein'){
+      var showMarker=pon||(lad.pre&&W.det.overlay)||(lad.chemi&&D.chemi)||(nir&&lad.igg);
+      if(showMarker){
+        x.font='10px monospace'; x.textAlign='right'; x.textBaseline='middle'; x.fillStyle=nir?'#7d8994':'#7c7362';
+        lad.b.forEach(function(sz){
+          var by=gy+rfOf(sz,m.rng).rf*gh, isRef=(lad.ref||[]).indexOf(sz)>=0, rgb;
+          if(lad.chemi&&D.chemi&&!pon) rgb=ink; else rgb=isRef?'214,40,90':'40,70,190';
+          if(pon&&!lad.pre) rgb='194,24,91';
+          if(nir) rgb='200,200,200';
+          band(x,gx+5,LW-10,by,isRef?4.5:3.4,rgb,isRef?0.9:0.72,1);
+          x.fillText(SCI.fmt(sz,4),gx-6,by);
+        });
+      }
+    }
+    if(pon){
+      // Ponceau S: total protein after transfer, ~0.2 µg/band limit, dimmed by transfer efficiency.
+      var psn={lod:0.2,ref:1.5,over:12};
+      W.lanes.forEach(function(L,i){ var lx=gx+(i+1)*(LW+GAP);
+        PROTEOME.forEach(function(p){ var a=(+L.load||0)*p.frac*transferEff(p.mw,W.xfer,m.T).eff, I=bandI(a,psn);
+          if(I>0) band(x,lx+5,LW-10,gy+rfOf(p.mw,m.rng).rf*gh,2.4*bandW(a,psn),ink,Math.min(0.8,I*0.75),1); });
+        var sg=x.createLinearGradient(0,gy,0,gy+gh); var lv=Math.min(0.22,0.04*Math.log10(1+(+L.load||0)));
+        sg.addColorStop(0,'rgba('+ink+','+(lv*0.6)+')'); sg.addColorStop(1,'rgba('+ink+','+(lv*0.25)+')');
+        x.fillStyle=sg; x.fillRect(lx+6,gy+6,LW-12,gh-10);
+      });
+    } else {
+      if(nir) x.globalCompositeOperation='lighter';
+      m.targets.forEach(function(T){
+        var rgb=nir?(T.t.ch==='700'?'255,70,70':'70,255,120'):ink;
+        T.bands.forEach(function(b){
+          var by=gy+b.rf*gh;
+          b.lanes.forEach(function(ln,li){
+            var d=ln.d; if(!(d.S>0)) return;
+            var v=d.seen?Math.min(1,Math.pow(d.S/d.sat,0.35)):Math.min(0.12,d.S*0.12);
+            var lx=gx+(li+1)*(LW+GAP), over=d.saturated?Math.log10(d.S/d.sat):0;
+            var bh=3.6*(1+0.3*Math.min(over,3)), soft=W.det.mode==='film'?1+0.35*Math.min(over,3):1;
+            band(x,lx+5,LW-10,by,bh,rgb,Math.min(0.97,v),soft);
+            if(d.saturated&&W.det.satRed&&!nir&&W.det.mode!=='film'){ x.fillStyle='rgba(225,24,43,0.85)'; x.fillRect(lx+7,by-bh*0.55,LW-14,bh*1.1); }
+          });
+        });
+      });
+      x.globalCompositeOperation='source-over';
+      // target names at the right edge
+      x.font='600 10px monospace'; x.textAlign='left'; x.textBaseline='middle';
+      m.targets.forEach(function(T){ T.bands.forEach(function(b){
+        x.fillStyle=nir?(T.t.ch==='700'?'#ff7a7a':'#7dffa3'):'#3a352c';
+        var nm=(T.t.name||'Target'); if(nm.length>11) nm=nm.slice(0,10)+'…';
+        x.fillText('◂ '+nm+' '+SCI.fmt(b.mw,3),gx+gw+6,gy+b.rf*gh); }); });
+      // cut lines
+      cutPlan(m).cuts.forEach(function(cu){ var y=gy+cu.rf*gh;
+        x.strokeStyle=nir?'rgba(255,255,255,0.45)':'rgba(60,60,70,0.55)'; x.setLineDash([5,4]); x.beginPath(); x.moveTo(gx,y); x.lineTo(gx+gw,y); x.stroke(); x.setLineDash([]);
+        x.font='9px monospace'; x.textAlign='left'; x.fillStyle=nir?'#aab':'#6b6558'; x.fillText('✂ '+SCI.fmt(cu.mw,3)+' kDa',gx+gw+6,y+10); });
+    }
+    x.textBaseline='alphabetic'; x.fillStyle=nir?'#7d8994':'#8a8172';
+    captions(x,pon?'Ponceau S · total protein':(D.chemi?(D.n.replace('Chemiluminescence — ','ECL · ')+' · '+SCI.fmt(W.det.exp,3)+' s'):'near-IR · 700 red / 800 green'),
+      ((PROT[W.pct]||{}).sh||W.pct)+' → '+(MEMS[W.xfer.mem]||{}).n+' · simulated',gx,gw,gy+gh+14);
+    return c;
   }
 
-  function render(){
-    var main=document.getElementById('gelMain'); if(!main) return;
-    var lanes=computeLanes(), w=warnings(lanes), rows=bandTable(lanes);
-    main.innerHTML='<div class="mbc-head"><h2>Gel simulator</h2><p>Predict how your fragments will lay out — and whether they will actually separate — before you pour a gel.</p></div>'+
-      '<div class="gel-wrap" id="gelCanvasWrap"></div>'+
-      '<div class="gel-disc">Migration is modelled as linear in log₁₀(size) across this gel’s resolving range. It is a planning aid, not a prediction: real mobility also depends on buffer, voltage, temperature and conformation. Circular/supercoiled DNA is <b>not</b> modelled — it runs anomalously.</div>'+
-      w.map(function(x){return '<div class="gel-warn '+x.k+'">'+(x.k==='ok'?'✓ ':'⚠ ')+escapeHtml(x.t)+'</div>';}).join('')+
-      '<div class="mbc-actions"><button class="btn" onclick="GEL.png()">⬇ PNG</button>'+
-      '<button class="btn" onclick="GEL.png(300)" title="Publication PNG — re-rendered at 300 dpi with the resolution stamped in the file">⬇ 300 dpi</button>'+
-        '<button class="btn" onclick="GEL.copy()">Copy band table</button>'+
-        '<button class="btn" onclick="GEL.csv()">⬇ CSV</button>'+
-        '<button class="btn ac" onclick="GEL.toNotebook()">＋ Notebook</button></div>'+
-      '<div class="gel-sec">Bands (this table is the accessible equivalent of the image above)</div>'+
-      '<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr><th>Lane</th><th>Size</th><th>Rf</th><th>Status</th></tr></thead><tbody>'+
-      rows.map(function(r){return '<tr>'+r.map(function(c){return '<td>'+escapeHtml(String(c))+'</td>';}).join('')+'</tr>';}).join('')+
-      '</tbody></table></div>';
-    document.getElementById('gelCanvasWrap').appendChild(buildCanvas());
-    GEL._txt='Simulated gel — '+(S.type==='dna'?S.pct+'% agarose':S.pct+'% SDS-PAGE')+'\n'+
-      rows.map(function(r){return r.join('\t');}).join('\n');
-    save();
+  // Transfer efficiency across 5–300 kDa for the current settings, with each target marked.
+  function buildXferChart(m){
+    var W=m.W, Wd=560, Hd=170, L=46, R=14, T=14, B=34, DPR=2;
+    var c=document.createElement('canvas'); c.width=Wd*DPR; c.height=Hd*DPR; c.style.width=Wd+'px'; c.style.height=Hd+'px';
+    c.setAttribute('role','img'); c.setAttribute('aria-label','Transfer efficiency against protein size for the current transfer settings. The transfer column of the band table gives each target’s value as text.');
+    var x=c.getContext('2d'); x.scale(DPR,DPR);
+    var cs=getComputedStyle(document.documentElement);
+    var fg=(cs.getPropertyValue('--text2')||'#555').trim()||'#555', dim=(cs.getPropertyValue('--text3')||'#888').trim()||'#888';
+    var pw=Wd-L-R, ph=Hd-T-B, lo=Math.log10(5), hi=Math.log10(300);
+    function X(mw){ return L+(Math.log10(mw)-lo)/(hi-lo)*pw; } function Y(e){ return T+(1-e)*ph; }
+    [[0.8,1,'rgba(47,125,91,0.10)'],[0.5,0.8,'rgba(191,140,0,0.10)'],[0,0.5,'rgba(192,57,43,0.09)']].forEach(function(z){ x.fillStyle=z[2]; x.fillRect(L,Y(z[1]),pw,Y(z[0])-Y(z[1])); });
+    x.strokeStyle=dim; x.lineWidth=1; x.strokeRect(L,T,pw,ph);
+    x.font='10px monospace'; x.fillStyle=dim; x.textAlign='center'; x.textBaseline='top';
+    [5,10,20,50,100,200,300].forEach(function(v){ x.fillText(String(v),X(v),T+ph+4); });
+    x.fillText('kDa',L+pw/2,T+ph+18);
+    x.textAlign='right'; x.textBaseline='middle'; [0,0.5,0.8,1].forEach(function(e){ x.fillText(Math.round(e*100)+'%',L-5,Y(e)); });
+    x.strokeStyle='#2f7d5b'; x.lineWidth=2; x.beginPath();
+    for(var i=0;i<=120;i++){ var mw=Math.pow(10,lo+(hi-lo)*i/120), e=transferEff(mw,W.xfer,m.T).eff; if(i) x.lineTo(X(mw),Y(e)); else x.moveTo(X(mw),Y(e)); }
+    x.stroke(); x.lineWidth=1;
+    m.targets.forEach(function(Tg){ Tg.bands.forEach(function(b){ if(b.mw<5||b.mw>300) return;
+      x.strokeStyle=fg; x.setLineDash([2,3]); x.beginPath(); x.moveTo(X(b.mw),T); x.lineTo(X(b.mw),T+ph); x.stroke(); x.setLineDash([]);
+      x.fillStyle=fg; x.beginPath(); x.arc(X(b.mw),Y(b.xf.eff),3.5,0,Math.PI*2); x.fill();
+      x.textAlign='left'; x.textBaseline='bottom'; x.fillText(((Tg.t.name||'T').slice(0,10)),X(b.mw)+4,Y(b.xf.eff)-3); }); });
+    return c;
+  }
+
+  // ═════════════════════════ TABLES ═════════════════════════
+  function bandTable(lanes){
+    var rows=[], kind=kindOf(S.tab), sn=stainOf(kind,S[S.tab].stain);
+    lanes.forEach(function(L){ L.bands.forEach(function(b){
+      var st=b.status==='ok'?'in range':(b.status==='high'?'above range':'below range');
+      if(b.edge==='well') st='at the well'; else if(b.edge==='front') st='at the dye front';
+      if(b.I<=0) st+=' · not visible'; else if(b.over) st+=' · overloaded';
+      rows.push([L.name+(L.ladder?' (ladder)':''), fmtSizeK(b.size,kind)+(b.conf&&b.conf!=='lin'?' · '+CONF[b.conf].n:''),
+        (b.given?SCI.fmt(b.amt,3)+' '+sn.u:(L.ladder?'—':'nominal')), SCI.fmt(b.rf,2), st]);
+    }); });
+    return rows;
+  }
+  function wbTable(m){
+    var rows=[], W=m.W;
+    m.targets.forEach(function(T){ T.bands.forEach(function(b){ b.lanes.forEach(function(ln,li){
+      var d=ln.d, st=!(ln.ng>0)?'not loaded':(d.saturated?'SATURATED':(d.seen?'detected':'below detection'));
+      rows.push([W.lanes[li].name||('Lane '+(li+1)), T.t.name||'Target', SCI.fmt(b.mw,3), SCI.fmt(b.rf,2),
+        Math.round(b.xf.eff*100)+'% ('+b.xf.grade+')', SCI.fmt(ln.ng,3)+' ng', d.S>0?SCI.fmt(d.S,3)+'×':'0', st]);
+    }); }); });
+    return rows;
+  }
+  function tbl(head,rows){
+    return '<div class="mbc-tblwrap"><table class="mbc-tbl"><thead><tr>'+head.map(function(h){return '<th>'+escapeHtml(h)+'</th>';}).join('')+'</tr></thead><tbody>'+
+      rows.map(function(r){return '<tr>'+r.map(function(c){return '<td>'+escapeHtml(String(c))+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div>';
+  }
+  function warnHtml(w){ var ic={ok:'✓ ',bad:'⚠ ',warn:'⚠ ',info:'ℹ '}; return w.map(function(x){return '<div class="gel-warn '+x.k+'">'+(ic[x.k]||'')+escapeHtml(x.t)+'</div>';}).join(''); }
+  function planRows(p){
+    return p.strips.map(function(s,i){
+      var top=i===0?'top of membrane':('cut at '+SCI.fmt(p.cuts[i-1].mw,3)+' kDa');
+      var bot=i===p.strips.length-1?'bottom':('cut at '+SCI.fmt(p.cuts[i].mw,3)+' kDa');
+      return ['Strip '+(i+1), top+' → '+bot, s.targets.map(function(T){return T.t.name||'Target';}).join(' + '),
+        SCI.fmt(s.area,3)+' cm²', SCI.fmt(s.ml,3)+' mL',
+        s.primary.map(function(p){ return p.name+' 1:'+SCI.fmt(p.dil,4)+' → '+SCI.fmt(p.ul,3)+' µL'; }).join('; '),
+        '1:'+SCI.fmt(S.western.mem.sec,4)+' → '+SCI.fmt(s.secUl,3)+' µL'+(s.secUl<1?' (pre-dilute 1:10)':'')];
+    });
+  }
+  function cutText(p){
+    return p.cuts.map(function(cu){ var br=cu.between;
+      return 'Cut at ≈'+SCI.fmt(cu.mw,3)+' kDa, between '+(cu.above.name)+' and '+(cu.below.name)
+        +(br&&br.up&&br.dn?' — between the '+br.up+' and '+br.dn+' kDa ladder bands':'')+'.'; });
+  }
+
+  // ═════════════════════════ RENDER ═════════════════════════
+  function tabsHtml(){
+    var T=[['dna','DNA gel'],['protein','Protein gel'],['western','Western blot']];
+    return '<div class="gel-tabs" role="tablist" aria-label="Gel type">'+T.map(function(t){
+      var on=S.tab===t[0];
+      return '<button class="gel-tab" role="tab" id="gelTab_'+t[0]+'" aria-selected="'+on+'" aria-controls="gelMain" tabindex="'+(on?0:-1)+'" onclick="GEL.tab(\''+t[0]+'\')" onkeydown="GEL.tabKey(event)">'+t[1]+'</button>';
+    }).join('')+'</div>';
+  }
+  function optList(obj,cur,lab){ return Object.keys(obj).map(function(k){ return '<option value="'+escapeHtml(k)+'"'+(String(k)===String(cur)?' selected':'')+'>'+escapeHtml(lab?lab(k,obj[k]):obj[k].n)+'</option>'; }).join(''); }
+  function ladderOpts(kind,cur){
+    return allLadders().filter(function(l){return l.t===kind;}).map(function(l){
+      var tag=kind==='protein'?(l.chemi?' · chemi-visible':(l.pre?' · prestained':'')):'';
+      return '<option value="'+escapeHtml(l.id)+'"'+(l.id===cur?' selected':'')+'>'+escapeHtml((l.v?l.v+' — ':'')+l.n+tag)+'</option>'; }).join('');
   }
 
   function renderControls(){
     var el=document.getElementById('gelControls'); if(!el) return;
-    var lads=allLadders().filter(function(l){return l.t===S.type;});
-    if(!lads.filter(function(l){return l.id===S.ladder;}).length && lads.length) S.ladder=lads[0].id;
-    // Sort numerically. Object.keys() returns integer-like keys ('1','2','3') first in numeric
-    // order and only then the rest in insertion order, which rendered the gel-percentage
-    // dropdown as 1, 2, 3, 0.5, 0.7, 0.8, 1.2, 1.5.
-    var pcts=Object.keys(S.type==='dna'?DNA_RANGE:PROT_RANGE).sort(function(a,b){return parseFloat(a)-parseFloat(b);});
-    el.innerHTML=
-      '<div class="mbc-f"><label for="gelType">Gel type</label><select id="gelType" onchange="GEL.setType(this.value)">'+
-        '<option value="dna"'+(S.type==='dna'?' selected':'')+'>DNA — agarose</option>'+
-        '<option value="protein"'+(S.type==='protein'?' selected':'')+'>Protein — SDS-PAGE</option></select></div>'+
-      '<div class="mbc-f"><label for="gelPct">'+(S.type==='dna'?'Agarose %':'Acrylamide %')+'</label><select id="gelPct" onchange="GEL.set(\'pct\',this.value)">'+
-        pcts.map(function(p){return '<option'+(String(p)===String(S.pct)?' selected':'')+'>'+p+'</option>';}).join('')+'</select></div>'+
-      '<div class="mbc-f"><label for="gelLadder">Ladder</label><select id="gelLadder" onchange="GEL.set(\'ladder\',this.value)">'+
-        lads.map(function(l){return '<option value="'+l.id+'"'+(l.id===S.ladder?' selected':'')+'>'+escapeHtml((l.v?l.v+' — ':'')+l.n)+'</option>';}).join('')+'</select></div>'+
-      '<div class="mbc-f"><label for="gelLook">Appearance</label><select id="gelLook" onchange="GEL.set(\'look\',this.value)">'+
-        '<option value="dark"'+(S.look==='dark'?' selected':'')+'>Stained on dark (UV/blue light)</option>'+
-        '<option value="light"'+(S.look==='light'?' selected':'')+'>Dark bands on light</option></select></div>'+
-      '<div class="gel-sec">Lanes</div>'+
-      S.lanes.map(function(L,i){ return '<div class="gel-lane">'+
+    var tab=S.tab, g=S[tab], kind=kindOf(tab), h=tabsHtml();
+    var lads=allLadders().filter(function(l){return l.t===kind;});
+    if(!lads.filter(function(l){return l.id===g.ladder;}).length && lads.length) g.ladder=lads[0].id;
+    if(tab==='dna'){
+      var pcts=Object.keys(DNA_RANGE).sort(function(a,b){return parseFloat(a)-parseFloat(b);});
+      h+='<div class="mbc-f"><label for="gelPct">Agarose %</label><select id="gelPct" onchange="GEL.set(\'pct\',this.value)">'+
+          pcts.map(function(p){return '<option'+(String(p)===String(g.pct)?' selected':'')+'>'+p+'</option>';}).join('')+'</select></div>'+
+        '<div class="mbc-f"><label for="gelStain">Stain</label><select id="gelStain" onchange="GEL.set(\'stain\',this.value)">'+optList(STAINS.dna,g.stain,function(k,s){return s.n+' (≥ '+s.lod+' ng/band)';})+'</select></div>'+
+        '<div class="mbc-f"><label for="gelLadder">Ladder</label><select id="gelLadder" onchange="GEL.set(\'ladder\',this.value)">'+ladderOpts('dna',g.ladder)+'</select></div>'+
+        '<div class="mbc-f"><label for="gelLook">Appearance</label><select id="gelLook" onchange="GEL.set(\'look\',this.value)">'+
+          '<option value="dark"'+(g.look==='dark'?' selected':'')+'>Stained on dark (UV/blue light)</option>'+
+          '<option value="light"'+(g.look==='light'?' selected':'')+'>Dark bands on light</option></select></div>';
+    } else if(tab==='protein'){
+      h+='<div class="mbc-f"><label for="gelPct">Gel</label><select id="gelPct" onchange="GEL.set(\'pct\',this.value)">'+optList(PROT,g.pct,function(k,s){return (s.sh||s.n)+' · '+s.r[0]+'–'+s.r[1]+' kDa';})+'</select></div>'+
+        '<div class="mbc-f"><label for="gelStain">Stain</label><select id="gelStain" onchange="GEL.set(\'stain\',this.value)">'+optList(STAINS.protein,g.stain,function(k,s){return s.n+' (≥ '+SCI.fmt(s.lod*1000,2)+' ng/band)';})+'</select></div>'+
+        '<div class="mbc-f"><label for="gelLadder">Ladder</label><select id="gelLadder" onchange="GEL.set(\'ladder\',this.value)">'+ladderOpts('protein',g.ladder)+'</select></div>';
+    } else {
+      h+='<div class="mbc-f"><label for="gelPct">Gel</label><select id="gelPct" onchange="GEL.set(\'pct\',this.value)">'+optList(PROT,g.pct,function(k,s){return (s.sh||s.n)+' · '+s.r[0]+'–'+s.r[1]+' kDa';})+'</select></div>'+
+        '<div class="mbc-f"><label for="gelLadder">Ladder</label><select id="gelLadder" onchange="GEL.set(\'ladder\',this.value)">'+ladderOpts('protein',g.ladder)+'</select></div>';
+    }
+    h+='<div class="gel-sec">Lanes</div>';
+    if(tab==='western'){
+      h+='<div class="gel-lane"><span class="wb-hd" style="flex:1">Lane</span><span class="wb-hd" style="flex:0 0 58px">µg</span><span style="flex:0 0 26px"></span></div>'+
+        g.lanes.map(function(L,i){ return '<div class="gel-lane">'+
+          '<input class="gel-lsizes" value="'+escapeHtml(L.name)+'" oninput="GEL.lane('+i+',\'name\',this.value)" placeholder="lane" aria-label="Lane '+(i+1)+' name">'+
+          '<input class="gel-lnum" value="'+escapeHtml(String(L.load))+'" inputmode="decimal" oninput="GEL.lane('+i+',\'load\',this.value)" aria-label="Lane '+(i+1)+' total protein loaded, µg">'+
+          '<button class="gel-del" onclick="GEL.delLane('+i+')" title="Remove lane" aria-label="Remove lane '+(i+1)+'">✕</button></div>'; }).join('')+
+        '<button class="btn" onclick="GEL.addLane()" style="width:100%;justify-content:center;margin-top:4px;">＋ Lane</button>'+
+        '<div class="mbc-hint" style="margin-top:8px;">µg = total protein loaded per lane (e.g. from a BCA assay). 10–30 µg of whole-cell lysate is typical.</div>';
+    } else {
+      g.lanes.forEach(function(L,i){ h+='<div class="gel-lane">'+
         '<input class="gel-lname" value="'+escapeHtml(L.name)+'" oninput="GEL.lane('+i+',\'name\',this.value)" placeholder="lane" aria-label="Lane '+(i+1)+' name">'+
-        '<input class="gel-lsizes" value="'+escapeHtml(L.sizes)+'" oninput="GEL.lane('+i+',\'sizes\',this.value)" placeholder="sizes, comma separated" aria-label="Lane '+(i+1)+' sizes">'+
-        '<button class="gel-del" onclick="GEL.delLane('+i+')" title="Remove lane" aria-label="Remove lane '+(i+1)+'">✕</button></div>'; }).join('')+
-      '<button class="btn" onclick="GEL.addLane()" style="width:100%;justify-content:center;margin-top:4px;">＋ Lane</button>'+
-      '<div class="gel-sec">Custom ladder</div>'+
-      '<div class="mbc-f"><input id="gelCustName" placeholder="name, e.g. In-house 1 kb" aria-label="Custom ladder name"></div>'+
-      '<div class="mbc-f"><input id="gelCustBands" placeholder="bands: 10000, 5000, 2000…" aria-label="Custom ladder bands"></div>'+
-      '<button class="btn" onclick="GEL.addLadder()" style="width:100%;justify-content:center;">Save ladder</button>'+
-      '<div class="mbc-hint" style="margin-top:8px;">Sizes accept 2e3 and 2×10³. Ladder band sizes are the vendors’ published values; the image is drawn from those numbers.</div>';
+        '<input class="gel-lsizes" value="'+escapeHtml(L.sizes)+'" oninput="GEL.lane('+i+',\'sizes\',this.value)" placeholder="'+(kind==='dna'?'bp, e.g. 3000@150':'kDa, e.g. 45@2')+'" aria-label="Lane '+(i+1)+' bands">'+
+        (kind==='protein'?'<input class="gel-lnum" value="'+escapeHtml(L.lys?String(L.lys):'')+'" inputmode="decimal" placeholder="lysate" title="Whole-cell lysate loaded, µg (draws the background of a real lysate lane)" oninput="GEL.lane('+i+',\'lys\',this.value)" aria-label="Lane '+(i+1)+' lysate µg">':'')+
+        '<button class="gel-del" onclick="GEL.delLane('+i+')" title="Remove lane" aria-label="Remove lane '+(i+1)+'">✕</button></div>'; });
+      h+='<button class="btn" onclick="GEL.addLane()" style="width:100%;justify-content:center;margin-top:4px;">＋ Lane</button>';
+      if(kind==='dna') h+='<div class="gel-sec">Plasmid</div><div class="gel-plas">'+
+        '<input id="gelPlasSize" value="'+escapeHtml(String(g.plasBp||4000))+'" inputmode="decimal" aria-label="Plasmid size, bp" title="Plasmid size, bp">'+
+        '<input id="gelPlasAmt" value="'+escapeHtml(String(g.plasNg||400))+'" inputmode="decimal" aria-label="DNA loaded, ng" title="DNA loaded, ng">'+
+        '<button class="btn" onclick="GEL.plasmid(\'uncut\')">＋ Uncut</button><button class="btn" onclick="GEL.plasmid(\'lin\')">＋ Linearised</button></div>'+
+        '<div class="mbc-hint">bp and ng. Uncut draws a typical miniprep: mostly supercoiled, some nicked, a little linear.</div>';
+      h+='<div class="gel-sec">Custom ladder</div>'+
+        '<div class="mbc-f"><input id="gelCustName" placeholder="name, e.g. In-house 1 kb" aria-label="Custom ladder name"></div>'+
+        '<div class="mbc-f"><input id="gelCustBands" placeholder="bands: 10000, 5000, 2000…" aria-label="Custom ladder bands"></div>'+
+        '<button class="btn" onclick="GEL.addLadder()" style="width:100%;justify-content:center;">Save ladder</button>'+
+        '<div class="mbc-hint" style="margin-top:8px;">Write each band as a size, optionally with the amount after <b>@</b> — '+(kind==='dna'?'<b>3000@150</b> is 150 ng of 3 kb. Add <b>sc</b> or <b>oc</b> for supercoiled or nicked plasmid: <b>4000sc@300</b>.':'<b>45@2</b> is 2 µg of a 45 kDa protein.')+' Sizes accept 2e3 and 2×10³. Ladder band sizes are the vendors’ published values; the image is drawn from those numbers.</div>';
+    }
+    el.innerHTML=h;
   }
 
+  // Western controls live in the main panel. Built only on structural changes, so typing in
+  // them never rebuilds the inputs under the cursor.
+  function renderWbCtl(){
+    var el=document.getElementById('gelMainCtl'); if(!el) return;
+    if(S.tab!=='western'){ el.innerHTML=''; return; }
+    var W=S.western, nir=!(DETS[W.det.mode]||DETS.imager).chemi;
+    var hosts=['rabbit','mouse','goat','rat','chicken','sheep'];
+    var head='<div class="wb-row'+(nir?' nir':'')+'"><span class="wb-hd">Target</span><span class="wb-hd">kDa</span><span class="wb-hd">Abundance</span><span class="wb-hd">Per-lane level</span><span class="wb-hd">Host</span><span class="wb-hd">Antibody</span><span class="wb-hd">1 : dil</span>'+(nir?'<span class="wb-hd">Channel</span>':'')+'<span></span></div>';
+    var rows=W.targets.map(function(t,i){
+      return '<div class="wb-row'+(nir?' nir':'')+'">'+
+        '<input value="'+escapeHtml(t.name)+'" oninput="GEL.wt('+i+',\'name\',this.value)" aria-label="Target '+(i+1)+' name">'+
+        '<input value="'+escapeHtml(t.mw)+'" inputmode="decimal" oninput="GEL.wt('+i+',\'mw\',this.value)" aria-label="Target '+(i+1)+' apparent MW in kDa" title="Apparent MW in kDa — two values for a doublet, e.g. 42, 44">'+
+        '<select onchange="GEL.wt('+i+',\'abund\',this.value)" aria-label="Target '+(i+1)+' abundance">'+optList(ABUND,t.abund)+'</select>'+
+        '<input value="'+escapeHtml(t.expr)+'" oninput="GEL.wt('+i+',\'expr\',this.value)" placeholder="1 in every lane" aria-label="Target '+(i+1)+' relative level per lane" title="Relative expression per lane, comma separated — 1 is the abundance above, 0.3 is 30% of it">'+
+        '<select onchange="GEL.wt('+i+',\'host\',this.value)" aria-label="Target '+(i+1)+' primary host species">'+hosts.map(function(hh){return '<option'+(hh===t.host?' selected':'')+'>'+hh+'</option>';}).join('')+'</select>'+
+        '<select onchange="GEL.wt('+i+',\'ab\',this.value)" aria-label="Target '+(i+1)+' antibody quality">'+optList(ABQ,t.ab)+'</select>'+
+        '<input value="'+escapeHtml(String(t.dil))+'" inputmode="decimal" oninput="GEL.wt('+i+',\'dil\',this.value)" aria-label="Target '+(i+1)+' primary dilution, 1 to">'+
+        (nir?'<select onchange="GEL.wt('+i+',\'ch\',this.value)" aria-label="Target '+(i+1)+' fluorescence channel"><option value="700"'+(t.ch==='700'?' selected':'')+'>700</option><option value="800"'+(t.ch==='800'?' selected':'')+'>800</option></select>':'')+
+        '<button class="gel-del" onclick="GEL.delTarget('+i+')" title="Remove target" aria-label="Remove target '+(i+1)+'">✕</button></div>';
+    }).join('');
+    var X=W.xfer, D=W.det;
+    el.innerHTML=
+      '<div class="wb-card"><h3>Targets</h3>'+head+rows+
+        '<div class="wb-add"><button class="btn" onclick="GEL.addTarget(-1)">＋ Target</button>'+
+        '<select id="wbLc" aria-label="Add a loading control"><option value="">＋ Loading control…</option>'+LCTRL.map(function(c,i){return '<option value="'+i+'">'+escapeHtml(c.n+' — '+c.mw+' kDa ('+c.note+')')+'</option>';}).join('')+'</select>'+
+        '<button class="btn" onclick="GEL.addTarget(+document.getElementById(\'wbLc\').value)">Add</button></div></div>'+
+      '<div class="wb-card"><h3>Transfer</h3><div class="wb-grid">'+
+        '<div class="mbc-f"><label for="wbMethod">Method</label><select id="wbMethod" onchange="GEL.wx(\'method\',this.value)">'+optList(XFER,X.method)+'</select></div>'+
+        '<div class="mbc-f"><label for="wbMin">Time (min)</label><input id="wbMin" value="'+escapeHtml(String(X.min))+'" inputmode="decimal" oninput="GEL.wx(\'min\',this.value)"></div>'+
+        '<div class="mbc-f"><label for="wbMem">Membrane</label><select id="wbMem" onchange="GEL.wx(\'mem\',this.value)">'+optList(MEMS,X.mem)+'</select></div>'+
+        '<div class="mbc-f"><label for="wbMeoh">Methanol (%)</label><input id="wbMeoh" value="'+escapeHtml(String(X.meoh))+'" inputmode="decimal" oninput="GEL.wx(\'meoh\',this.value)"></div>'+
+        '<div class="mbc-f"><label for="wbSds">SDS in buffer (%)</label><input id="wbSds" value="'+escapeHtml(String(X.sds))+'" inputmode="decimal" oninput="GEL.wx(\'sds\',this.value)"></div>'+
+      '</div></div>'+
+      '<div class="wb-card"><h3>Detection</h3><div class="wb-grid">'+
+        '<div class="mbc-f"><label for="wbMode">Detector</label><select id="wbMode" onchange="GEL.wd(\'mode\',this.value)">'+optList(DETS,D.mode)+'</select></div>'+
+        (nir?'':'<div class="mbc-f"><label for="wbSub">Substrate</label><select id="wbSub" onchange="GEL.wd(\'sub\',this.value)">'+optList(SUBS,D.sub)+'</select></div>'+
+                '<div class="mbc-f"><label for="wbExp">Exposure (s)</label><input id="wbExp" value="'+escapeHtml(String(D.exp))+'" inputmode="decimal" oninput="GEL.wd(\'exp\',this.value)"></div>')+
+        '<div class="mbc-f"><label for="wbOv">Marker overlay</label><select id="wbOv" onchange="GEL.wd(\'overlay\',this.value===\'1\')"><option value="1"'+(D.overlay?' selected':'')+'>Show prestained ladder</option><option value="0"'+(D.overlay?'':' selected')+'>Signal only</option></select></div>'+
+        (nir||D.mode==='film'?'':'<div class="mbc-f"><label for="wbSat">Saturated pixels</label><select id="wbSat" onchange="GEL.wd(\'satRed\',this.value===\'1\')"><option value="1"'+(D.satRed?' selected':'')+'>Highlight in red</option><option value="0"'+(D.satRed?'':' selected')+'>Don’t highlight</option></select></div>')+
+      '</div></div>'+
+      '<div class="wb-card"><h3>Membrane &amp; antibodies</h3><div class="wb-grid">'+
+        '<div class="mbc-f"><label for="wbSize">Membrane</label><select id="wbSize" onchange="GEL.wm(\'size\',this.value)">'+optList(MEMSIZE,W.mem.size)+'</select></div>'+
+        '<div class="mbc-f"><label for="wbMl">Antibody solution (mL/cm²)</label><input id="wbMl" value="'+escapeHtml(String(W.mem.mlcm2))+'" inputmode="decimal" oninput="GEL.wm(\'mlcm2\',this.value)"></div>'+
+        '<div class="mbc-f"><label for="wbSec">Secondary 1 :</label><input id="wbSec" value="'+escapeHtml(String(W.mem.sec))+'" inputmode="decimal" oninput="GEL.wm(\'sec\',this.value)"></div>'+
+      '</div></div>';
+  }
+
+  function render(){
+    var out=document.getElementById('gelMainOut'); if(!out) return;
+    if(S.tab==='western') renderWestern(out); else renderGel(out);
+    save();
+  }
+  function renderGel(out){
+    var lanes=computeLanes(), w=gelWarnings(lanes), rows=bandTable(lanes), kind=kindOf(S.tab), sn=stainOf(kind,S[S.tab].stain);
+    var head=kind==='dna'
+      ?'<div class="mbc-head"><h2>DNA gel</h2><p>Predict how your fragments will lay out — and whether they will actually separate — before you pour a gel.</p></div>'
+      :'<div class="mbc-head"><h2>Protein gel</h2><p>Plan an SDS-PAGE run: which gel resolves your proteins, how much to load for your stain, and what a lysate lane will look like.</p></div>';
+    out.innerHTML=head+
+      '<div class="gel-wrap" id="gelCanvasWrap"></div>'+
+      '<div class="gel-disc">Mobility is modelled as a smooth sigmoid in log₁₀(size): steepest mid-gel, compressing toward the well and the dye front, with band width and brightness following the load against '+escapeHtml(sn.n)+'’s detection limit. It is a planning aid, not a prediction — real mobility also depends on buffer, voltage and temperature'+(kind==='protein'?', and glycosylated, very basic or membrane proteins often run away from their true mass.':'.')+'</div>'+
+      warnHtml(w)+
+      '<div class="mbc-actions"><button class="btn" onclick="GEL.png()">⬇ PNG</button>'+
+        '<button class="btn" onclick="GEL.png(300)" title="Publication PNG — re-rendered at 300 dpi with the resolution stamped in the file">⬇ 300 dpi</button>'+
+        '<button class="btn" onclick="GEL.copy()">Copy band table</button>'+
+        '<button class="btn" onclick="GEL.csv()">⬇ CSV</button>'+
+        (kind==='protein'?'<button class="btn" onclick="GEL.fromProtein()" title="Opens the Western tab with this gel, ladder and lysate lanes — replaces the Western\u2019s current lanes">→ Plan a Western from this gel</button>':'')+
+        '<button class="btn ac" onclick="GEL.toNotebook()">＋ Notebook</button></div>'+
+      '<div class="gel-sec">Bands (this table is the accessible equivalent of the image above)</div>'+
+      tbl(['Lane','Size','Load','Rf','Status'],rows);
+    document.getElementById('gelCanvasWrap').appendChild(buildGelCanvas());
+    GEL._txt='Simulated '+gelName(S.tab)+(kind==='protein'?' · '+sn.n:'')+'\n'+rows.map(function(r){return r.join('\t');}).join('\n');
+  }
+  function renderWestern(out){
+    var m=wbModel(), w=wbWarnings(m), p=cutPlan(m), rows=wbTable(m), W=m.W;
+    var pr=planRows(p);
+    out.innerHTML=
+      '<div class="gel-wrap" id="gelCanvasWrap"></div>'+
+      '<div class="wb-view" role="group" aria-label="Membrane view">'+
+        '<button class="btn'+(W.view==='blot'?' ac':'')+'" aria-pressed="'+(W.view==='blot')+'" onclick="GEL.view(\'blot\')">Detected blot</button>'+
+        '<button class="btn'+(W.view==='ponceau'?' ac':'')+'" aria-pressed="'+(W.view==='ponceau')+'" onclick="GEL.view(\'ponceau\')">Ponceau S (total protein)</button></div>'+
+      '<div class="gel-disc">Band positions come from the protein-gel model. Transfer efficiency and signal are heuristic curves that encode published rules of thumb — use them to spot a saturated loading control, a protein that will not transfer, or two targets you cannot separate, not to predict intensities. Abundance levels are order-of-magnitude only.</div>'+
+      warnHtml(w)+
+      '<div class="gel-sec">Transfer efficiency for these settings</div>'+
+      '<div class="gel-wrap" id="gelXferWrap" style="padding:8px"></div>'+
+      '<div class="gel-sec">Cut plan &amp; antibody volumes</div>'+
+      (p.cuts.length?'<div class="mbc-hint" style="margin-bottom:6px">'+cutText(p).map(escapeHtml).join('<br>')+'</div>':'<div class="mbc-hint" style="margin-bottom:6px">No cut needed — '+(p.items.length>1?'the targets are too close to separate with scissors, so they share one strip.':'one target, one strip.')+'</div>')+
+      tbl(['Strip','Span','Probes','Area','Solution','Primary','Secondary'],pr)+
+      '<div class="mbc-actions"><button class="btn" onclick="GEL.png()">⬇ PNG</button>'+
+        '<button class="btn" onclick="GEL.png(300)" title="Publication PNG — re-rendered at 300 dpi">⬇ 300 dpi</button>'+
+        '<button class="btn" onclick="GEL.copy()">Copy plan</button>'+
+        '<button class="btn" onclick="GEL.csv()">⬇ CSV</button>'+
+        '<button class="btn" onclick="GEL.protocol()">📋 Western protocol</button>'+
+        '<button class="btn ac" onclick="GEL.toNotebook()">＋ Notebook</button></div>'+
+      '<div class="gel-sec">Bands by lane (the accessible equivalent of the image above)</div>'+
+      tbl(['Lane','Target','kDa','Rf','Transfer','Target loaded','Signal (× limit)','Status'],rows);
+    document.getElementById('gelCanvasWrap').appendChild(buildBlotCanvas(0,m));
+    document.getElementById('gelXferWrap').appendChild(buildXferChart(m));
+    GEL._txt='Simulated Western blot — '+((PROT[W.pct]||{}).n||W.pct)+', '+(XFER[W.xfer.method]||{}).n+' '+W.xfer.min+' min onto '+(MEMS[W.xfer.mem]||{}).n+', '+(DETS[W.det.mode]||{}).n+'\n'+
+      w.map(function(x){return '- '+x.t;}).join('\n')+'\n\nCut plan\n'+cutText(p).join('\n')+'\n'+pr.map(function(r){return r.join('\t');}).join('\n')+
+      '\n\nBands\n'+rows.map(function(r){return r.join('\t');}).join('\n');
+  }
+  function renderAll(){
+    var main=document.getElementById('gelMain'); if(!main) return;
+    if(!document.getElementById('gelMainOut')){
+      main.innerHTML='<div id="gelMainHead"></div><div id="gelMainCtl"></div><div id="gelMainOut"></div>';
+    }
+    document.getElementById('gelMainHead').innerHTML=S.tab==='western'
+      ?'<div class="mbc-head"><h2>Western blot</h2><p>From protein gel to image: will your targets separate, transfer and be detected without saturating — and where to cut the membrane and how much antibody each strip needs.</p></div>':'';
+    renderControls(); renderWbCtl(); render();
+  }
+
+  function dl(content,name,type){ _dl(content,name,type); }
   window.GEL={
-    init:function(){ if(!S) S=load(); renderControls(); render(); },
-    set:function(k,v){ S[k]=v; renderControls(); render(); },
-    setType:function(v){ S.type=v; S.pct=(v==='dna'?'1':'12');
-      var l=allLadders().filter(function(x){return x.t===v;})[0]; if(l) S.ladder=l.id;
-      S.lanes=(v==='dna')?[{name:'Sample 1',sizes:'5000, 3000, 1000'},{name:'Sample 2',sizes:'4200, 4000'}]
-                         :[{name:'Lysate',sizes:'70, 45, 25'},{name:'Elution',sizes:'45'}];
+    init:function(){ if(!S) S=load(); renderAll(); },
+    tab:function(t){ if(!S) S=load(); if(t!=='dna'&&t!=='protein'&&t!=='western') return;
+      S.tab=t; renderAll(); var b=document.getElementById('gelTab_'+t); if(b) try{ b.focus(); }catch(e){} },
+    // Explicit only: carrying the protein gel into the Western replaces the Western's lanes,
+    // so it must never happen as a side effect of switching tabs.
+    fromProtein:function(){ if(!S) S=load(); var pg=S.protein, W=S.western;
+      W.pct=pg.pct; if((ladderById(pg.ladder)||{}).t==='protein') W.ladder=pg.ladder;
+      var withLys=pg.lanes.filter(function(L){return L.lys>0;});
+      if(withLys.length) W.lanes=withLys.map(function(L){return {name:L.name,load:L.lys};});
+      S.tab='western'; renderAll();
+      showToast(withLys.length?('✓ '+withLys.length+' lysate lane(s) and the '+((PROT[W.pct]||{}).n||W.pct)+' gel carried over'):('✓ Gel carried over — give lanes a lysate amount to carry them too'),'green'); },
+    tabKey:function(e){ var order=['dna','protein','western'], i=order.indexOf(S.tab);
+      if(e.key==='ArrowRight'||e.key==='ArrowLeft'){ e.preventDefault(); GEL.tab(order[(i+(e.key==='ArrowRight'?1:2))%3]); } },
+    set:function(k,v){ S[S.tab][k]=v; renderControls(); render(); },
+    lane:function(i,k,v){ var L=G().lanes[i]; if(!L) return;
+      L[k]=(k==='load'||k==='lys')?clamp(SCI.parse(v),0,200):str(v,k==='name'?40:400); render(); },
+    addLane:function(){ var g=G(); if(g.lanes.length>=30) return;
+      g.lanes.push(S.tab==='western'?{name:'Lane '+(g.lanes.length+1),load:(g.lanes[g.lanes.length-1]||{load:20}).load}:{name:'Lane '+(g.lanes.length+1),sizes:'',lys:0});
       renderControls(); render(); },
-    lane:function(i,k,v){ if(S.lanes[i]){ S.lanes[i][k]=v; render(); } },
-    addLane:function(){ S.lanes.push({name:'Lane '+(S.lanes.length+1), sizes:''}); renderControls(); render(); },
-    // Cross-module entry point: a digest becomes a lane without the user
-    // retyping twenty fragment sizes. Switches to DNA if we are on a protein gel.
+    delLane:function(i){ G().lanes.splice(i,1); renderControls(); render(); },
+    plasmid:function(kind){
+      var sz=SCI.parse((document.getElementById('gelPlasSize')||{}).value), ng=SCI.parse((document.getElementById('gelPlasAmt')||{}).value);
+      if(!(sz>0)){ showToast('Enter the plasmid size in bp','warn'); return; } if(!(ng>0)) ng=400;
+      // Remember what was typed — the sidebar is rebuilt below, and it used to reset these to
+      // 4000 bp / 400 ng, so "＋ Uncut" then "＋ Linearised" gave two different plasmids.
+      S.dna.plasBp=sz; S.dna.plasNg=ng;
+      var r=function(v){ return Math.round(v*10)/10; };
+      var sizes=kind==='uncut'?(sz+'sc@'+r(ng*0.8)+', '+sz+'oc@'+r(ng*0.15)+', '+sz+'lin@'+r(ng*0.05)):(sz+'@'+r(ng));
+      S.dna.lanes.push({name:(kind==='uncut'?'Uncut ':'Linear ')+(sz>=1000?SCI.fmt(sz/1000,3)+' kb':sz+' bp'), sizes:sizes, lys:0});
+      renderControls(); render(); },
+    // Western editing — inputs call these and only the output is re-rendered.
+    wt:function(i,k,v){ var t=S.western.targets[i]; if(!t) return;
+      if(k==='dil') t.dil=clamp(SCI.parse(v),1,1e6)||1000;
+      else if(k==='name'||k==='mw'||k==='expr') t[k]=str(v,k==='expr'?200:40);
+      else t[k]=v;
+      render(); },
+    addTarget:function(idx){ var W=S.western; if(W.targets.length>=12) return;
+      var c=(idx>=0&&LCTRL[idx])?LCTRL[idx]:null;
+      var used={}; W.targets.forEach(function(t){ used[t.ch]=(used[t.ch]||0)+1; });
+      W.targets.push(c?{name:c.n,mw:c.mw,abund:c.abund,expr:'',host:c.host,ch:(used['700']||0)<=(used['800']||0)?'700':'800',ab:'good',dil:5000,lc:true}
+                      :{name:'Target '+(W.targets.length+1),mw:'50',abund:'med',expr:'',host:'rabbit',ch:'800',ab:'avg',dil:1000,lc:false});
+      renderWbCtl(); render(); },
+    delTarget:function(i){ S.western.targets.splice(i,1); renderWbCtl(); render(); },
+    wx:function(k,v){ var X=S.western.xfer;
+      if(k==='method'){ X.method=XFER[v]?v:'wet'; X.min=XFER[X.method].def; renderWbCtl(); }
+      else if(k==='mem') X.mem=MEMS[v]?v:'nc45';
+      else if(k==='min') X.min=clamp(SCI.parse(v),1,1440);
+      else if(k==='meoh') X.meoh=clamp(SCI.parse(v),0,20);
+      else if(k==='sds') X.sds=clamp(SCI.parse(v),0,0.1);
+      render(); },
+    wd:function(k,v){ var D=S.western.det;
+      if(k==='mode'){ D.mode=DETS[v]?v:'imager'; renderWbCtl(); }
+      else if(k==='exp') D.exp=clamp(SCI.parse(v),0.1,36000);
+      else D[k]=v;
+      render(); },
+    wm:function(k,v){ var M=S.western.mem;
+      if(k==='size') M.size=MEMSIZE[v]?v:'mini';
+      else if(k==='mlcm2') M.mlcm2=clamp(SCI.parse(v),0.02,1)||0.1;
+      else if(k==='sec') M.sec=clamp(SCI.parse(v),100,1e6)||10000;
+      render(); },
+    view:function(v){ S.western.view=v==='ponceau'?'ponceau':'blot'; render(); },
+    protocol:function(){ try{ setMode('proto'); if(window.PROTO&&PROTO.open) PROTO.open('western-blot'); }catch(e){} },
+    // Cross-module entry points. A digest becomes a DNA lane; a translated ORF becomes a protein
+    // lane or a Western target — without retyping sizes.
     pushLane:function(name,sizes){
       if(!S) S=load();
-      if(S.type!=='dna'){                        // switch the gel WITHOUT wiping existing lanes
-        S.type='dna'; S.pct='1';
-        var l=allLadders().filter(function(x){return x.t==='dna';})[0]; if(l) S.ladder=l.id;
-      }
-      S.lanes.push({name:String(name||'Digest').slice(0,40), sizes:String(sizes||'')});
-      renderControls(); render(); },
-    delLane:function(i){ S.lanes.splice(i,1); renderControls(); render(); },
+      S.tab='dna';
+      S.dna.lanes.push({name:str(name||'Digest',40), sizes:str(sizes,400), lys:0});
+      renderAll(); },
+    pushProtein:function(name,kda,dest){
+      if(!S) S=load(); kda=+kda; if(!(kda>0)) return;
+      var nm=str(name||'Protein',40), v=Math.round(kda*10)/10;
+      if(dest==='western'){ var W=S.western; if(W.targets.length<12) W.targets.push({name:nm,mw:String(v),abund:'med',expr:'',host:'rabbit',ch:'800',ab:'avg',dil:1000,lc:false}); S.tab='western'; }
+      else { S.protein.lanes.push({name:nm, sizes:v+'@1', lys:0}); S.tab='protein'; }
+      renderAll(); },
     addLadder:function(){
       var n=(document.getElementById('gelCustName').value||'').trim();
       var b=parseSizes(document.getElementById('gelCustBands').value).sort(function(a,c){return c-a;});
+      b=b.filter(function(v,i){ return i===0||v!==b[i-1]; });
       if(!n||!b.length){ showToast('Give the ladder a name and some band sizes','warn'); return; }
-      var list=customLadders(); var id='cust-'+Date.now();
-      list.push({id:id, v:'Custom', t:S.type, n:n, b:b, ref:[]});
-      try{ lsSetWarn('dd_gel_ladders',JSON.stringify(list)); }catch(e){}
-      S.ladder=id; renderControls(); render(); showToast('✓ Ladder saved','green');
+      var list=customLadders(); var id='cust-'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+      list.push({id:id, v:'Custom', t:kindOf(S.tab), n:n.slice(0,60), b:b, ref:[]});
+      if(!lsSetWarn('dd_gel_ladders',JSON.stringify(list))){ showToast('Couldn’t save the ladder — browser storage is full or unavailable.','warn',6000); return; }
+      G().ladder=id; renderControls(); render(); showToast('✓ Ladder saved','green');
     },
     png:function(dpi){
-      if(dpi>0){ dlCanvasPngDpi(buildCanvas(dpi/96),dpi,'gel-'+(S.type)+'-'+S.pct+'-'+dpi+'dpi.png'); return; }
-      var c=buildCanvas(); c.toBlob(function(bl){ var a=document.createElement('a');
-      a.href=URL.createObjectURL(bl); a.download='gel-'+(S.type)+'-'+S.pct+'.png'; a.click();
-      setTimeout(function(){URL.revokeObjectURL(a.href);},1000); showToast('✓ Gel PNG exported','green'); },'image/png'); },
-    csv:function(){ var rows=bandTable(computeLanes());
-      var csv='Lane,Size,Rf,Status\n'+rows.map(function(r){return r.map(function(c){return csvCell(c);}).join(',');}).join('\n');
-      _dl(csv,'gel-bands.csv','text/csv'); showToast('✓ Band table exported','green'); },
+      var wb=S.tab==='western', base=wb?('western-'+S.western.pct+'-'+S.western.view):('gel-'+S.tab+'-'+S[S.tab].pct);
+      var mk=function(sc){ return wb?buildBlotCanvas(sc):buildGelCanvas(sc); };
+      if(dpi>0){ dlCanvasPngDpi(mk(dpi/96),dpi,base+'-'+dpi+'dpi.png'); return; }
+      mk().toBlob(function(bl){ var a=document.createElement('a');
+        a.href=URL.createObjectURL(bl); a.download=base+'.png'; a.click();
+        setTimeout(function(){URL.revokeObjectURL(a.href);},1000); showToast('✓ PNG exported','green'); },'image/png'); },
+    csv:function(){
+      var head, rows;
+      if(S.tab==='western'){ head=['Lane','Target','kDa','Rf','Transfer','Target loaded','Signal (x limit)','Status']; rows=wbTable(wbModel()); }
+      else { head=['Lane','Size','Load','Rf','Status']; rows=bandTable(computeLanes()); }
+      var csv=head.map(csvCell).join(',')+'\n'+rows.map(function(r){return r.map(function(c){return csvCell(c);}).join(',');}).join('\n');
+      dl(csv,(S.tab==='western'?'western':'gel')+'-bands.csv','text/csv'); showToast('✓ Band table exported','green'); },
     copy:function(){ dcCopyText(GEL._txt); },
     toNotebook:function(){ if(!window.NB){ showToast('Notebook not ready','warn'); return; } NB.capture('gel'); },
     // consumed by the notebook capture picker
     blocks:function(sel){
-      var lanes=computeLanes(), out=[];
-      if(sel.image) out.push({type:'image', title:'Simulated gel — '+(S.type==='dna'?S.pct+'% agarose':S.pct+'% SDS-PAGE'), dataUrl:buildCanvas().toDataURL('image/png')});
-      if(sel.table) out.push({type:'table', title:'Bands', cols:['Lane','Size','Rf','Status'], rows:bandTable(lanes)});
-      if(sel.warn) out.push({type:'kv', title:'Gel check', pairs:warnings(lanes).map(function(w,i){return ['Note '+(i+1), w.t];})});
+      if(!S) S=load(); var out=[];
+      if(S.tab==='western'){
+        var m=wbModel(), p=cutPlan(m), title='Simulated Western blot — '+((PROT[m.W.pct]||{}).n||m.W.pct);
+        if(sel.image) out.push({type:'image', title:title, dataUrl:buildBlotCanvas(0,m).toDataURL('image/png')});
+        if(sel.table) out.push({type:'table', title:'Western bands', cols:['Lane','Target','kDa','Rf','Transfer','Target loaded','Signal (× limit)','Status'], rows:wbTable(m)});
+        if(sel.warn) out.push({type:'kv', title:'Blot check', pairs:wbWarnings(m).map(function(w,i){return ['Note '+(i+1), w.t];})});
+        if(sel.plan) out.push({type:'table', title:'Cut plan & antibody volumes', cols:['Strip','Span','Probes','Area','Solution','Primary','Secondary'], rows:planRows(p)});
+        return out;
+      }
+      var lanes=computeLanes();
+      if(sel.image) out.push({type:'image', title:'Simulated gel — '+gelName(S.tab), dataUrl:buildGelCanvas().toDataURL('image/png')});
+      if(sel.table) out.push({type:'table', title:'Bands', cols:['Lane','Size','Load','Rf','Status'], rows:bandTable(lanes)});
+      if(sel.warn) out.push({type:'kv', title:'Gel check', pairs:gelWarnings(lanes).map(function(w,i){return ['Note '+(i+1), w.t];})});
       return out;
     },
-    _model:{ rfOf:rfOf, rangeFor:rangeFor, ladders:allLadders, RESOLVE:RESOLVE,
-             state:function(){return S||(S=load());}, warnings:function(){return warnings(computeLanes());} }
+    _model:{ rfOf:rfOf, rangeFor:rangeFor, ladders:allLadders, RESOLVE:RESOLVE, RF_EDGE:RF_EDGE,
+             PROT:PROT, STAINS:STAINS, CONF:CONF, LCTRL:LCTRL, MIN_CUT_GAP:MIN_CUT_GAP,
+             parseBands:parseBands, bandI:bandI, bandW:bandW, resolves:resolves, bestPct:bestPct,
+             transferEff:transferEff, detect:detect, sane:sane, defState:defState, equimolar:equimolar,
+             // run a function against a temporary state without touching the user's gel
+             withState:function(st,fn){ var keep=S; S=sane(st); try{ return fn(); } finally { S=keep; } },
+             lanes:function(){ return computeLanes(); }, wb:function(){ return wbModel(); }, cutPlan:function(){ return cutPlan(wbModel()); },
+             wbWarnings:function(){ return wbWarnings(wbModel()); },
+             state:function(){ if(!S) S=load(); var g=S[S.tab]; return {type:S.tab==='dna'?'dna':'protein', tab:S.tab, pct:g.pct}; },
+             label:function(){ if(!S) S=load(); return S.tab==='western'?('Western · '+((PROT[S.western.pct]||{}).n||S.western.pct)):gelName(S.tab); },
+             warnings:function(){ return S.tab==='western'?wbWarnings(wbModel()):gelWarnings(computeLanes()); } }
   };
 })();
 
@@ -12316,7 +13232,7 @@ function dyeWorking(o){
     dilcalc: {label:'Dilution Calc', mod:'DCBLK',    items:[['result','Result + worked math']]},
     calc:    {label:'Calculators',   mod:'MBCBLK',   items:[['result','Inputs + results'],['table','Result table']]},
     proto:   {label:'Protocols',     mod:'PROTOBLK', items:[['reagents','Reagents needed'],['steps','Steps (with ticks)']]},
-    gel:     {label:'Gel Sim',       mod:'GELBLK',   items:[['image','Gel image'],['table','Band table'],['warn','Gel check notes']]},
+    gel:     {label:'Gels & Blots',  mod:'GELBLK',   items:[['image','Gel / blot image'],['table','Band table'],['warn','Gel / blot check notes'],['plan','Western cut & antibody plan']]},
     phg:     {label:'Phage Planner', mod:'PHGBLK',   items:[['plan','Infection plan'],['ladder','Dilution ladder'],['recipe','Dilution recipe']]},
     mic:     {label:'Microscopy',    mod:'MICBLK',   items:[['dye','Dye sheet + directions'],['dilution','Working dilution recipe'],['panel','Panel & channel check']]},
     tit:     {label:'Titering & EOP',mod:'TITBLK',   items:[['header','Experiment info'],['counts','Raw plaque counts'],['summary','Titer & EOP summary + methods note'],['chart','Chart (image)']]},
@@ -12375,8 +13291,10 @@ function dyeWorking(o){
     res:    function(){ return {id:'',label:'Results'}; },
     plate:  function(){ var nm=''; try{ nm=P().expName||(plates[activePlate]&&plates[activePlate].name)||''; }catch(e){}
                         return {id:'',label:nm||'Plate'}; },
-    gel:    function(){ var s=null; try{ s=GEL._model.state(); }catch(e){}
-                        return {id:'',label:s?(s.pct+'% '+(s.type==='dna'?'agarose':'SDS-PAGE')):'Gel'}; },
+    // The model names its own gel: "12% Tris-glycine", "1% agarose", "Western · 10% Tris-glycine".
+    // Building the label here from pct printed "tricine16% SDS-PAGE" for a Tricine gel.
+    gel:    function(){ var l=''; try{ l=GEL._model.label(); }catch(e){}
+                        return {id:'',label:l||'Gel'}; },
     dilcalc:function(){ return {id:'',label:'Dilution & Molarity'}; }
   };
   // Stamp at capture time — the only moment the source is known. `!b.src`
@@ -13591,12 +14509,14 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       +'<div class="mbc-actions"><button class="btn" onclick="SEQ.orfCsv()">⬇ ORF table (CSV)</button>'
         +'<button class="btn" onclick="SEQ.orfFasta(\'nt\')">⬇ ORFs (FASTA, nt)</button>'
         +'<button class="btn" onclick="SEQ.orfFasta(\'aa\')">⬇ Proteins (FASTA)</button></div>'
-      +'<div class="mbc-tblwrap"><table class="sq-tbl"><thead><tr><th>#</th><th>Start</th><th>End</th><th>Strand</th><th>Frame</th><th>aa</th><th>kDa</th><th>Protein (first 40 aa)</th></tr></thead><tbody>'
+      +'<div class="mbc-tblwrap"><table class="sq-tbl"><thead><tr><th>#</th><th>Start</th><th>End</th><th>Strand</th><th>Frame</th><th>aa</th><th>kDa</th><th>Protein (first 40 aa)</th><th>Send to</th></tr></thead><tbody>'
       +orfs.slice(0,400).map(function(o,i){
         var aa=translate(o.nt,rec.code).replace(/\*$/,'');
         // A wrapped ORF ends BEFORE it starts. Saying so in the End cell is the
         // only thing that makes the row's aa count add up.
-        return '<tr><td>'+(i+1)+'</td><td>'+(o.start+1)+'</td><td>'+o.end+(o.wrapped?' (wraps origin)':'')+'</td><td>'+(o.strand===1?'+':'−')+'</td><td>'+o.frame+'</td><td>'+o.aaLen+'</td><td>'+(proteinMW(aa)/1000).toFixed(1)+'</td><td>'+escapeHtml(aa.slice(0,40))+(aa.length>40?'…':'')+'</td></tr>';
+        return '<tr><td>'+(i+1)+'</td><td>'+(o.start+1)+'</td><td>'+o.end+(o.wrapped?' (wraps origin)':'')+'</td><td>'+(o.strand===1?'+':'−')+'</td><td>'+o.frame+'</td><td>'+o.aaLen+'</td><td>'+(proteinMW(aa)/1000).toFixed(1)+'</td><td>'+escapeHtml(aa.slice(0,40))+(aa.length>40?'…':'')+'</td>'
+          +'<td style="white-space:nowrap"><button class="btn" style="padding:2px 7px;font-size:10.5px" onclick="SEQ.orfTo('+i+',\'protein\')" title="Load ORF '+(i+1)+' as a protein-gel lane" aria-label="Load ORF '+(i+1)+' as a protein-gel lane">→ gel</button> '
+          +'<button class="btn" style="padding:2px 7px;font-size:10.5px" onclick="SEQ.orfTo('+i+',\'western\')" title="Add ORF '+(i+1)+' as a Western blot target" aria-label="Add ORF '+(i+1)+' as a Western blot target">→ WB</button></td></tr>';
       }).join('')+'</tbody></table></div>'
       +(orfs.length>400?'<div class="tit-mini" style="margin-top:6px;">Showing the first 400 of '+orfs.length+' — the CSV has all of them.</div>':'')
       +'<div class="sl" style="margin-top:18px;">Sequence</div>'
@@ -14161,11 +15081,27 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
       // a normal agarose gel anyway. Take the largest 30 and SAY what was left
       // behind rather than quietly truncating.
       var all=d.fragments, keep=all.slice(0,30);
-      GEL.pushLane(r.name.slice(0,18)+' / '+enz.join('+'), keep.map(function(f){return f.len;}).join(', '));
+      // Equimolar: every fragment is cut from the same molecules, so each carries mass in
+      // proportion to its length. On a real gel a 150 bp fragment of a 5 kb digest is
+      // 30× fainter than the 4.5 kb one; sending bare sizes drew them all equally bright.
+      var ng=500, total=all.reduce(function(s,f){return s+f.len;},0);
+      var mass=GEL._model.equimolar(keep.map(function(f){return f.len;}),total,ng);
+      GEL.pushLane(r.name.slice(0,18)+' / '+enz.join('+'),
+        keep.map(function(f,i){ return f.len+'@'+mass[i]; }).join(', '));
       setMode('gel');
-      showToast(all.length>keep.length
+      showToast((all.length>keep.length
         ? '✓ 30 largest of '+all.length+' fragments loaded ('+all[30].len+' bp and smaller left out) — the CSV has all of them'
-        : '✓ '+all.length+' fragments loaded as a gel lane','green'); },
+        : '✓ '+all.length+' fragments loaded as a gel lane')+' · '+ng+' ng digest, equimolar — edit the @ amounts to change the load','green'); },
+    // A translated ORF becomes a protein-gel lane or a Western target at its computed mass.
+    orfTo:function(i,dest){
+      var r=R(); if(!r)return;
+      var o=findOrfs(r.seq,{minAa:orfMinAa(),code:r.code,circular:r.circular})[i]; if(!o)return;
+      if(!window.GEL||!GEL.pushProtein){ showToast('Gel simulator unavailable','warn'); return; }
+      var aa=translate(o.nt,r.code).replace(/\*$/,''), kda=proteinMW(aa)/1000;
+      GEL.pushProtein(r.name.slice(0,14)+' ORF'+(i+1), kda, dest==='western'?'western':'protein');
+      setMode('gel');
+      showToast('✓ ORF '+(i+1)+' ('+kda.toFixed(1)+' kDa) '+(dest==='western'?'added as a Western target':'loaded as a protein-gel lane')
+        +' — that is the predicted mass; tags, glycosylation and charge can make it run higher or lower','green'); },
 
     runPrimers:function(){ setU('pRun',true); render(); },
     primerCsv:function(){
@@ -14483,9 +15419,15 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
      ['dilcalc','💧','Dilution & Molarity'],['reagent','⚗️','Reagent Prep'],['calc','🧮','Calculators'],
      ['proto','📋','Protocols'],['phg','🦠','Phage Planner'],['titer','⭕','Titering & EOP'],
      ['cfu','🧫','CFU Counts — colonies to CFU/mL'],
-     ['mic','🔬','Microscopy & Dyes'],['gel','🧪','Gel Simulator'],['seq','🧬','Sequences & Cloning'],
+     ['mic','🔬','Microscopy & Dyes'],['gel','🧪','Gels & Western blots'],['seq','🧬','Sequences & Cloning'],
      ['results','📈','Results — every titer over time'],['notebook','📓','Lab Notebook']]
       .forEach(function(m){ out.push({kind:'module',icon:m[1],name:m[2],hay:m[2],go:function(){setMode(m[0]);}}); });
+    // The three benches inside Gels & Blots, each reachable by the words people actually search for.
+    [['dna','DNA gel simulator','agarose electrophoresis dna fragment plasmid supercoiled nicked digest'],
+     ['protein','Protein gel simulator (SDS-PAGE)','sds page protein acrylamide coomassie silver sypro tricine lysate'],
+     ['western','Western blot simulator','western blot immunoblot transfer pvdf nitrocellulose antibody ecl chemiluminescence loading control actin gapdh ponceau']]
+      .forEach(function(t){ out.push({kind:'module',icon:'🧪',name:t[1],hay:t[1]+' '+t[2],
+        go:function(){ setMode('gel'); if(window.GEL&&GEL.tab) GEL.tab(t[0]); }}); });
     try{ (window.SEQ&&SEQ.list&&SEQ.list()||[]).forEach(function(s){
       out.push({kind:'sequence',icon:'🧬',name:s.name,hay:s.name+' '+(s.desc||''),
                 go:function(){ setMode('seq'); if(SEQ.open)SEQ.open(s.id); }}); }); }catch(e){}
@@ -14536,7 +15478,7 @@ function GELBLK(sel){ return (window.GEL&&GEL.blocks)?GEL.blocks(sel):[]; }
         out.push({kind:'experiment',icon:'⭕',name:x.name||('Experiment '+(i+1)),
                   hay:(x.name||'')+' '+(x.date||''), go:function(){ setMode('titer'); if(window.TIT)TIT.sel(i); }}); }); }catch(e){}
     try{ (window.GEL&&GEL._model&&GEL._model.ladders()||[]).forEach(function(l){
-      out.push({kind:'ladder',icon:'🧪',name:l.n,hay:l.n+' '+(l.v||''), go:function(){ setMode('gel'); }}); }); }catch(e){}
+      out.push({kind:'ladder',icon:'🧪',name:l.n,hay:l.n+' '+(l.v||''), go:function(){ setMode('gel'); if(window.GEL&&GEL.tab) GEL.tab(l.t==='dna'?'dna':'protein'); }}); }); }catch(e){}
     out.push({kind:'action',icon:'⬇',name:'Back up my whole workspace',hay:'backup export save data',go:backup});
     out.forEach(function(o){ o.hay=(o.hay||o.name).toLowerCase(); });
     return out;
